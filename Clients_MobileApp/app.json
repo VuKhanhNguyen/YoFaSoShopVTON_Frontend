@@ -1,36 +1,54 @@
 {
   "expo": {
-    "name": "yofaso-mobile",
+    "name": "YoFaSo Shop",
     "slug": "yofaso-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/brand/app-icon.png",
     "scheme": "yofasomobile",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "light",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/brand/app-icon.png"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "backgroundColor": "#FAFAF9",
+        "foregroundImage": "./assets/brand/app-icon.png"
       },
       "predictiveBackGestureEnabled": false
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/brand/app-icon.png"
     },
     "plugins": [
       "expo-router",
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "backgroundColor": "#FAFAF9",
+          "image": "./assets/brand/logo.png",
+          "imageWidth": 180
+        }
+      ],
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Cho phép chọn ảnh để thử đồ ảo.",
+          "cameraPermission": "Cho phép chụp ảnh để thử đồ ảo.",
+          "microphonePermission": false
+        }
+      ],
+      "expo-sharing",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Cho phép YoFaSo truy cập ảnh bạn chọn.",
+          "savePhotosPermission": "Cho phép lưu ảnh thử đồ vào thư viện.",
+          "granularPermissions": [
+            "photo"
+          ]
         }
       ]
     ],

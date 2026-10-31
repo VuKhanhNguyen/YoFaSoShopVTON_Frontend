@@ -41,3 +41,10 @@ example
 # generated native folders
 /ios
 /android
+
+# Local verification output
+/dist-test/
+/dist-android/
+/dist-ios/
+/test-results/
+.env

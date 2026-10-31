@@ -1,98 +1,115 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
+import { useEffect, useState } from "react";
+import { ImageBackground, SafeAreaView, Text, View } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as SplashScreen from "expo-splash-screen";
+import { router } from "expo-router";
+import { Button, Logo, Notice, colors } from "@/components/shop/ui";
+const photos = [
+  require("../../assets/editorial/onboard-1.jpg"),
+  require("../../assets/editorial/onboard-2.jpg"),
+  require("../../assets/editorial/onboard-3.jpg"),
+];
+const slides = [
+  {
+    title: "Tìm phong cách của bạn",
+    body: "Khám phá những thiết kế được chọn cho mỗi ngày.",
+  },
+  {
+    title: "Thử trước, chọn sau",
+    body: "Xem trang phục trên ảnh của bạn với phòng thử đồ ảo.",
+  },
+  {
+    title: "Mặc đẹp theo cách riêng",
+    body: "Tham khảo độ hài hòa và chọn món đồ phối cùng.",
+  },
+];
+export default function Welcome() {
+  const [step, setStep] = useState<number | null>(null),
+    [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    AsyncStorage.getItem("yofaso.onboarding.v1")
+      .then((seen) => {
+        if (active) seen ? router.replace("/auth") : setStep(0);
+      })
+      .catch(() => {
+        if (active) {
+          setError("Không đọc được dữ liệu thiết bị. Bạn vẫn có thể tiếp tục.");
+          setStep(0);
+        }
+      })
+      .finally(() => SplashScreen.hideAsync());
+    return () => {
+      active = false;
+    };
+  }, []);
+  async function finish() {
+    try {
+      await AsyncStorage.setItem("yofaso.onboarding.v1", "seen");
+      router.replace("/auth");
+    } catch {
+      setError(
+        "Không lưu được trạng thái. Kiểm tra bộ nhớ thiết bị rồi thử lại.",
+      );
+    }
   }
-  if (Device.isDevice) {
+  if (step === null)
     return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
-
-export default function HomeScreen() {
-  return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
-
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
-
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
-
-        {Platform.OS === 'web' && <WebBadge />}
+      <SafeAreaView
+        style={{
+          flex: 1,
+          justifyContent: "center",
+          alignItems: "center",
+          backgroundColor: colors.canvas,
+        }}
+      >
+        <Logo />
       </SafeAreaView>
-    </ThemedView>
+    );
+  return (
+    <ImageBackground source={photos[step]} style={{ flex: 1 }}>
+      <SafeAreaView
+        style={{ flex: 1, padding: 24, justifyContent: "space-between" }}
+      >
+        <View
+          style={{
+            backgroundColor: "#FFFFFFE8",
+            alignSelf: "flex-start",
+            borderRadius: 16,
+            padding: 8,
+          }}
+        >
+          <Logo />
+        </View>
+        <View
+          style={{
+            backgroundColor: "#FAFAF9F5",
+            padding: 24,
+            borderRadius: 24,
+            gap: 12,
+          }}
+        >
+          <Text
+            accessibilityRole="header"
+            style={{ fontSize: 30, color: colors.primary, fontWeight: "600" }}
+          >
+            {slides[step].title}
+          </Text>
+          <Notice>{slides[step].body}</Notice>
+          <Text
+            accessibilityLabel={`Trang ${step + 1} trên 3`}
+            style={{ color: colors.muted }}
+          >
+            {step + 1} / 3
+          </Text>
+          {!!error && <Notice error>{error}</Notice>}
+          <Button
+            title={step === 2 ? "Bắt đầu" : "Tiếp tục"}
+            onPress={() => (step === 2 ? void finish() : setStep(step + 1))}
+          />
+          <Button title="Bỏ qua" secondary onPress={() => void finish()} />
+        </View>
+      </SafeAreaView>
+    </ImageBackground>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
-  },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
-  },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
-  },
-  title: {
-    textAlign: 'center',
-  },
-  code: {
-    textTransform: 'uppercase',
-  },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
-  },
-});
