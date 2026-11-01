@@ -1,3 +1,26 @@
+let lastActivity = Date.now();
+let lastRenewal = Date.now();
+let renewal: Promise<unknown> | null = null;
+let closing = false;
+export function noteActivity() {
+  if (closing || document.visibilityState !== "visible") return;
+  lastActivity = Date.now();
+  if (lastActivity - lastRenewal < 60000 || renewal) return;
+  lastRenewal = lastActivity;
+  renewal = api("/auth/refresh", "POST")
+    .catch((e: unknown) => {
+      if (e instanceof ApiError && e.status === 401)
+        window.dispatchEvent(new Event("yofaso:session-expired"));
+    })
+    .finally(() => {
+      renewal = null;
+    });
+}
+export async function logout() {
+  closing = true;
+  await renewal;
+  await api("/auth/logout", "POST");
+}
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -12,6 +35,7 @@ export async function api<T>(
   method = "GET",
   body?: unknown,
   key?: string,
+  remember?: boolean,
 ): Promise<T> {
   let response: Response;
   try {
@@ -22,6 +46,14 @@ export async function api<T>(
           ? {}
           : { "Content-Type": "application/json" }),
         ...(key ? { "Idempotency-Key": key } : {}),
+        ...(remember !== undefined
+          ? { "X-Yofaso-Remember": String(remember) }
+          : {}),
+        ...(typeof document !== "undefined" &&
+        document.visibilityState === "visible" &&
+        Date.now() - lastActivity < 60000
+          ? { "X-Yofaso-Activity": "1" }
+          : {}),
       },
       body:
         body === undefined
@@ -40,7 +72,9 @@ export async function api<T>(
     if (
       response.status === 401 &&
       typeof window !== "undefined" &&
-      !path.startsWith("/auth/")
+      !path.startsWith("/auth/") &&
+      document.visibilityState === "visible" &&
+      Date.now() - lastActivity < 60000
     )
       window.dispatchEvent(new Event("yofaso:session-expired"));
     throw new ApiError(
@@ -55,6 +89,10 @@ export async function api<T>(
           )
         : {},
     );
+  }
+  if (path === "/auth/login") {
+    closing = false;
+    lastActivity = lastRenewal = Date.now();
   }
   return result as T;
 }

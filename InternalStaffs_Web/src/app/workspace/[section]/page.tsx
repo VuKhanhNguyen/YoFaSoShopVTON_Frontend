@@ -1,18 +1,10 @@
 import { notFound } from "next/navigation";
-import { Dashboard } from "@/components/Dashboard";
 import { PosTerminal } from "@/components/PosTerminal";
-import { CatalogManager } from "@/components/CatalogManager";
-import { OrderBoard } from "@/components/OrderBoard";
-import {
-  Inventory,
-  Notifications,
-  People,
-  Promotions,
-  Reviews,
-  Shifts,
-} from "@/components/Operations";
-import { Studio } from "@/components/Studio";
-export default async function Page({
+import { WarehouseFulfillment } from "@/components/WarehouseFulfillment";
+import { ShipperDeliveries } from "@/components/ShipperDeliveries";
+import { AdminDashboard } from "@/components/AdminDashboard";
+
+export default async function WorkspaceSectionPage({
   params,
 }: {
   params: Promise<{ section: string }>;
@@ -20,34 +12,21 @@ export default async function Page({
   const { section } = await params;
   switch (section) {
     case "dashboard":
-      return <Dashboard />;
+    case "analytics":
+    case "studio":
+    case "promotions":
+    case "reviews":
+    case "users":
+    case "shifts":
+    case "notifications":
+      return <AdminDashboard />;
     case "pos":
       return <PosTerminal />;
-    case "catalog":
-      return <CatalogManager />;
-    case "orders":
-      return <OrderBoard />;
     case "warehouse":
-      return (
-        <>
-          <OrderBoard warehouse />
-          <Inventory />
-        </>
-      );
+    case "orders":
+      return <WarehouseFulfillment />;
     case "deliveries":
-      return <OrderBoard deliveries />;
-    case "users":
-      return <People />;
-    case "promotions":
-      return <Promotions />;
-    case "reviews":
-      return <Reviews />;
-    case "shifts":
-      return <Shifts />;
-    case "notifications":
-      return <Notifications />;
-    case "studio":
-      return <Studio />;
+      return <ShipperDeliveries />;
     default:
       notFound();
   }

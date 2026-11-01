@@ -1,45 +1,36 @@
 import type { Metadata } from "next";
-import localFont from "next/font/local";
 import "./globals.css";
-const jakarta = localFont({
-  src: [
-    { path: "./fonts/Jakarta-Regular.ttf", weight: "400" },
-    { path: "./fonts/Jakarta-SemiBold.ttf", weight: "600" },
-  ],
-  variable: "--font-jakarta",
-  display: "swap",
-});
-const editorial = localFont({
-  src: "./fonts/Playfair-SemiBold.ttf",
-  variable: "--font-editorial",
-  display: "swap",
-});
-const mono = localFont({
-  src: "./fonts/JetBrains-Medium.ttf",
-  variable: "--font-mono",
-  display: "swap",
-});
+import { AuthProvider } from "@/lib/auth";
+import { DesktopToastStack, ServerOfflineBanner } from "@/components/feedback";
+
 export const metadata: Metadata = {
-  title: "YoFaSo Shop | Cổng nội bộ",
-  description: "Không gian vận hành bán hàng, kho và giao nhận YoFaSo Shop",
-  robots: { index: false, follow: false },
-  icons: { icon: "/brand/logo.png" },
+  title: "YoFaSo Shop — Cổng Vận hành Nội bộ & POS Đa kênh",
+  description:
+    "Hệ thống vận hành bán hàng, thu ngân POS, quản lý kho bãi, giao vận shipper và dashboard quản trị chủ shop YoFaSo Omnichannel VTON Platform.",
+  icons: { icon: "/brand/YoFaSo_logo.ico" },
 };
+
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   return (
-    <html
-      lang="vi"
-      className={`${jakarta.variable} ${editorial.variable} ${mono.variable}`}
-    >
-      <body>
-        <a href="#main-content" className="skip-link">
-          Đến nội dung chính
-        </a>
-        {children}
+    <html lang="vi">
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Playfair+Display:wght@600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+        />
+      </head>
+      <body className="min-h-dvh bg-background text-foreground antialiased selection:bg-accent selection:text-primary">
+        <AuthProvider>
+          <ServerOfflineBanner />
+          {children}
+          <DesktopToastStack />
+        </AuthProvider>
       </body>
     </html>
   );

@@ -20,12 +20,12 @@ import {
   ChatCircle,
   Bell,
   Clock,
-  SignOut,
   Sparkle,
   List,
 } from "@phosphor-icons/react";
 import { useResource } from "@/hooks/use-resource";
-import { api } from "@/lib/api";
+import { noteActivity } from "@/lib/api";
+import { LogoutButton } from "./LogoutButton";
 import type { User } from "@/lib/models";
 import { State } from "./ui";
 const Context = createContext<User | null>(null);
@@ -93,6 +93,17 @@ export function StaffShell({ children }: { children: ReactNode }) {
   const [menu, setMenu] = useState(false),
     [offline, setOffline] = useState(false);
   useEffect(() => {
+    const activity = (event: Event) => {
+      if (event.isTrusted) noteActivity();
+    };
+    const events = ["pointerdown", "keydown", "wheel", "touchmove"];
+    events.forEach((e) =>
+      document.addEventListener(e, activity, { passive: true }),
+    );
+    return () =>
+      events.forEach((e) => document.removeEventListener(e, activity));
+  }, []);
+  useEffect(() => {
     const update = () => setOffline(!navigator.onLine);
     update();
     window.addEventListener("online", update);
@@ -127,15 +138,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
       <main className="startup">
         <h1>Cổng dành cho nhân sự</h1>
         <p>Tài khoản này không có vai trò nhân sự.</p>
-        <button
-          onClick={() =>
-            void api("/auth/logout", "POST").finally(() =>
-              router.replace("/login"),
-            )
-          }
-        >
-          Đăng xuất
-        </button>
+        <LogoutButton />
       </main>
     );
   const permitted =
@@ -180,17 +183,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
             <small>
               {user.roles.map((r) => r.replace("ROLE_", "")).join(", ")}
             </small>
-            <button
-              className="secondary"
-              onClick={() =>
-                void api("/auth/logout", "POST").finally(() =>
-                  router.replace("/login"),
-                )
-              }
-            >
-              <SignOut size={18} />
-              Đăng xuất
-            </button>
+            <LogoutButton />
           </div>
         </aside>
         <div className="workspace">

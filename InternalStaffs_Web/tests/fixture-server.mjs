@@ -17,7 +17,11 @@ const server = http.createServer(async (req, res) => {
   function send(value, status = 200) { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)); }
   if (p.startsWith('/catalog/images/') || p.startsWith('/assets/') && p.endsWith('/content')) { res.writeHead(200, { 'Content-Type': 'image/jpeg' }); fs.createReadStream(path.join(root, 'Clients_MobileApp/assets/editorial/onboard-1.jpg')).pipe(res); return; }
   if (p === '/auth/login' || p === '/auth/register') { roles = body.username?.toLowerCase().startsWith('customer') ? ['ROLE_CUSTOMER'] : body.username?.toLowerCase().startsWith('warehouse') ? ['ROLE_STAFF_WAREHOUSE'] : body.username?.toLowerCase().startsWith('shipper') ? ['ROLE_STAFF_SHIPPER'] : ['ROLE_SHOP_ADMIN']; send({ accessToken: 'test-access', refreshToken: 'test-refresh', expiresIn: 900, user: { ...user, roles } }); return; }
-  if (p === '/auth/refresh') { send({ accessToken: 'test-access', refreshToken: 'test-refresh-rotated', user: { ...user, roles } }); return; }
+  if (p === '/auth/refresh') {
+    if (body.refreshToken === 'invalid-refresh') { send({ message: 'Phiên đã bị thu hồi.' }, 401); return; }
+    if (body.refreshToken === 'unavailable-refresh') { send({ message: 'Dịch vụ tạm gián đoạn.' }, 503); return; }
+    send({ accessToken: 'test-access', refreshToken: 'test-refresh-rotated', user: { ...user, roles } }); return;
+  }
   if (p === '/auth/logout') { send({ revoked: true }); return; }
   if (p === '/auth/forgot-password') { send({ requestId: 'a'.repeat(32) }, 202); return; }
   if (p === '/auth/reset-password') { send({ loginAgain: true }); return; }

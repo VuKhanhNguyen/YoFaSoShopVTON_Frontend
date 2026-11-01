@@ -14,7 +14,12 @@ function allowed(path: string, method: string) {
       new RegExp(`^${route.path.replace(/\{[^}]+\}/g, "[^/]+")}$`).test(path),
   );
 }
-function session(response: NextResponse, tokens: TokenPair | null) {
+function session(
+  response: NextResponse,
+  tokens: TokenPair | null,
+  remember = false,
+) {
+  response.headers.set("Cache-Control", "no-store");
   const options = {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -23,11 +28,15 @@ function session(response: NextResponse, tokens: TokenPair | null) {
   };
   response.cookies.set("yofaso.access", tokens?.accessToken || "", {
     ...options,
-    maxAge: tokens ? 900 : 0,
+    ...(tokens ? (remember ? { maxAge: 900 } : {}) : { maxAge: 0 }),
   });
   response.cookies.set("yofaso.refresh", tokens?.refreshToken || "", {
     ...options,
-    maxAge: tokens ? 7 * 86400 : 0,
+    ...(tokens ? (remember ? { maxAge: 7 * 86400 } : {}) : { maxAge: 0 }),
+  });
+  response.cookies.set("yofaso.remember", tokens ? String(remember) : "", {
+    ...options,
+    ...(tokens ? (remember ? { maxAge: 7 * 86400 } : {}) : { maxAge: 0 }),
   });
 }
 async function renew(token: string) {
@@ -40,10 +49,15 @@ async function renew(token: string) {
       signal: AbortSignal.timeout(15000),
       redirect: "error",
     })
-      .then(async (r) => (r.ok ? ((await r.json()) as TokenPair) : null))
-      .catch(() => null);
+      .then(async (r) => {
+        if (r.status === 401) return null;
+        if (!r.ok) throw new Error("Refresh unavailable");
+        return (await r.json()) as TokenPair;
+      })
+      .finally(() => {
+        setTimeout(() => refreshes.delete(token), 5000);
+      });
     refreshes.set(token, promise);
-    setTimeout(() => refreshes.delete(token), 5000);
   }
   return refreshes.get(token)!;
 }
@@ -58,7 +72,7 @@ async function handle(
       { status: 400 },
     );
   const path = "/" + segments.map(encodeURIComponent).join("/");
-  if (!allowed(path, request.method) || path === "/auth/refresh")
+  if (!allowed(path, request.method))
     return NextResponse.json(
       { message: "Không có thao tác này." },
       { status: 404 },
@@ -73,6 +87,33 @@ async function handle(
     );
   const access = request.cookies.get("yofaso.access")?.value,
     refresh = request.cookies.get("yofaso.refresh")?.value;
+  const remember = request.cookies.get("yofaso.remember")?.value === "true";
+  // Refresh được đổi bằng cookie HttpOnly; JavaScript không được cung cấp/nhận token.
+  if (path === "/auth/refresh") {
+    if (
+      request.method !== "POST" ||
+      request.headers.get("x-yofaso-activity") !== "1"
+    )
+      return NextResponse.json(
+        { message: "Cần thao tác từ ứng dụng." },
+        { status: 403 },
+      );
+    let tokens: TokenPair | null;
+    try {
+      tokens = refresh ? await renew(refresh) : null;
+    } catch {
+      return NextResponse.json(
+        { message: "Chưa thể gia hạn phiên. Vui lòng thử lại khi có mạng." },
+        { status: 502, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    const response = NextResponse.json(
+      tokens ? { renewed: true } : { message: "Phiên đăng nhập đã hết hạn." },
+      { status: tokens ? 200 : 401 },
+    );
+    session(response, tokens, remember);
+    return response;
+  }
   const auth = ["/auth/login", "/auth/register"].includes(path);
   // Cổng nhân sự không có đăng ký công khai hoặc nhận token từ JavaScript.
   if (path === "/auth/register")
@@ -107,15 +148,30 @@ async function handle(
   try {
     let tokens: TokenPair | null | undefined,
       upstream = await call(access);
-    if (upstream.status === 401 && refresh && !path.startsWith("/auth/")) {
-      tokens = await renew(refresh);
-      if (tokens) upstream = await call(tokens.accessToken);
+    if (
+      upstream.status === 401 &&
+      refresh &&
+      (!path.startsWith("/auth/") || path === "/auth/logout")
+    ) {
+      tokens =
+        request.headers.get("x-yofaso-activity") === "1"
+          ? await renew(refresh)
+          : undefined;
+      if (tokens) {
+        if (path === "/auth/logout")
+          body = JSON.stringify({ refreshToken: tokens.refreshToken });
+        upstream = await call(tokens.accessToken);
+      }
     }
     const type = upstream.headers.get("content-type") || "application/json";
     if (auth && upstream.ok) {
       tokens = (await upstream.json()) as TokenPair;
       const response = NextResponse.json({ user: tokens.user });
-      session(response, tokens);
+      session(
+        response,
+        tokens,
+        request.headers.get("x-yofaso-remember") === "true",
+      );
       return response;
     }
     const response = new NextResponse(await upstream.arrayBuffer(), {
@@ -126,8 +182,8 @@ async function handle(
         "X-Content-Type-Options": "nosniff",
       },
     });
-    if (tokens !== undefined) session(response, tokens);
-    if (path === "/auth/logout" || upstream.status === 401)
+    if (tokens !== undefined) session(response, tokens, remember);
+    if (path === "/auth/logout" || (upstream.status === 401 && tokens === null))
       session(response, null);
     return response;
   } catch {

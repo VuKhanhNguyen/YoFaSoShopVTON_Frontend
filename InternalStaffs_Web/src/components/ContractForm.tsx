@@ -1,12 +1,12 @@
 "use client";
 import { useRef, useState } from "react";
 import { ApiError } from "@/lib/api";
+import { PasswordInput, PasswordMeter } from "./PasswordInput";
 import {
   choices,
   labels,
   resolve,
   schemas,
-  strength,
   validate,
   type Schema,
 } from "@/lib/validation";
@@ -15,7 +15,9 @@ export type Options = Record<string, Option[]>;
 function localDateTime(value: unknown): string {
   const date = new Date(String(value));
   if (!Number.isFinite(date.getTime())) return "";
-  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+    .toISOString()
+    .slice(0, 16);
 }
 function defaults(schema: Schema): unknown {
   const s = resolve(schema);
@@ -48,12 +50,16 @@ export function ContractForm({
   onSubmit,
   title = "Lưu thay đổi",
   options = {},
+  footer,
+  hiddenFields = [],
 }: {
   schemaName: string;
   initial?: Record<string, unknown>;
   onSubmit: (body: Record<string, unknown>, key: string) => Promise<void>;
   title?: string;
   options?: Options;
+  footer?: React.ReactNode;
+  hiddenFields?: string[];
 }) {
   const schema = schemas[schemaName],
     [value, setValue] = useState<Record<string, unknown>>(
@@ -62,7 +68,6 @@ export function ContractForm({
     [errors, setErrors] = useState<Record<string, string>>({}),
     [message, setMessage] = useState(""),
     [busy, setBusy] = useState(false),
-    [visible, setVisible] = useState(false),
     [confirm, setConfirm] = useState("");
   const attempt = useRef<{ payload: string; key: string } | null>(null);
   async function submit(event: React.FormEvent) {
@@ -235,26 +240,36 @@ export function ContractForm({
             onChange={(e) => set(e.target.value)}
             aria-invalid={!!errors[path]}
           />
+        ) : password ? (
+          <PasswordInput
+            id={id}
+            value={String(v ?? "")}
+            maxLength={s.maxLength}
+            autoComplete={
+              schemaName === "Login" ||
+              key === "currentPassword" ||
+              key === "oldPassword"
+                ? "current-password"
+                : "new-password"
+            }
+            onChange={(e) => set(e.target.value)}
+            aria-invalid={!!errors[path]}
+            aria-describedby={errors[path] ? `${id}-error` : undefined}
+          />
         ) : (
           <input
             id={id}
             type={
-              password
-                ? visible
-                  ? "text"
-                  : "password"
-                : s.format === "email"
-                  ? "email"
-                  : s.type === "integer" || s.type === "number"
-                    ? "number"
-                    : s.format === "date-time"
-                      ? "datetime-local"
-                      : "text"
+              s.format === "email"
+                ? "email"
+                : s.type === "integer" || s.type === "number"
+                  ? "number"
+                  : s.format === "date-time"
+                    ? "datetime-local"
+                    : "text"
             }
             value={
-              s.format === "date-time" && v
-                ? localDateTime(v)
-                : String(v ?? "")
+              s.format === "date-time" && v ? localDateTime(v) : String(v ?? "")
             }
             maxLength={s.maxLength}
             autoComplete={
@@ -287,57 +302,54 @@ export function ContractForm({
             {errors[path]}
           </p>
         )}
-        {password && s.minLength === 10 && !!v && (
-          <p className="hint">Độ mạnh: {strength(String(v))}</p>
-        )}
+        {password &&
+          ["Register", "Staff", "Password", "Reset"].includes(schemaName) &&
+          ["password", "newPassword"].includes(key) && (
+            <PasswordMeter value={String(v ?? "")} />
+          )}
       </div>
     );
   }
   return (
     <form noValidate onSubmit={submit} className="contract-form">
       <fieldset disabled={busy} className="form-fields">
-        {Object.entries(schema.properties || {}).map(([key, spec]) =>
-          field(
-            spec,
-            value[key],
-            (next) => setValue({ ...value, [key]: next }),
-            key,
-            schema.required?.includes(key),
-          ),
-        )}
+        {Object.entries(schema.properties || {})
+          .filter(([key]) => !hiddenFields.includes(key))
+          .map(([key, spec]) =>
+            field(
+              spec,
+              value[key],
+              (next) => setValue({ ...value, [key]: next }),
+              key,
+              schema.required?.includes(key),
+            ),
+          )}
         {["Register", "Staff", "Password", "Reset"].includes(schemaName) && (
           <div className="field">
             <label htmlFor="confirmPassword">Xác nhận mật khẩu</label>
-            <input
+            <PasswordInput
               id="confirmPassword"
-              type={visible ? "text" : "password"}
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
               maxLength={72}
               autoComplete="new-password"
+              aria-invalid={!!errors.confirmPassword}
+              aria-describedby={
+                errors.confirmPassword ? "confirmPassword-error" : undefined
+              }
             />
             {errors.confirmPassword && (
-              <p className="field-error">{errors.confirmPassword}</p>
+              <p
+                id="confirmPassword-error"
+                role="alert"
+                className="field-error"
+              >
+                {errors.confirmPassword}
+              </p>
             )}
           </div>
         )}
-        {[
-          "Login",
-          "Register",
-          "Staff",
-          "Profile",
-          "Password",
-          "Reset",
-        ].includes(schemaName) && (
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={visible}
-              onChange={(e) => setVisible(e.target.checked)}
-            />
-            Hiện mật khẩu
-          </label>
-        )}
+        {footer}
       </fieldset>
       {!!message && (
         <p
