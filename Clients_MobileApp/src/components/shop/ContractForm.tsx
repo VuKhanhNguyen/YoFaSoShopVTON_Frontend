@@ -1,33 +1,28 @@
 import { useState } from "react";
 import { Switch, Text, View } from "react-native";
 import { ApiError } from "@/lib/api";
-import {
-  labels,
-  schemas,
-  validate,
-  strength,
-  type Schema,
-} from "@/lib/validation";
-import { Button, Field, Notice, s } from "./ui";
+import { labels, schemas, validate, type Schema } from "@/lib/validation";
+import { Button, Field, Notice, PasswordMeter, s } from "./ui";
 export function ContractForm({
   schemaName,
   initial = {},
   onSubmit,
   title = "Lưu thay đổi",
   exclude = [],
+  footer,
 }: {
   schemaName: string;
   initial?: Record<string, unknown>;
   onSubmit: (value: Record<string, unknown>) => Promise<void>;
   title?: string;
   exclude?: string[];
+  footer?: React.ReactNode;
 }) {
   const schema = schemas[schemaName];
   const [value, setValue] = useState(initial),
     [errors, setErrors] = useState<Record<string, string>>({}),
     [message, setMessage] = useState(""),
     [busy, setBusy] = useState(false);
-  const [visible, setVisible] = useState(false);
   async function submit() {
     const allowed = Object.fromEntries(
       Object.entries(value).filter(
@@ -100,7 +95,7 @@ export function ContractForm({
               ? "none"
               : "sentences"
           }
-          secureTextEntry={password && !visible}
+          password={password}
           keyboardType={
             key === "phone" || spec.type === "integer"
               ? "phone-pad"
@@ -110,9 +105,11 @@ export function ContractForm({
           }
           multiline={key === "comment" || key === "street"}
         />
-        {password && spec.minLength === 10 && !!value[key] && (
-          <Notice>Độ mạnh: {strength(String(value[key]))}</Notice>
-        )}
+        {password &&
+          ["Register", "Reset", "Password"].includes(schemaName) &&
+          ["password", "newPassword"].includes(key) && (
+            <PasswordMeter value={String(value[key] ?? "")} />
+          )}
       </View>
     );
   }
@@ -123,15 +120,7 @@ export function ContractForm({
         .map(([key, spec]) => field(key, spec))}
       {["Register", "Reset", "Password"].includes(schemaName) &&
         field("confirmPassword", { type: "string", maxLength: 72 })}
-      {Object.keys(schema.properties || {}).some((key) =>
-        key.toLowerCase().includes("password"),
-      ) && (
-        <Button
-          secondary
-          title={visible ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
-          onPress={() => setVisible(!visible)}
-        />
-      )}
+      {footer}
       {!!message && (
         <Notice error={message !== "Đã lưu thành công."}>{message}</Notice>
       )}

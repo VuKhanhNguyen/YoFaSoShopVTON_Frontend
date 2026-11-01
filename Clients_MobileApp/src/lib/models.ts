@@ -5,9 +5,12 @@ export type User = {
   fullName: string;
   email: string;
   phone: string;
+  dateOfBirth?: string;
   roles: string[];
   loyaltyPoints: number;
   membership: string;
+  avatarUrl?: string | null;
+  avatarKey?: string | null;
 };
 export type Tokens = { accessToken: string; refreshToken: string; user: User };
 export type Variant = {

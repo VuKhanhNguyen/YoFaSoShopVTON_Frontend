@@ -7,6 +7,26 @@ export const BASE_URL = (
 let current: Tokens | null = null;
 let refreshing: Promise<void> | null = null;
 let onExpired = () => {};
+let remembered = false;
+let foreground = true;
+let lastActivity = 0;
+let renewedAt = 0;
+let lastAttempt = 0;
+let restoring: Promise<User | null> | null = null;
+let epoch = 0;
+let storageWrite: Promise<unknown> = Promise.resolve();
+export function setForeground(active: boolean) {
+  foreground = active;
+}
+// Chỉ sự kiện chạm/gõ/cuộn gọi hàm này. Polling API không được gia hạn phiên.
+export function noteActivity() {
+  if (!foreground) return;
+  lastActivity = Date.now();
+  if (current && lastActivity - Math.max(renewedAt, lastAttempt) >= 60000) {
+    lastAttempt = lastActivity;
+    void renew().catch(() => {});
+  }
+}
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -21,12 +41,94 @@ export function setExpiryHandler(fn: () => void) {
 }
 export async function saveTokens(tokens: Tokens | null) {
   current = tokens;
+  renewedAt = Date.now();
+  lastAttempt = renewedAt;
   if (Platform.OS !== "web") {
-    if (tokens)
-      await SecureStore.setItemAsync("yofaso.session", JSON.stringify(tokens));
-    else await SecureStore.deleteItemAsync("yofaso.session");
+    const refresh = tokens && remembered ? tokens.refreshToken : null;
+    // Tuần tự hóa ghi/xóa để refresh đang chạy không khôi phục phiên vừa đăng xuất.
+    storageWrite = storageWrite
+      .catch(() => {})
+      .then(() =>
+        refresh
+          ? SecureStore.setItemAsync(
+              "yofaso.session",
+              JSON.stringify({ refreshToken: refresh, remember: true }),
+            )
+          : SecureStore.deleteItemAsync("yofaso.session"),
+      );
+    await storageWrite;
   }
   // Expo Web chỉ giữ token trong bộ nhớ; không ghi localStorage/AsyncStorage.
+}
+async function renew() {
+  if (!current) return;
+  if (refreshing) return refreshing;
+  const token = current.refreshToken,
+    generation = epoch;
+  refreshing = api<Tokens>(
+    "/auth/refresh",
+    "POST",
+    { refreshToken: token },
+    undefined,
+    false,
+  )
+    .then(async (pair) => {
+      if (epoch === generation && current?.refreshToken === token)
+        await saveTokens(pair);
+    })
+    .catch(async (e) => {
+      // Mất mạng không xóa thông tin đã ghi nhớ; token bị thu hồi thì phải đăng nhập lại.
+      if (e instanceof ApiError && e.status === 401 && epoch === generation) {
+        epoch++;
+        remembered = false;
+        await saveTokens(null);
+        onExpired();
+      }
+      throw e;
+    })
+    .finally(() => {
+      refreshing = null;
+    });
+  return refreshing;
+}
+export function restoreSession(): Promise<User | null> {
+  if (!restoring)
+    restoring = restoreSavedSession().finally(() => {
+      restoring = null;
+    });
+  return restoring;
+}
+async function restoreSavedSession(): Promise<User | null> {
+  if (Platform.OS === "web") return null;
+  try {
+    const stored = await SecureStore.getItemAsync("yofaso.session");
+    if (!stored) return null;
+    const { refreshToken, remember } = JSON.parse(stored);
+    if (typeof refreshToken !== "string" || remember !== true) {
+      await saveTokens(null);
+      return null;
+    }
+    const pair = await api<Tokens>(
+      "/auth/refresh",
+      "POST",
+      { refreshToken },
+      undefined,
+      false,
+    );
+    if (!pair.user.roles.includes("ROLE_CUSTOMER")) {
+      await saveTokens(null);
+      return null;
+    }
+    remembered = true;
+    epoch++;
+    await saveTokens(pair);
+    lastActivity = Date.now();
+    return pair.user;
+  } catch (e) {
+    if (!(e instanceof ApiError) || e.status === 401)
+      await saveTokens(null).catch(() => {});
+    return null;
+  }
 }
 export const imageSource = (assetId: string) => ({
   uri: `${BASE_URL}/assets/${encodeURIComponent(assetId)}/content`,
@@ -78,28 +180,12 @@ export async function api<T>(
   if (
     response.status === 401 &&
     current &&
+    foreground &&
+    Date.now() - lastActivity < 60000 &&
     retry &&
     !path.startsWith("/auth/")
   ) {
-    if (!refreshing)
-      refreshing = api<Tokens>(
-        "/auth/refresh",
-        "POST",
-        { refreshToken: current.refreshToken },
-        undefined,
-        false,
-      )
-        .then(saveTokens)
-        .finally(() => {
-          refreshing = null;
-        });
-    try {
-      await refreshing;
-    } catch {
-      await saveTokens(null);
-      onExpired();
-      throw new ApiError("Phiên đăng nhập đã hết hạn.", 401);
-    }
+    await renew();
     return api<T>(path, method, body, key, false);
   }
   const result = await response.json().catch(() => ({}));
@@ -122,7 +208,11 @@ export async function api<T>(
   }
   return result as T;
 }
-export async function login(body: unknown, register = false): Promise<User> {
+export async function login(
+  body: unknown,
+  register = false,
+  remember = false,
+): Promise<User> {
   const tokens = await api<Tokens>(
     register ? "/auth/register" : "/auth/login",
     "POST",
@@ -130,13 +220,30 @@ export async function login(body: unknown, register = false): Promise<User> {
   );
   if (!tokens.user.roles.includes("ROLE_CUSTOMER"))
     throw new ApiError("Tài khoản nhân sự vui lòng dùng cổng nội bộ.", 403);
+  epoch++;
+  remembered = remember;
+  lastActivity = Date.now();
   await saveTokens(tokens);
   return tokens.user;
 }
 export async function logout() {
+  // Đợi lần xoay đang chạy trước khi thu hồi refresh mới nhất.
+  await refreshing?.catch(() => {});
+  const token = current;
+  epoch++;
+  remembered = false;
+  await saveTokens(null);
   try {
-    if (current)
-      await api("/auth/logout", "POST", { refreshToken: current.refreshToken });
+    if (token)
+      await fetch(`${BASE_URL}/auth/logout`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token.accessToken}`,
+        },
+        body: JSON.stringify({ refreshToken: token.refreshToken }),
+        signal: AbortSignal.timeout(15000),
+      });
   } finally {
     await saveTokens(null);
   }

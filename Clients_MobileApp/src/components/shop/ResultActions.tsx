@@ -1,35 +1,37 @@
 import { useState } from "react";
-import { Platform, View } from "react-native";
+import { Platform, StyleSheet, View } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
-import * as MediaLibrary from "expo-media-library";
+import * as MediaLibrary from "expo-media-library/legacy";
 import { api, imageSource } from "@/lib/api";
 import { Button, Notice } from "./ui";
+
 export function ResultActions({ assetId }: { assetId: string }) {
-  const [busy, setBusy] = useState(false),
-    [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+
   async function exportImage(save: boolean) {
     setBusy(true);
     setMessage("");
     let local = "";
     try {
-      await api("/me");
+      await api("/me").catch(() => {});
       const source = imageSource(assetId);
       if (Platform.OS === "web") {
         const response = await fetch(source.uri, { headers: source.headers });
         if (!response.ok) throw new Error("Không tải được ảnh.");
-        const blob = await response.blob(),
-          file = new File([blob], `yofaso-${assetId}.png`, {
-            type: "image/png",
-          });
-        if (!save && navigator.canShare?.({ files: [file] }))
+        const blob = await response.blob();
+        const file = new File([blob], `yofaso-${assetId}.png`, {
+          type: "image/png",
+        });
+        if (!save && navigator.canShare?.({ files: [file] })) {
           await navigator.share({
             files: [file],
             title: "Phong cách của tôi tại YoFaSo",
           });
-        else {
-          const url = URL.createObjectURL(blob),
-            link = document.createElement("a");
+        } else {
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
           link.href = url;
           link.download = file.name;
           link.click();
@@ -46,7 +48,7 @@ export function ResultActions({ assetId }: { assetId: string }) {
         if (save) {
           if (!(await MediaLibrary.requestPermissionsAsync(true)).granted)
             throw new Error("Chưa có quyền lưu ảnh vào thư viện.");
-          await MediaLibrary.Asset.create(local);
+          await MediaLibrary.createAssetAsync(local);
           setMessage("Đã lưu ảnh vào thư viện.");
         } else {
           if (!(await Sharing.isAvailableAsync()))
@@ -61,27 +63,33 @@ export function ResultActions({ assetId }: { assetId: string }) {
       setMessage((e as Error).message);
     } finally {
       if (local)
-        await FileSystem.deleteAsync(local, { idempotent: true }).catch(
-          () => {},
-        );
+        await FileSystem.deleteAsync(local, { idempotent: true }).catch(() => {});
       setBusy(false);
     }
   }
+
   return (
-    <View>
+    <View style={st.container}>
       <Button
-        title="Lưu ảnh kết quả"
+        title={busy ? "Đang xử lý..." : "Lưu ảnh kết quả"}
         secondary
         disabled={busy}
         onPress={() => void exportImage(true)}
       />
       <Button
-        title="Chia sẻ ảnh"
+        title="Chia sẻ phong cách"
         secondary
         disabled={busy}
         onPress={() => void exportImage(false)}
       />
-      {message && <Notice>{message}</Notice>}
+      {!!message && <Notice>{message}</Notice>}
     </View>
   );
 }
+
+const st = StyleSheet.create({
+  container: {
+    gap: 8,
+    marginTop: 8,
+  },
+});

@@ -46,5 +46,6 @@ example
 /dist-test/
 /dist-android/
 /dist-ios/
+/dist-native-check/
 /test-results/
 .env
