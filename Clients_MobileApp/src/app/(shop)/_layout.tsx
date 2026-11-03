@@ -6,6 +6,7 @@ import { Colors, Radii, Shadows } from "@/constants/theme";
 export default function ShopTabsLayout() {
   return (
     <Tabs
+      initialRouteName="explore"
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: Colors.primary,
@@ -15,8 +16,17 @@ export default function ShopTabsLayout() {
         tabBarItemStyle: st.tabItem,
       }}
     >
+      {/* Hidden index redirect route */}
       <Tabs.Screen
         name="index"
+        options={{
+          href: null,
+        }}
+      />
+
+      {/* 4 Dedicated Shop Tabs */}
+      <Tabs.Screen
+        name="explore"
         options={{
           title: "Khám phá",
           tabBarIcon: ({ color, focused }) => (
@@ -75,10 +85,10 @@ function TabIcon({
 const st = StyleSheet.create({
   floatingDock: {
     position: "absolute",
-    left: 18,
-    right: 18,
+    marginLeft: "5%",
     bottom: Platform.OS === "ios" ? 20 : 16,
-    height: 62,
+    height: 70,
+    width: "90%",
     borderRadius: Radii.full,
     backgroundColor: "rgba(255, 255, 255, 0.94)",
     borderWidth: 1,

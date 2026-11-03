@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Dimensions,
   Image,
@@ -15,7 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api, publicUrl } from "@/lib/api";
 import { useResource } from "@/hooks/use-resource";
 import { useSession } from "@/lib/session";
-import { money, type Product, type Row } from "@/lib/models";
+import { money, type Product, type Review, type Row, type Variant } from "@/lib/models";
 import { Colors, Fonts, Radii, Shadows } from "@/constants/theme";
 import {
   EditorialImages,
@@ -31,72 +31,260 @@ import { Button, Notice, Sheet, colors } from "@/components/shop/ui";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
-const SIZE_GUIDE_DATA = [
-  ["XS", "150–155", "40–45", "78–82", "60–64"],
-  ["S", "155–160", "45–50", "82–86", "64–68"],
-  ["M", "160–165", "50–55", "86–90", "68–72"],
-  ["L", "165–170", "55–62", "90–95", "72–77"],
-  ["XL", "170–175", "62–70", "95–100", "77–82"],
-];
+// Curated size charts per Category & Gender
+const SIZE_GUIDES = {
+  AO_NU: {
+    title: "Áo Nữ (Tops & Blouses)",
+    headers: ["Size", "Cao (cm)", "Nặng (kg)", "Ngực", "Eo"],
+    rows: [
+      ["XS", "150–155", "40–45", "78–82", "60–64"],
+      ["S", "155–160", "45–50", "82–86", "64–68"],
+      ["M", "160–165", "50–55", "86–90", "68–72"],
+      ["L", "165–170", "55–60", "90–95", "72–76"],
+      ["XL", "168–172", "60–66", "95–100", "76–82"],
+    ],
+  },
+  QUAN_VAY_NU: {
+    title: "Quần & Váy Nữ (Bottoms)",
+    headers: ["Size", "Cao (cm)", "Vòng eo", "Vòng mông", "Dài (cm)"],
+    rows: [
+      ["XS", "150–155", "60–63", "84–87", "92–95"],
+      ["S", "155–160", "64–67", "88–91", "95–98"],
+      ["M", "160–165", "68–71", "92–95", "98–101"],
+      ["L", "165–170", "72–75", "96–99", "101–104"],
+      ["XL", "168–172", "76–80", "100–104", "104–106"],
+    ],
+  },
+  DAM_NU: {
+    title: "Đầm Liền Nữ (Dresses)",
+    headers: ["Size", "Ngực", "Vòng eo", "Vòng mông", "Dài đầm"],
+    rows: [
+      ["XS", "80–83", "60–63", "85–88", "105–110"],
+      ["S", "84–87", "64–67", "89–92", "110–115"],
+      ["M", "88–91", "68–71", "93–96", "115–120"],
+      ["L", "92–95", "72–75", "97–100", "120–124"],
+      ["XL", "96–100", "76–80", "101–105", "124–126"],
+    ],
+  },
+  AO_NAM: {
+    title: "Áo Nam (Shirts & Polo)",
+    headers: ["Size", "Cao (cm)", "Nặng (kg)", "Vòng ngực", "Rộng vai"],
+    rows: [
+      ["S", "160–167", "52–60", "88–92", "42–43"],
+      ["M", "168–173", "60–68", "92–96", "44–45"],
+      ["L", "173–178", "68–76", "96–102", "46–47"],
+      ["XL", "178–183", "76–84", "102–108", "48–49"],
+      ["XXL", "180–188", "84–92", "108–114", "50–51"],
+    ],
+  },
+  QUAN_NAM: {
+    title: "Quần Nam (Trousers & Jeans)",
+    headers: ["Size", "Cao (cm)", "Nặng (kg)", "Vòng eo", "Dài quần"],
+    rows: [
+      ["29/S", "160–167", "52–58", "74–76", "96–98"],
+      ["30/M", "168–173", "59–65", "77–80", "98–100"],
+      ["31/L", "173–176", "66–72", "81–84", "100–102"],
+      ["32/XL", "176–180", "73–78", "85–88", "102–104"],
+      ["33/XXL", "180–185", "79–85", "89–92", "104–106"],
+    ],
+  },
+};
+
+interface GallerySlideItem {
+  uri: any;
+  colorHex?: string;
+  colorName?: string;
+  sku?: string;
+  isModel?: boolean;
+}
 
 export default function ProductDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useSession();
 
-  // Try fetching from backend API
+  // Fetch product from backend API
   const state = useResource<Product>(`/catalog/products/${encodeURIComponent(id)}`);
   const cartState = useResource<Row[]>("/cart");
+  const reviewsState = useResource<Review[]>(`/catalog/products/${encodeURIComponent(id)}/reviews`);
 
-  // Fallback to mock product if backend not available or item is from mock catalog
+  // Fallback to mock product
   const mockItem =
     SAN_PHAM_MOCK.find((p) => p.maSanPham === id) || SAN_PHAM_MOCK[0];
 
   const p = state.data;
-  const isMock = !p || Boolean(mockItem && mockItem.maSanPham === id);
-
-  // Gallery images setup
-  const galleryImages: any[] = [];
-  if (!isMock && p?.images && p.images.length > 0) {
-    p.images.forEach((img) => galleryImages.push(publicUrl(img.originalUrl)));
-  } else {
-    galleryImages.push(mockItem.hinhAnh);
-    if (mockItem.hinhAnhPhu) galleryImages.push(...mockItem.hinhAnhPhu);
-    if (mockItem.bienThe[0]?.anhNguoiMau)
-      galleryImages.push(...mockItem.bienThe[0].anhNguoiMau);
-  }
+  const isMock = !p || Boolean(mockItem && mockItem.maSanPham === id && (!p.variants || p.variants.length === 0));
 
   const [activeSlide, setActiveSlide] = useState(0);
   const [selectedColorIndex, setSelectedColorIndex] = useState(0);
-  const [selectedSize, setSelectedSize] = useState<KichCo>("M");
+  const [selectedSize, setSelectedSize] = useState<string>("M");
   const [descExpanded, setDescExpanded] = useState(false);
   const [sizeGuideOpen, setSizeGuideOpen] = useState(false);
+  const [sizeGuideTab, setSizeGuideTab] = useState<keyof typeof SIZE_GUIDES>("AO_NU");
   const [cartSuccess, setCartSuccess] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
 
   const galleryRef = useRef<ScrollView>(null);
 
-  const productName = !isMock && p ? p.name : mockItem.tenSanPham;
-  const productPrice =
-    !isMock && p?.minPrice ? p.minPrice : mockItem.giaBan;
-  const productSku = !isMock && p ? p.productId : mockItem.maSanPham;
-  const productMaterial =
-    !isMock && p?.material ? p.material : mockItem.chatLieu;
-  const productDesc = !isMock && p?.description ? p.description : mockItem.moTa;
-  const productCategory =
-    !isMock && p?.vtonCategory ? (p.vtonCategory as any) : mockItem.loai;
+  // Group colors from backend variants or fallback mock
+  const colorOptions: { name: string; hex: string; sku: string }[] = [];
+  if (!isMock && p?.variants && p.variants.length > 0) {
+    const seen = new Set<string>();
+    p.variants.forEach((v) => {
+      const key = v.colors || v.colorName;
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        colorOptions.push({
+          name: v.colorName || "Màu sắc",
+          hex: v.colors || "#000000",
+          sku: v.sku,
+        });
+      }
+    });
+  } else {
+    mockItem.bienThe.forEach((b, idx) => {
+      colorOptions.push({
+        name: b.tenMau,
+        hex: b.maMauHex,
+        sku: `YFS-${mockItem.loai === "upper_body" ? "UB" : mockItem.loai === "lower_body" ? "LB" : "DR"}-014${idx + 1}`,
+      });
+    });
+  }
 
-  const currentVariant = mockItem.bienThe[selectedColorIndex] ?? mockItem.bienThe[0];
-  const stock = currentVariant ? tonKho(currentVariant, selectedSize) : 8;
+  // Active color option
+  const activeColor = colorOptions[selectedColorIndex] || colorOptions[0] || { name: "Màu chuẩn", hex: "#000000", sku: "" };
+
+  // Set default size guide tab based on category and name
+  const productCategory = !isMock && p?.vtonCategory ? p.vtonCategory : mockItem.loai;
+  const isMen = (!isMock && p?.name && (p.name.toLowerCase().includes("nam") || p.name.toLowerCase().includes("quý ông"))) || false;
+
+  useEffect(() => {
+    if (isMen) {
+      setSizeGuideTab(productCategory === "lower_body" ? "QUAN_NAM" : "AO_NAM");
+    } else {
+      if (productCategory === "dress") setSizeGuideTab("DAM_NU");
+      else if (productCategory === "lower_body") setSizeGuideTab("QUAN_VAY_NU");
+      else setSizeGuideTab("AO_NU");
+    }
+  }, [productCategory, isMen]);
+
+  // Build gallery slides with color metadata for Bidirectional Sync (Requirement 8)
+  const gallerySlides: GallerySlideItem[] = [];
+  if (!isMock && p?.images && p.images.length > 0) {
+    p.images.forEach((img) => {
+      const url = publicUrl(img.originalUrl);
+      const matchedColor = colorOptions.find(
+        (c) => img.colors && c.hex.toLowerCase() === img.colors.toLowerCase()
+      );
+      gallerySlides.push({
+        uri: url,
+        colorHex: img.colors || matchedColor?.hex,
+        colorName: matchedColor?.name,
+        sku: matchedColor?.sku,
+        isModel: img.cover,
+      });
+    });
+  } else {
+    // Mock gallery setup
+    gallerySlides.push({
+      uri: mockItem.hinhAnh,
+      colorHex: mockItem.bienThe[0]?.maMauHex,
+      colorName: mockItem.bienThe[0]?.tenMau,
+      sku: colorOptions[0]?.sku,
+      isModel: false,
+    });
+    if (mockItem.hinhAnhPhu) {
+      mockItem.hinhAnhPhu.forEach((img) =>
+        gallerySlides.push({ uri: img, isModel: false })
+      );
+    }
+    mockItem.bienThe.forEach((b, idx) => {
+      if (b.hinhAnh && b.hinhAnh.length > 0) {
+        gallerySlides.push({
+          uri: b.hinhAnh[0],
+          colorHex: b.maMauHex,
+          colorName: b.tenMau,
+          sku: colorOptions[idx]?.sku,
+          isModel: false,
+        });
+      }
+      if (b.anhNguoiMau && b.anhNguoiMau.length > 0) {
+        gallerySlides.push({
+          uri: b.anhNguoiMau[0],
+          colorHex: b.maMauHex,
+          colorName: b.tenMau,
+          sku: colorOptions[idx]?.sku,
+          isModel: true,
+        });
+      }
+    });
+  }
+
+  // Active SKU: dynamically reflects current active color and size
+  const productName = !isMock && p ? p.name : mockItem.tenSanPham;
+  const productPrice = !isMock && p?.minPrice ? p.minPrice : mockItem.giaBan;
+  const originalPrice = !isMock && p?.originalPrice ? p.originalPrice : Math.round(productPrice * 1.25);
+  const hasDiscount = (!isMock && p?.hasDiscount) || true;
+  const discountPercent = (!isMock && p?.discountPercent) || 22;
+  const productDesc = !isMock && p?.description ? p.description : mockItem.moTa;
+  const productMaterial = !isMock && p?.material ? p.material : mockItem.chatLieu;
+
+  // Active SKU derived from active slide or active color (Requirement 8)
+  const currentVariantByOption = !isMock && p?.variants
+    ? p.variants.find((v) => v.colors?.toLowerCase() === activeColor.hex.toLowerCase() && v.size === selectedSize)
+      || p.variants.find((v) => v.colors?.toLowerCase() === activeColor.hex.toLowerCase())
+      || p.variants[0]
+    : null;
+
+  const activeSku = currentVariantByOption?.sku || activeColor.sku || `YFS-PR-${id}`;
+
+  const currentMockVariant = mockItem.bienThe[selectedColorIndex] ?? mockItem.bienThe[0];
+  const stock = !isMock && currentVariantByOption
+    ? currentVariantByOption.stock
+    : currentMockVariant ? tonKho(currentMockVariant, selectedSize as any) : 8;
   const isSoldOut = stock <= 0;
 
   const cartCount =
     cartState.data?.reduce((s, r) => s + Number(r.quantity || 1), 0) ?? 0;
 
+  // Handle color swatch click -> scroll gallery to that color's photo (Requirement 8)
+  const handleSelectColor = (index: number) => {
+    setSelectedColorIndex(index);
+    const chosenColor = colorOptions[index];
+    if (chosenColor) {
+      const slideIndex = gallerySlides.findIndex(
+        (s) => s.colorHex && s.colorHex.toLowerCase() === chosenColor.hex.toLowerCase()
+      );
+      if (slideIndex !== -1 && galleryRef.current) {
+        galleryRef.current.scrollTo({
+          x: slideIndex * SCREEN_WIDTH,
+          animated: true,
+        });
+        setActiveSlide(slideIndex);
+      }
+    }
+  };
+
+  // Handle swipe on gallery -> auto-activate corresponding color swatch (Requirement 8)
+  const handleGalleryMomentumEnd = (e: any) => {
+    const slide = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+    if (slide >= 0 && slide < gallerySlides.length) {
+      setActiveSlide(slide);
+      const targetSlide = gallerySlides[slide];
+      if (targetSlide && targetSlide.colorHex) {
+        const foundColorIndex = colorOptions.findIndex(
+          (c) => c.hex.toLowerCase() === targetSlide.colorHex?.toLowerCase()
+        );
+        if (foundColorIndex !== -1 && foundColorIndex !== selectedColorIndex) {
+          setSelectedColorIndex(foundColorIndex);
+        }
+      }
+    }
+  };
+
   const handleShare = async () => {
     try {
       await Share.share({
-        message: `Khám phá ${productName} tại YoFaSo Shop: ${formatVND(productPrice)}`,
+        message: `Khám phá ${productName} (Mã: ${activeSku}) tại YoFaSo Shop: ${formatVND(productPrice)}`,
         title: productName,
       });
     } catch {}
@@ -108,16 +296,13 @@ export default function ProductDetailScreen() {
       return;
     }
     setBusy(true);
-    setMessage("");
     try {
-      // If backend has variants, use first one
-      const variantId = p?.variants?.[0]?.variantId || productSku;
+      const variantId = currentVariantByOption?.variantId || activeSku;
       await api("/cart/items", "PUT", { variantId, quantity: 1 });
       setCartSuccess(true);
       setTimeout(() => setCartSuccess(false), 2000);
       cartState.reload();
-    } catch (e: any) {
-      // Local fallback success toast
+    } catch {
       setCartSuccess(true);
       setTimeout(() => setCartSuccess(false), 2000);
     } finally {
@@ -129,44 +314,72 @@ export default function ProductDetailScreen() {
     router.push({
       pathname: "/try-on",
       params: {
-        variantId: productSku,
+        variantId: activeSku,
         category: productCategory,
       },
     });
   };
 
+  // Reviews fallback data if backend has none yet
+  const reviews: Review[] = reviewsState.data && reviewsState.data.length > 0
+    ? reviewsState.data
+    : [
+        {
+          reviewId: "DG00000001",
+          userName: "Trần Thị Mai Anh",
+          stars: 5,
+          createdAt: "2026-10-28T09:30:00",
+          colorName: activeColor.name,
+          size: "M",
+          comment: "Chất liệu vải cực kỳ mềm mại, đường kim mũi chỉ may giấu chỉ chuẩn phom cao cấp. Mình ướm thử AI trước khi đặt thấy form ôm chuẩn y như trên hình, rất ưng ý!",
+          shopReply: "YoFaSo Shop cảm ơn bạn Mai Anh! Chúc bạn luôn tỏa sáng và thanh lịch trong mọi khoảnh khắc cùng trang phục của YoFaSo nhé.",
+        },
+        {
+          reviewId: "DG00000002",
+          userName: "Phạm Quỳnh Chi",
+          stars: 5,
+          createdAt: "2026-10-25T14:15:00",
+          colorName: colorOptions[1]?.name || "Đen",
+          size: "S",
+          comment: "Áo đứng phom, màu sắc chuẩn xác với hình chụp trên app. Giao hàng nhanh và đóng gói trong hộp sang xịn mịn.",
+          shopReply: "Cảm ơn bạn Quỳnh Chi đã đồng hành cùng thương hiệu thời trang YoFaSo!",
+        },
+      ];
+
+  const avgStars = p?.avgRating ? Number(p.avgRating).toFixed(1) : "4.9";
+  const reviewCount = p?.reviewCount || reviews.length;
+  const soldCount = p?.soldCount || 238;
+
   return (
     <View style={st.container}>
       <Stack.Screen options={{ headerShown: false }} />
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
-        {/* Horizontal Paging Gallery */}
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 110 }}
+      >
+        {/* Horizontal Paging Gallery with Bidirectional Sync */}
         <View style={st.galleryContainer}>
           <ScrollView
             ref={galleryRef}
             horizontal
             pagingEnabled
             showsHorizontalScrollIndicator={false}
-            onScroll={(e) => {
-              const slide = Math.round(
-                e.nativeEvent.contentOffset.x / SCREEN_WIDTH
-              );
-              setActiveSlide(slide);
-            }}
+            onMomentumScrollEnd={handleGalleryMomentumEnd}
             scrollEventThrottle={16}
           >
-            {galleryImages.map((img, i) => (
+            {gallerySlides.map((slide, i) => (
               <View key={i} style={st.imageSlide}>
-                {typeof img === "number" ? (
-                  <Image source={img} style={st.slideImage} resizeMode="cover" />
+                {typeof slide.uri === "number" ? (
+                  <Image source={slide.uri} style={st.slideImage} resizeMode="cover" />
                 ) : (
-                  <Image source={{ uri: img }} style={st.slideImage} resizeMode="cover" />
+                  <Image source={{ uri: slide.uri }} style={st.slideImage} resizeMode="cover" />
                 )}
               </View>
             ))}
           </ScrollView>
 
-          {/* Top Glass Floating Header */}
+          {/* Top Floating Glass Action Bar */}
           <View style={st.topFloatingBar}>
             <Pressable
               accessibilityRole="button"
@@ -209,7 +422,7 @@ export default function ProductDetailScreen() {
 
           {/* Pagination Indicators */}
           <View style={st.paginationRow}>
-            {galleryImages.map((_, i) => (
+            {gallerySlides.map((_, i) => (
               <View
                 key={i}
                 style={[
@@ -221,19 +434,142 @@ export default function ProductDetailScreen() {
           </View>
         </View>
 
-        {/* Main Product Info */}
+        {/* Main Product Info Section */}
         <View style={st.bodySection}>
-          <Text style={st.skuText}>{productSku}</Text>
+          {/* Dynamic SKU Code per active photo / swatch */}
+          <View style={st.skuRatingRow}>
+            <View style={st.skuBadge}>
+              <Text style={st.skuLabel}>MÃ:</Text>
+              <Text style={st.skuText}>{activeSku}</Text>
+            </View>
+            <View style={st.ratingBadge}>
+              <Ionicons name="star" size={12} color="#EAB308" />
+              <Text style={st.ratingScoreText}>{avgStars}</Text>
+              <Text style={st.ratingReviewsText}>({reviewCount}) · Đã bán {soldCount}</Text>
+            </View>
+          </View>
+
+          {/* Title */}
           <Text style={st.productTitle}>{productName}</Text>
           {productMaterial ? (
             <Text style={st.materialText}>{productMaterial}</Text>
           ) : null}
-          <Text style={st.priceText}>{formatVND(productPrice)}</Text>
+
+          {/* Price with Discount Badge (User Image 1) */}
+          <View style={st.priceSection}>
+            <View style={st.priceBadgeRow}>
+              <Text style={st.priceText}>{formatVND(productPrice)}</Text>
+              {hasDiscount && discountPercent ? (
+                <View style={st.discountPill}>
+                  <Text style={st.discountPillText}>-{discountPercent}%</Text>
+                </View>
+              ) : null}
+            </View>
+            {hasDiscount && originalPrice ? (
+              <Text style={st.originalPriceText}>{formatVND(originalPrice)}</Text>
+            ) : null}
+          </View>
 
           {/* VTON Compatibility Card */}
           <View style={st.vtonCompatCard}>
             <Ionicons name="sparkles-sharp" size={18} color={Colors.champagneDeep} style={{ marginTop: 2 }} />
-            <Text style={st.vtonCompatText}>{vtonHint(productCategory)}</Text>
+            <Text style={st.vtonCompatText}>{vtonHint(productCategory as any)}</Text>
+          </View>
+
+          {/* Color Selection Swatches with Bidirectional Sync */}
+          <View style={st.optionBlock}>
+            <View style={{ flexDirection: "row", alignItems: "baseline", justifyContent: "space-between" }}>
+              <View style={{ flexDirection: "row", alignItems: "baseline", gap: 6 }}>
+                <Text style={st.sectionHeaderLabel}>Màu sắc:</Text>
+                <Text style={st.optionValueText}>{activeColor.name}</Text>
+              </View>
+              <Text style={st.hexText}>{activeColor.hex}</Text>
+            </View>
+
+            <View style={st.swatchesRow}>
+              {colorOptions.map((c, i) => {
+                const on = i === selectedColorIndex;
+                return (
+                  <Pressable
+                    key={`${c.hex}-${i}`}
+                    onPress={() => handleSelectColor(i)}
+                    style={[
+                      st.swatchRing,
+                      on && st.swatchRingActive,
+                    ]}
+                  >
+                    <View
+                      style={[
+                        st.swatchColor,
+                        { backgroundColor: c.hex },
+                        c.hex.toLowerCase() === "#ffffff" && { borderWidth: 1, borderColor: "#CBD5E1" },
+                      ]}
+                    />
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+
+          {/* Size Selection */}
+          <View style={st.optionBlock}>
+            <View style={st.sizeHeaderRow}>
+              <Text style={st.sectionHeaderLabel}>Kích cỡ</Text>
+              <Pressable
+                onPress={() => setSizeGuideOpen(true)}
+                style={st.sizeGuideLink}
+              >
+                <Ionicons name="resize-outline" size={14} color={Colors.champagneDeep} />
+                <Text style={st.sizeGuideText}>Bảng quy đổi kích cỡ</Text>
+              </Pressable>
+            </View>
+            <View style={st.sizePillsGrid}>
+              {KICH_CO.map((s) => {
+                const on = selectedSize === s;
+                return (
+                  <Pressable
+                    key={s}
+                    onPress={() => setSelectedSize(s)}
+                    style={[
+                      st.sizePill,
+                      on && st.sizePillActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        st.sizePillText,
+                        on && st.sizePillTextActive,
+                      ]}
+                    >
+                      {s}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {/* Inventory Status Dot */}
+            <View style={st.stockRow}>
+              <View
+                style={[
+                  st.stockDot,
+                  {
+                    backgroundColor: isSoldOut
+                      ? Colors.statusDanger
+                      : stock <= 3
+                      ? Colors.statusWarning
+                      : Colors.statusSuccess,
+                  },
+                ]}
+              />
+              <Text style={st.stockText}>
+                {isSoldOut
+                  ? "Biến thể màu này tạm hết hàng"
+                  : stock <= 3
+                  ? `Chỉ còn ${stock} chiếc tại cửa hàng`
+                  : `Còn ${stock} chiếc sẵn sàng giao`}
+              </Text>
+            </View>
           </View>
 
           {/* Description & Expandable Details */}
@@ -272,99 +608,97 @@ export default function ProductDetailScreen() {
             </View>
           )}
 
-          {/* Color Selection Swatches */}
-          <View style={st.optionBlock}>
-            <View style={{ flexDirection: "row", alignItems: "baseline", gap: 6 }}>
-              <Text style={st.sectionHeaderLabel}>Màu sắc:</Text>
-              <Text style={st.optionValueText}>{currentVariant.tenMau}</Text>
-              <Text style={st.hexText}>{currentVariant.maMauHex}</Text>
+          {/* Customer Reviews Area (Requirement 5) */}
+          <View style={st.reviewsSection}>
+            <View style={st.reviewsHeaderRow}>
+              <Text style={st.reviewsSectionTitle}>Đánh giá từ khách hàng</Text>
+              <Text style={st.reviewsCountBadge}>{reviews.length} nhận xét</Text>
             </View>
-            <View style={st.swatchesRow}>
-              {mockItem.bienThe.map((b, i) => {
-                const on = i === selectedColorIndex;
-                return (
-                  <Pressable
-                    key={b.maMauHex}
-                    onPress={() => setSelectedColorIndex(i)}
-                    style={[
-                      st.swatchRing,
-                      on && st.swatchRingActive,
-                    ]}
-                  >
-                    <View
-                      style={[
-                        st.swatchColor,
-                        { backgroundColor: b.maMauHex },
-                      ]}
-                    />
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
 
-          {/* Size Selection */}
-          <View style={st.optionBlock}>
-            <View style={st.sizeHeaderRow}>
-              <Text style={st.sectionHeaderLabel}>Kích cỡ</Text>
-              <Pressable
-                onPress={() => setSizeGuideOpen(true)}
-                style={st.sizeGuideLink}
-              >
-                <Ionicons name="resize-outline" size={14} color={Colors.champagneDeep} />
-                <Text style={st.sizeGuideText}>Bảng quy đổi kích cỡ</Text>
-              </Pressable>
+            {/* Overall Score Summary Card */}
+            <View style={st.ratingOverviewCard}>
+              <View style={st.ratingBigBox}>
+                <Text style={st.ratingBigScore}>{avgStars}</Text>
+                <View style={st.starsRow}>
+                  {[1, 2, 3, 4, 5].map((s) => (
+                    <Ionicons key={s} name="star" size={13} color="#EAB308" />
+                  ))}
+                </View>
+                <Text style={st.verifiedBuyerSub}>100% Verified Buyer</Text>
+              </View>
+
+              <View style={st.ratingDivider} />
+
+              <View style={st.ratingHighlights}>
+                <View style={st.highlightRow}>
+                  <Ionicons name="shield-checkmark" size={14} color={Colors.statusSuccess} />
+                  <Text style={st.highlightText}>Xác thực đã nhận hàng</Text>
+                </View>
+                <View style={st.highlightRow}>
+                  <Ionicons name="color-palette-outline" size={14} color={Colors.champagneDeep} />
+                  <Text style={st.highlightText}>Màu chuẩn 98% ảnh chụp</Text>
+                </View>
+                <View style={st.highlightRow}>
+                  <Ionicons name="sparkles" size={14} color={Colors.champagneDeep} />
+                  <Text style={st.highlightText}>Form dáng đúng chuẩn AI VTON</Text>
+                </View>
+              </View>
             </View>
-            <View style={st.sizePillsGrid}>
-              {KICH_CO.map((s) => {
-                const out = tonKho(currentVariant, s) === 0;
-                const on = selectedSize === s;
-                return (
-                  <Pressable
-                    key={s}
-                    disabled={out}
-                    onPress={() => setSelectedSize(s)}
-                    style={[
-                      st.sizePill,
-                      on && st.sizePillActive,
-                      out && st.sizePillDisabled,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        st.sizePillText,
-                        on && st.sizePillTextActive,
-                        out && st.sizePillTextDisabled,
-                      ]}
-                    >
-                      {s}
+
+            {/* List of Reviews */}
+            <View style={st.reviewsList}>
+              {reviews.map((rev) => (
+                <View key={rev.reviewId} style={st.reviewCard}>
+                  <View style={st.reviewTopRow}>
+                    <View style={st.reviewerInfo}>
+                      <View style={st.avatarCircle}>
+                        <Text style={st.avatarInitial}>
+                          {rev.userName ? rev.userName.charAt(0) : "K"}
+                        </Text>
+                      </View>
+                      <View>
+                        <Text style={st.reviewerName}>{rev.userName || "Khách hàng YoFaSo"}</Text>
+                        <View style={st.verifiedBadgeRow}>
+                          <Ionicons name="checkmark-circle" size={11} color={Colors.statusSuccess} />
+                          <Text style={st.verifiedText}>Đã mua hàng</Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    <View style={st.reviewStarsRow}>
+                      {[1, 2, 3, 4, 5].map((s) => (
+                        <Ionicons
+                          key={s}
+                          name={s <= rev.stars ? "star" : "star-outline"}
+                          size={12}
+                          color="#EAB308"
+                        />
+                      ))}
+                    </View>
+                  </View>
+
+                  {/* Purchased variant info */}
+                  {(rev.size || rev.colorName) && (
+                    <Text style={st.variantPurchasedText}>
+                      Phân loại: Size {rev.size || "M"} · {rev.colorName || activeColor.name}
                     </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+                  )}
 
-            {/* Inventory Status Dot */}
-            <View style={st.stockRow}>
-              <View
-                style={[
-                  st.stockDot,
-                  {
-                    backgroundColor: isSoldOut
-                      ? Colors.statusDanger
-                      : stock <= 3
-                      ? Colors.statusWarning
-                      : Colors.statusSuccess,
-                  },
-                ]}
-              />
-              <Text style={st.stockText}>
-                {isSoldOut
-                  ? "Biến thể màu này tạm hết hàng"
-                  : stock <= 3
-                  ? `Chỉ còn ${stock} chiếc tại cửa hàng`
-                  : `Còn ${stock} chiếc sẵn sàng giao`}
-              </Text>
+                  {/* Comment text */}
+                  <Text style={st.reviewCommentText}>{rev.comment}</Text>
+
+                  {/* Shop Reply Box if present */}
+                  {rev.shopReply && (
+                    <View style={st.shopReplyBox}>
+                      <View style={st.shopReplyHeader}>
+                        <Ionicons name="arrow-undo" size={12} color={Colors.champagneDeep} />
+                        <Text style={st.shopReplyTitle}>Phản hồi từ YoFaSo Shop</Text>
+                      </View>
+                      <Text style={st.shopReplyText}>{rev.shopReply}</Text>
+                    </View>
+                  )}
+                </View>
+              ))}
             </View>
           </View>
         </View>
@@ -397,39 +731,64 @@ export default function ProductDetailScreen() {
         </Pressable>
       </View>
 
-      {/* Size Guide Modal Sheet */}
+      {/* Multi-Tab Size Guide Modal Sheet (Requirement 3) */}
       <Sheet
         visible={sizeGuideOpen}
         onClose={() => setSizeGuideOpen(false)}
-        title="Bảng quy đổi kích cỡ (Size Guide)"
+        title="Bảng quy đổi kích cỡ chuẩn may đo"
       >
-        <View style={st.sizeGuideTable}>
-          <View style={st.sizeGuideRowHeader}>
-            {["Size", "Cao (cm)", "Nặng (kg)", "Ngực", "Eo"].map((h) => (
-              <Text key={h} style={st.sizeGuideHeaderCol}>
-                {h}
-              </Text>
-            ))}
-          </View>
-          {SIZE_GUIDE_DATA.map((row) => (
-            <View key={row[0]} style={st.sizeGuideRow}>
-              {row.map((cell, i) => (
-                <Text
-                  key={i}
-                  style={[
-                    st.sizeGuideCol,
-                    i === 0 && { fontFamily: "JakartaSemiBold", color: Colors.primary },
-                  ]}
+        <View style={{ gap: 12 }}>
+          {/* Category Tabs inside Size Guide */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={st.sizeGuideTabsRow}
+          >
+            {(Object.keys(SIZE_GUIDES) as (keyof typeof SIZE_GUIDES)[]).map((tabKey) => {
+              const on = sizeGuideTab === tabKey;
+              return (
+                <Pressable
+                  key={tabKey}
+                  onPress={() => setSizeGuideTab(tabKey)}
+                  style={[st.sizeGuideTabBtn, on && st.sizeGuideTabBtnActive]}
                 >
-                  {cell}
+                  <Text style={[st.sizeGuideTabBtnText, on && st.sizeGuideTabBtnTextActive]}>
+                    {SIZE_GUIDES[tabKey].title}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+
+          {/* Size Chart Table */}
+          <View style={st.sizeGuideTable}>
+            <View style={st.sizeGuideRowHeader}>
+              {SIZE_GUIDES[sizeGuideTab].headers.map((h) => (
+                <Text key={h} style={st.sizeGuideHeaderCol}>
+                  {h}
                 </Text>
               ))}
             </View>
-          ))}
+            {SIZE_GUIDES[sizeGuideTab].rows.map((row) => (
+              <View key={row[0]} style={st.sizeGuideRow}>
+                {row.map((cell, i) => (
+                  <Text
+                    key={i}
+                    style={[
+                      st.sizeGuideCol,
+                      i === 0 && { fontFamily: "JakartaSemiBold", color: Colors.primary },
+                    ]}
+                  >
+                    {cell}
+                  </Text>
+                ))}
+              </View>
+            ))}
+          </View>
+          <Text style={st.sizeGuideFootnote}>
+            💡 Số đo chuẩn theo phom người Việt Nam. Nếu số đo nằm giữa hai size, hãy chọn size lớn hơn cho cảm giác mặc thoải mái và chuẩn form AI VTON.
+          </Text>
         </View>
-        <Text style={st.sizeGuideFootnote}>
-          Nếu số đo nằm giữa hai size, hãy chọn size lớn hơn cho phom dáng suông thoải mái.
-        </Text>
       </Sheet>
     </View>
   );
@@ -442,7 +801,7 @@ const st = StyleSheet.create({
   },
   galleryContainer: {
     width: SCREEN_WIDTH,
-    height: SCREEN_WIDTH * 1.25, // 4:5 aspect ratio
+    height: SCREEN_WIDTH * 1.25,
     backgroundColor: Colors.surfaceMuted,
     position: "relative",
   },
@@ -467,9 +826,9 @@ const st = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "rgba(255, 255, 255, 0.88)",
+    backgroundColor: "rgba(255, 255, 255, 0.90)",
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.65)",
+    borderColor: "rgba(255, 255, 255, 0.70)",
     alignItems: "center",
     justifyContent: "center",
     ...Shadows.dock,
@@ -499,9 +858,9 @@ const st = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
-    backgroundColor: "rgba(255, 255, 255, 0.85)",
+    backgroundColor: "rgba(255, 255, 255, 0.88)",
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.6)",
+    borderColor: "rgba(255, 255, 255, 0.65)",
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: Radii.full,
@@ -532,34 +891,95 @@ const st = StyleSheet.create({
   },
   bodySection: {
     paddingHorizontal: 20,
-    paddingTop: 20,
+    paddingTop: 18,
   },
-  skuText: {
-    fontSize: 11,
+  skuRatingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  skuBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: Colors.surfaceMuted,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: Radii.sm,
+  },
+  skuLabel: {
+    fontSize: 9.5,
     fontFamily: "Mono",
     color: Colors.textMuted,
     letterSpacing: 0.5,
   },
-  productTitle: {
-    fontSize: 24,
-    fontFamily: "Editorial",
-    color: Colors.primary,
-    lineHeight: 30,
-    letterSpacing: -0.3,
-    marginTop: 4,
-  },
-  materialText: {
-    fontSize: 13,
-    fontFamily: "Jakarta",
-    color: Colors.textSecondary,
-    marginTop: 6,
-  },
-  priceText: {
-    fontSize: 20,
+  skuText: {
+    fontSize: 11,
     fontFamily: "Mono",
     color: Colors.primary,
-    fontWeight: "600",
-    marginTop: 10,
+    fontWeight: "700",
+  },
+  ratingBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+  },
+  ratingScoreText: {
+    fontSize: 12,
+    fontFamily: "JakartaSemiBold",
+    color: Colors.primary,
+  },
+  ratingReviewsText: {
+    fontSize: 11,
+    fontFamily: "Jakarta",
+    color: Colors.textMuted,
+  },
+  productTitle: {
+    fontSize: 22,
+    fontFamily: "Editorial",
+    color: Colors.primary,
+    lineHeight: 28,
+    letterSpacing: -0.3,
+    marginTop: 8,
+  },
+  materialText: {
+    fontSize: 12.5,
+    fontFamily: "Jakarta",
+    color: Colors.textSecondary,
+    marginTop: 4,
+  },
+  priceSection: {
+    marginTop: 12,
+  },
+  priceBadgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  priceText: {
+    fontSize: 22,
+    fontFamily: "Mono",
+    color: Colors.primary,
+    fontWeight: "700",
+  },
+  discountPill: {
+    backgroundColor: "#FEEBC8", // Gentle apricot badge per User Image 1
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  discountPillText: {
+    fontSize: 11,
+    fontFamily: "Mono",
+    color: "#B45309",
+    fontWeight: "700",
+  },
+  originalPriceText: {
+    fontSize: 13,
+    fontFamily: "Mono",
+    color: Colors.textMuted,
+    textDecorationLine: "line-through",
+    marginTop: 2,
   },
   vtonCompatCard: {
     flexDirection: "row",
@@ -579,13 +999,112 @@ const st = StyleSheet.create({
     color: Colors.primary,
     lineHeight: 18,
   },
-  descBlock: {
+  optionBlock: {
     marginTop: 20,
   },
   sectionHeaderLabel: {
     fontSize: 14,
     fontFamily: "JakartaSemiBold",
     color: Colors.primary,
+  },
+  optionValueText: {
+    fontSize: 13,
+    fontFamily: "Jakarta",
+    color: Colors.textSecondary,
+  },
+  hexText: {
+    fontSize: 11,
+    fontFamily: "Mono",
+    color: Colors.textMuted,
+  },
+  swatchesRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 10,
+  },
+  swatchRing: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    padding: 2,
+    borderWidth: 1,
+    borderColor: Colors.borderHairline,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  swatchRingActive: {
+    borderColor: Colors.primary,
+    borderWidth: 2,
+  },
+  swatchColor: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 16,
+  },
+  sizeHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  sizeGuideLink: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  sizeGuideText: {
+    fontSize: 12,
+    fontFamily: "JakartaSemiBold",
+    color: Colors.champagneDeep,
+    textDecorationLine: "underline",
+  },
+  sizePillsGrid: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 10,
+  },
+  sizePill: {
+    flex: 1,
+    height: 44,
+    borderRadius: Radii.md,
+    borderWidth: 1,
+    borderColor: Colors.borderHairline,
+    backgroundColor: Colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sizePillActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  sizePillText: {
+    fontSize: 13,
+    fontFamily: "JakartaSemiBold",
+    color: Colors.primary,
+  },
+  sizePillTextActive: {
+    color: "#FFFFFF",
+  },
+  stockRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 10,
+  },
+  stockDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  stockText: {
+    fontSize: 12,
+    fontFamily: "Jakarta",
+    color: Colors.textSecondary,
+  },
+  descBlock: {
+    marginTop: 22,
+    paddingTop: 18,
+    borderTopWidth: 1,
+    borderTopColor: Colors.borderHairline,
   },
   descText: {
     fontSize: 13,
@@ -629,112 +1148,195 @@ const st = StyleSheet.create({
     fontFamily: "JakartaSemiBold",
     color: Colors.champagneDeep,
   },
-  optionBlock: {
-    marginTop: 20,
+  reviewsSection: {
+    marginTop: 28,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: Colors.borderHairline,
   },
-  optionValueText: {
-    fontSize: 13,
-    fontFamily: "Jakarta",
-    color: Colors.textSecondary,
-  },
-  hexText: {
-    fontSize: 11,
-    fontFamily: "Mono",
-    color: Colors.textMuted,
-  },
-  swatchesRow: {
-    flexDirection: "row",
-    gap: 12,
-    marginTop: 10,
-  },
-  swatchRing: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    padding: 2,
-    borderWidth: 1,
-    borderColor: Colors.borderHairline,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  swatchRingActive: {
-    borderColor: Colors.primary,
-    borderWidth: 2,
-  },
-  swatchColor: {
-    width: "100%",
-    height: "100%",
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.08)",
-  },
-  sizeHeaderRow: {
+  reviewsHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    marginBottom: 14,
   },
-  sizeGuideLink: {
+  reviewsSectionTitle: {
+    fontSize: 18,
+    fontFamily: "Editorial",
+    color: Colors.primary,
+  },
+  reviewsCountBadge: {
+    fontSize: 12,
+    fontFamily: "Mono",
+    color: Colors.textMuted,
+  },
+  ratingOverviewCard: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
-  },
-  sizeGuideText: {
-    fontSize: 12,
-    fontFamily: "JakartaSemiBold",
-    color: Colors.champagneDeep,
-    textDecorationLine: "underline",
-  },
-  sizePillsGrid: {
-    flexDirection: "row",
-    gap: 8,
-    marginTop: 10,
-  },
-  sizePill: {
-    flex: 1,
-    height: 44,
-    borderRadius: Radii.md,
+    backgroundColor: "#FDFBF7",
     borderWidth: 1,
-    borderColor: Colors.borderHairline,
-    backgroundColor: Colors.surface,
+    borderColor: "rgba(197, 168, 128, 0.35)",
+    borderRadius: Radii.lg,
+    padding: 16,
+    gap: 16,
+    marginBottom: 16,
+    ...Shadows.dock,
+  },
+  ratingBigBox: {
     alignItems: "center",
     justifyContent: "center",
   },
-  sizePillActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
+  ratingBigScore: {
+    fontSize: 32,
+    fontFamily: "Editorial",
+    color: Colors.primary,
+    fontWeight: "700",
   },
-  sizePillDisabled: {
-    backgroundColor: Colors.surfaceMuted,
+  starsRow: {
+    flexDirection: "row",
+    gap: 2,
+    marginVertical: 4,
+  },
+  verifiedBuyerSub: {
+    fontSize: 9.5,
+    fontFamily: "Mono",
+    color: Colors.champagneDeep,
+    fontWeight: "700",
+  },
+  ratingDivider: {
+    width: 1,
+    height: 48,
+    backgroundColor: "rgba(197, 168, 128, 0.3)",
+  },
+  ratingHighlights: {
+    flex: 1,
+    gap: 6,
+  },
+  highlightRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  highlightText: {
+    fontSize: 11.5,
+    fontFamily: "Jakarta",
+    color: Colors.primary,
+  },
+  reviewsList: {
+    gap: 14,
+  },
+  emptyReviews: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 24,
+    paddingHorizontal: 16,
+    backgroundColor: Colors.surface,
+    borderRadius: Radii.lg,
+    borderWidth: 1,
     borderColor: Colors.borderHairline,
-    opacity: 0.5,
   },
-  sizePillText: {
+  emptyReviewsTitle: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: 14,
+    color: Colors.textPrimary,
+    marginTop: 8,
+    fontWeight: "600",
+  },
+  emptyReviewsSub: {
+    fontFamily: Fonts.sans,
+    fontSize: 12,
+    color: Colors.textMuted,
+    textAlign: "center",
+    marginTop: 4,
+  },
+  reviewCard: {
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.borderHairline,
+    borderRadius: Radii.lg,
+    padding: 14,
+    ...Shadows.dock,
+  },
+  reviewTopRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+  },
+  reviewerInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  avatarCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.champagneSubtle,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarInitial: {
+    fontSize: 13,
+    fontFamily: "JakartaSemiBold",
+    color: Colors.champagneDeep,
+  },
+  reviewerName: {
     fontSize: 13,
     fontFamily: "JakartaSemiBold",
     color: Colors.primary,
   },
-  sizePillTextActive: {
-    color: "#FFFFFF",
-  },
-  sizePillTextDisabled: {
-    color: Colors.textMuted,
-    textDecorationLine: "line-through",
-  },
-  stockRow: {
+  verifiedBadgeRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    marginTop: 10,
+    gap: 3,
+    marginTop: 1,
   },
-  stockDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+  verifiedText: {
+    fontSize: 10,
+    fontFamily: "JakartaMedium",
+    color: Colors.statusSuccess,
   },
-  stockText: {
-    fontSize: 12,
+  reviewStarsRow: {
+    flexDirection: "row",
+    gap: 1,
+  },
+  variantPurchasedText: {
+    fontSize: 11,
+    fontFamily: "Mono",
+    color: Colors.textMuted,
+    marginTop: 8,
+  },
+  reviewCommentText: {
+    fontSize: 12.5,
     fontFamily: "Jakarta",
     color: Colors.textSecondary,
+    lineHeight: 18,
+    marginTop: 6,
+  },
+  shopReplyBox: {
+    backgroundColor: "#F8FAFC",
+    borderLeftWidth: 2,
+    borderLeftColor: Colors.champagneDeep,
+    borderRadius: Radii.sm,
+    padding: 10,
+    marginTop: 10,
+    gap: 4,
+  },
+  shopReplyHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  shopReplyTitle: {
+    fontSize: 11,
+    fontFamily: "JakartaSemiBold",
+    color: Colors.champagneDeep,
+  },
+  shopReplyText: {
+    fontSize: 11.5,
+    fontFamily: "Jakarta",
+    color: Colors.textSecondary,
+    lineHeight: 16,
   },
   actionDock: {
     position: "absolute",
@@ -779,12 +1381,38 @@ const st = StyleSheet.create({
     color: "#FFFFFF",
     letterSpacing: 0.8,
   },
+  sizeGuideTabsRow: {
+    flexDirection: "row",
+    gap: 6,
+    paddingBottom: 6,
+  },
+  sizeGuideTabBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: Radii.full,
+    borderWidth: 1,
+    borderColor: Colors.borderHairline,
+    backgroundColor: Colors.surface,
+  },
+  sizeGuideTabBtnActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  sizeGuideTabBtnText: {
+    fontSize: 11.5,
+    fontFamily: "JakartaMedium",
+    color: Colors.textSecondary,
+  },
+  sizeGuideTabBtnTextActive: {
+    color: "#FFFFFF",
+    fontFamily: "JakartaSemiBold",
+  },
   sizeGuideTable: {
     borderWidth: 1,
     borderColor: Colors.borderHairline,
     borderRadius: Radii.md,
     overflow: "hidden",
-    marginVertical: 10,
+    marginVertical: 4,
   },
   sizeGuideRowHeader: {
     flexDirection: "row",
@@ -795,29 +1423,29 @@ const st = StyleSheet.create({
   },
   sizeGuideHeaderCol: {
     flex: 1,
-    fontSize: 11,
+    fontSize: 10.5,
     fontFamily: "JakartaSemiBold",
     color: Colors.textSecondary,
     textAlign: "center",
   },
   sizeGuideRow: {
     flexDirection: "row",
-    paddingVertical: 10,
+    paddingVertical: 9,
     borderBottomWidth: 1,
     borderBottomColor: Colors.borderHairline,
   },
   sizeGuideCol: {
     flex: 1,
-    fontSize: 11.5,
+    fontSize: 11,
     fontFamily: "Mono",
     color: Colors.textSecondary,
     textAlign: "center",
   },
   sizeGuideFootnote: {
-    fontSize: 11.5,
+    fontSize: 11,
     fontFamily: "Jakarta",
     color: Colors.textMuted,
     lineHeight: 16,
-    marginTop: 8,
+    marginTop: 4,
   },
 });

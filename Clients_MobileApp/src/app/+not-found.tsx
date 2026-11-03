@@ -4,7 +4,7 @@ export default function NotFound() {
   return (
     <Screen>
       <Logo />
-      <Heading>404. Trang đã lạc mất</Heading>
+      <Heading>404. Page Not Found</Heading>
       <Notice>
         Đường dẫn này không còn tồn tại. Cùng trở lại khám phá bộ sưu tập.
       </Notice>

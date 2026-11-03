@@ -448,7 +448,7 @@ export default function WelcomeIndex() {
             adjustsFontSizeToFit
             minimumFontScale={0.8}
           >
-            YoFaSo Atelier · Powered by Vision AI
+            YoFaSo Atelier · Your Fashion, Your Own Soul
           </Text>
         </Animated.View>
       </View>

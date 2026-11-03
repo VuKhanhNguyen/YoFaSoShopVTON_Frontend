@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { router, Stack, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { api } from "@/lib/api";
+import { api, publicUrl } from "@/lib/api";
 import { useResource } from "@/hooks/use-resource";
 import { useSession } from "@/lib/session";
 import type { Row } from "@/lib/models";
@@ -54,7 +54,7 @@ export default function CartScreen() {
   const { user } = useSession();
   const state = useResource<Row[]>(user ? "/cart" : null);
 
-  const [localCart, setLocalCart] = useState<LocalCartItem[]>(MOCK_CART_ITEMS);
+  const [localCart, setLocalCart] = useState<LocalCartItem[]>([]);
   const [voucherCode, setVoucherCode] = useState("VTON5");
   const [voucherApplied, setVoucherApplied] = useState(true);
   const [voucherSheetOpen, setVoucherSheetOpen] = useState(false);
@@ -68,19 +68,17 @@ export default function CartScreen() {
     }, [state.reload])
   );
 
-  // If backend returns cart rows, use them, otherwise fallback to localCart
-  const hasBackendCart = Boolean(state.data && state.data.length > 0);
-  const cartItems: LocalCartItem[] = hasBackendCart
-    ? state.data!.map((r) => ({
-        variantId: String(r.variantId),
-        name: String(r.productName || r.productId),
-        colorName: String(r.colorName || "Tiêu chuẩn"),
-        size: String(r.size || "M"),
-        unitPrice: Number(r.unitPrice || 450000),
-        quantity: Number(r.quantity || 1),
-        image: EditorialImages.shirt,
-      }))
-    : localCart;
+  // Khi người dùng đăng nhập, sử dụng trực tiếp giỏ hàng từ cơ sở dữ liệu
+  const rawCart = user ? (state.data || []) : localCart;
+  const cartItems: LocalCartItem[] = rawCart.map((r: any) => ({
+    variantId: String(r.variantId),
+    name: String(r.productName || r.name || r.productId || "Sản phẩm YoFaSo"),
+    colorName: String(r.colorName || "Tiêu chuẩn"),
+    size: String(r.size || "M"),
+    unitPrice: Number(r.unitPrice || 0),
+    quantity: Number(r.quantity || 1),
+    image: r.coverUrl ? { uri: publicUrl(r.coverUrl) } : (r.image || EditorialImages.shirt),
+  }));
 
   const subtotal = cartItems.reduce(
     (acc, item) => acc + item.unitPrice * item.quantity,
@@ -93,7 +91,7 @@ export default function CartScreen() {
   const updateQuantity = async (variantId: string, newQty: number) => {
     if (newQty < 1) {
       // Remove
-      if (hasBackendCart) {
+      if (user) {
         await api(`/cart/items/${variantId}`, "DELETE").catch(() => {});
         state.reload();
       } else {
@@ -104,7 +102,7 @@ export default function CartScreen() {
       return;
     }
 
-    if (hasBackendCart) {
+    if (user) {
       await api("/cart/items", "PUT", { variantId, quantity: newQty }).catch(() => {});
       state.reload();
     } else {

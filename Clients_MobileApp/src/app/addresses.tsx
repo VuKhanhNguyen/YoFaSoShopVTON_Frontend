@@ -397,7 +397,7 @@ const st = StyleSheet.create({
   },
   addressCardDefault: {
     borderColor: Colors.champagne,
-    backgroundColor: "rgba(251, 248, 243, 0.4)",
+    // backgroundColor: "rgba(251, 248, 243, 0.4)",
   },
   cardTopRow: {
     flexDirection: "row",
