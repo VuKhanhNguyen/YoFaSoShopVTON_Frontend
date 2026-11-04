@@ -11,12 +11,18 @@ export function SelectField({
   options,
   onChange,
   error,
+  displayValue,
+  placeholder,
+  disabled,
 }: {
   label: string;
   value: string;
   options: SelectOption[];
   onChange: (value: string) => void;
   error?: string;
+  displayValue?: string;
+  placeholder?: string;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -30,7 +36,9 @@ export function SelectField({
     [onChange]
   );
 
-  const selectedLabel = options.find((o) => o.value === value)?.label;
+  const selectedLabel =
+    options.find((o) => o.value === value)?.label ||
+    (displayValue ? displayValue : undefined);
 
   const render = useCallback(
     ({ item }: { item: SelectOption }) => {
@@ -74,17 +82,22 @@ export function SelectField({
         style={({ pressed }) => [
           st.trigger,
           !!error && st.triggerError,
-          pressed && { opacity: 0.8 },
+          disabled && st.triggerDisabled,
+          pressed && !disabled && { opacity: 0.8 },
         ]}
-        onPress={() => setOpen(true)}
+        onPress={() => {
+          if (!disabled) setOpen(true);
+        }}
+        disabled={disabled}
       >
         <Text
           style={[
             st.triggerText,
             !selectedLabel && { color: Colors.muted },
+            disabled && { color: Colors.muted },
           ]}
         >
-          {selectedLabel || `Chọn ${label.toLowerCase()}`}
+          {selectedLabel || placeholder || `Chọn ${label.toLowerCase()}`}
         </Text>
         <Ionicons name="chevron-down" size={16} color={Colors.muted} />
       </Pressable>
@@ -158,6 +171,10 @@ const st = StyleSheet.create({
   },
   triggerError: {
     borderColor: "#DC2626",
+  },
+  triggerDisabled: {
+    backgroundColor: Colors.canvas,
+    opacity: 0.6,
   },
   triggerText: {
     fontFamily: Fonts.sans,

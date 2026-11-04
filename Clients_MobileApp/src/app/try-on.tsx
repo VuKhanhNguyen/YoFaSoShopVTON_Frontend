@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
+import { File as ExpoFile } from "expo-file-system";
 import { Ionicons } from "@expo/vector-icons";
 import { api, requestKey } from "@/lib/api";
 import type { Row } from "@/lib/models";
@@ -132,11 +133,16 @@ export default function TryOnScreen() {
       if (Platform.OS === "web") {
         form.append("file", await (await fetch(photoUri)).blob(), "person.jpg");
       } else {
-        form.append("file", {
-          uri: photoUri,
-          type: "image/jpeg",
-          name: "person.jpg",
-        } as any);
+        try {
+          const file = new ExpoFile(photoUri);
+          form.append("file", file as unknown as Blob, "person.jpg");
+        } catch {
+          form.append("file", {
+            uri: photoUri,
+            type: "image/jpeg",
+            name: "person.jpg",
+          } as any);
+        }
       }
 
       // Try uploading asset to backend

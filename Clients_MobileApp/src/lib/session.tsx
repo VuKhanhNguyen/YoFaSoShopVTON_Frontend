@@ -15,6 +15,7 @@ import {
   noteActivity,
   setForeground,
   saveTokens,
+  updateSessionUser,
 } from "./api";
 import type { User } from "./models";
 const Context = createContext<{
@@ -23,8 +24,12 @@ const Context = createContext<{
   signOut: () => Promise<void>;
 }>({ user: null, setUser: () => {}, signOut: async () => {} });
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUserState] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
+  const setUser = (u: User | null) => {
+    setUserState(u);
+    if (u) updateSessionUser(u);
+  };
   useEffect(() => {
     let active = true;
     setExpiryHandler(() => {

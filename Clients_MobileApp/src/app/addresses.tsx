@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Modal,
   Pressable,
@@ -10,7 +11,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { router, Stack } from "expo-router";
+import { Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors, Fonts, Radii, Shadows, Spacing } from "@/constants/theme";
 import { api } from "@/lib/api";
@@ -18,17 +19,79 @@ import { useResource } from "@/hooks/use-resource";
 import type { Row } from "@/lib/models";
 import { RequireAccount } from "@/components/shop/RequireAccount";
 import { SelectField } from "@/components/shop/SelectField";
-import { EmptyState } from "@/components/shop/ui";
 
 const MOCK_DEFAULT_ADDRESS: Row = {
   addressId: "addr-001",
   recipientName: "Nguyễn Lê Quỳnh Hương",
   phone: "0912345678",
-  street: "Số 88 Đồng Khởi, Phường Bến Nghé",
+  street: "Số 88 Đồng Khởi",
   ward: "Phường Bến Nghé",
-  city: "Quận 1, TP. Hồ Chí Minh",
+  city: "Thành phố Hồ Chí Minh",
   defaultAddress: true,
 };
+
+type AddressMode = "new" | "legacy";
+
+interface LocationCandidate {
+  province: {
+    code: string;
+    name: string;
+    type: string;
+    fullName?: string;
+  };
+  ward: {
+    code: string;
+    name: string;
+    type: string;
+    fullName?: string;
+  };
+  street?: string;
+  fullAddress?: string;
+}
+
+interface ConversionResponse {
+  status: "EXACT" | "NEEDS_CONFIRMATION" | "UNMAPPED";
+  requiresConfirmation: boolean;
+  candidates: LocationCandidate[];
+  oldAddress?: {
+    fullAddress?: string;
+  };
+}
+
+// Chuẩn hóa tên địa danh để so khớp linh hoạt, bỏ tiền tố hành chính (thành phố, tỉnh, phường, xã,...)
+function normalizeLocationName(name: string): string {
+  if (!name) return "";
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/^(thành phố|tỉnh|quận|huyện|thị xã|thị trấn|phường|xã|tp\.|tp)\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isLocationMatch(candidate: Row | undefined, target: string): boolean {
+  if (!candidate || !target) return false;
+  const targetTrim = target.trim().toLowerCase();
+  const cName = String(candidate.name || "").trim().toLowerCase();
+  const cFull = String(
+    candidate.fullName || (candidate.type ? `${candidate.type} ${candidate.name}` : "")
+  ).trim().toLowerCase();
+  const cWithType = `${String(candidate.type || "").trim()} ${cName}`.trim().toLowerCase();
+
+  // 1. So khớp trực tiếp chuỗi (không phân biệt hoa thường)
+  if (targetTrim === cName || targetTrim === cFull || targetTrim === cWithType) {
+    return true;
+  }
+
+  // 2. So khớp sau khi lược bỏ tiền tố hành chính (VD: "thành phố Đà Nẵng" và "Đà Nẵng")
+  const targetNorm = normalizeLocationName(target);
+  const cNorm = normalizeLocationName(cName);
+  if (targetNorm && cNorm && targetNorm === cNorm) {
+    return true;
+  }
+
+  return false;
+}
 
 export default function AddressesScreen() {
   return (
@@ -40,52 +103,164 @@ export default function AddressesScreen() {
 
 function AddressesContent() {
   const state = useResource<Row[]>("/me/addresses");
-  const provinces = useResource<Row[]>("/new-provinces");
 
-  const [province, setProvince] = useState<Row>();
-  const [ward, setWard] = useState<Row>();
+  // Resource danh mục địa chính MỚI (sau sáp nhập 01/07/2025)
+  const newProvinces = useResource<Row[]>("/new-provinces");
+
+  // Resource danh mục địa chính CŨ (trước sáp nhập)
+  const legacyProvinces = useResource<Row[]>("/provinces");
+
+  // Dialog & Form states
   const [editing, setEditing] = useState<Row | null>(null);
   const [formVisible, setFormVisible] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  // Form states
+  // Chế độ chọn địa chỉ: "new" (sau sáp nhập 1/7/2025) hoặc "legacy" (cũ -> tự chuyển đổi)
+  const [mode, setMode] = useState<AddressMode>("new");
+
+  // Thông tin liên lạc
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [street, setStreet] = useState("");
   const [isDefault, setIsDefault] = useState(false);
 
-  const wards = useResource<Row[]>(
-    province ? `/new-provinces/${province.code}/wards` : null
+  // States dành cho Địa chỉ MỚI (Tỉnh -> Phường/Xã)
+  const [newProvince, setNewProvince] = useState<Row>();
+  const [newWard, setNewWard] = useState<Row>();
+  const newWards = useResource<Row[]>(
+    newProvince?.code ? `/new-provinces/${newProvince.code}/wards` : null
   );
+
+  // States dành cho Địa chỉ CŨ (Tỉnh -> Quận/Huyện -> Phường/Xã)
+  const [legacyProvince, setLegacyProvince] = useState<Row>();
+  const [legacyDistrict, setLegacyDistrict] = useState<Row>();
+  const [legacyWard, setLegacyWard] = useState<Row>();
+  const legacyDistricts = useResource<Row[]>(
+    legacyProvince?.code ? `/provinces/${legacyProvince.code}/districts` : null
+  );
+  const legacyWards = useResource<Row[]>(
+    legacyDistrict?.code ? `/districts/${legacyDistrict.code}/wards` : null
+  );
+
+  // State kết quả chuyển đổi từ cũ -> mới
+  const [converting, setConverting] = useState(false);
+  const [conversionResult, setConversionResult] = useState<ConversionResponse | null>(null);
+  const [selectedCandidate, setSelectedCandidate] = useState<LocationCandidate | null>(null);
 
   const addresses =
     state.data && state.data.length > 0 ? state.data : [MOCK_DEFAULT_ADDRESS];
 
+  // Thực hiện chuyển đổi địa chỉ cũ sang địa chỉ mới sau sáp nhập
+  const runConversion = useCallback(
+    async (provCode: string, distCode: string, wardCode?: string, currentStreet?: string) => {
+      if (!provCode || !distCode) return;
+      setConverting(true);
+      setError("");
+      try {
+        const res = await api<ConversionResponse>("/convert/address", "POST", {
+          provinceCode: provCode,
+          districtCode: distCode,
+          wardCode: wardCode || undefined,
+          street: currentStreet?.trim() || "",
+        });
+        setConversionResult(res);
+        if (res?.candidates && res.candidates.length > 0) {
+          setSelectedCandidate(res.candidates[0]);
+        } else {
+          setSelectedCandidate(null);
+        }
+      } catch (e) {
+        setConversionResult(null);
+        setSelectedCandidate(null);
+        setError("Không thể chuyển đổi địa chỉ cũ: " + (e as Error).message);
+      } finally {
+        setConverting(false);
+      }
+    },
+    []
+  );
+
+  // Trạng thái chờ đồng bộ địa chỉ khi mở Modal chỉnh sửa
+  const [pendingSyncCity, setPendingSyncCity] = useState<string | null>(null);
+  const [pendingSyncWard, setPendingSyncWard] = useState<string | null>(null);
+
+  // Mở modal Thêm mới
   const handleOpenAdd = () => {
     setEditing(null);
+    setMode("new");
     setName("");
     setPhone("");
     setStreet("");
-    setProvince(undefined);
-    setWard(undefined);
+    setNewProvince(undefined);
+    setNewWard(undefined);
+    setPendingSyncCity(null);
+    setPendingSyncWard(null);
+    setLegacyProvince(undefined);
+    setLegacyDistrict(undefined);
+    setLegacyWard(undefined);
+    setConversionResult(null);
+    setSelectedCandidate(null);
     setIsDefault(addresses.length === 0);
     setError("");
     setFormVisible(true);
   };
 
+  // Mở modal Chỉnh sửa
   const handleOpenEdit = (a: Row) => {
     setEditing(a);
+    setMode("new");
     setName(String(a.recipientName || ""));
     setPhone(String(a.phone || ""));
     setStreet(String(a.street || ""));
     setIsDefault(Boolean(a.defaultAddress));
-    setProvince(undefined);
-    setWard(undefined);
+
+    const currentCity = String(a.city || "");
+    const currentWard = String(a.ward || "");
+
+    setPendingSyncCity(currentCity);
+    setPendingSyncWard(currentWard);
+
+    // Tìm tỉnh mới nếu danh sách newProvinces đã tải
+    const foundP = newProvinces.data?.find((p) => isLocationMatch(p, currentCity));
+    setNewProvince(foundP);
+    setNewWard(undefined);
+
+    // Chuẩn bị sẵn tỉnh cũ phòng trường hợp user chuyển tab sang Địa chỉ cũ
+    const foundLegacyP = legacyProvinces.data?.find((p) => isLocationMatch(p, currentCity));
+    setLegacyProvince(foundLegacyP);
+    setLegacyDistrict(undefined);
+    setLegacyWard(undefined);
+
+    setConversionResult(null);
+    setSelectedCandidate(null);
     setError("");
     setFormVisible(true);
   };
 
+  // Tự động tìm và chọn tỉnh mới khi danh sách newProvinces đã sẵn sàng
+  useEffect(() => {
+    if (editing && pendingSyncCity && newProvinces.data && newProvinces.data.length > 0) {
+      const foundP = newProvinces.data.find((p) => isLocationMatch(p, pendingSyncCity));
+      if (foundP) {
+        setNewProvince(foundP);
+      }
+      setPendingSyncCity(null);
+    }
+  }, [editing, pendingSyncCity, newProvinces.data]);
+
+  // Tự động tìm và chọn phường/xã mới khi danh sách wards của tỉnh mới đã tải xong
+  useEffect(() => {
+    if (editing && pendingSyncWard && newWards.data && newWards.data.length > 0) {
+      const foundW = newWards.data.find((w) => isLocationMatch(w, pendingSyncWard));
+      if (foundW) {
+        setNewWard(foundW);
+        setPendingSyncWard(null);
+      }
+    }
+  }, [editing, pendingSyncWard, newWards.data]);
+
+  // Xóa địa chỉ
   const handleDelete = (a: Row) => {
     Alert.alert(
       "Xóa địa chỉ này?",
@@ -108,11 +283,47 @@ function AddressesContent() {
     );
   };
 
+  // Lưu địa chỉ (Thêm mới hoặc Cập nhật)
   const handleSave = async () => {
     if (!name.trim() || !phone.trim() || !street.trim()) {
-      setError("Vui lòng điền đầy đủ họ tên, số điện thoại và địa chỉ.");
+      setError("Vui lòng điền đầy đủ họ tên người nhận, số điện thoại và địa chỉ chi tiết.");
       return;
     }
+
+    let finalCity = "";
+    let finalWard = "";
+    let finalProvinceCode: string | undefined = undefined;
+    let finalWardCode: string | undefined = undefined;
+
+    if (mode === "new") {
+      if (!newProvince) {
+        setError("Vui lòng chọn Tỉnh / Thành phố mới (sau sáp nhập).");
+        return;
+      }
+      if (!newWard) {
+        setError("Vui lòng chọn Phường / Xã mới (sau sáp nhập).");
+        return;
+      }
+      finalCity = String(newProvince.name);
+      finalWard = String(newWard.name);
+      finalProvinceCode = String(newProvince.code);
+      finalWardCode = String(newWard.code);
+    } else {
+      // Chế độ địa chỉ cũ
+      if (!legacyProvince || !legacyDistrict) {
+        setError("Vui lòng chọn Tỉnh/Thành và Quận/Huyện cũ.");
+        return;
+      }
+      if (!selectedCandidate) {
+        setError("Chưa hoàn tất chuyển đổi địa chỉ sang đơn vị hành chính sau sáp nhập.");
+        return;
+      }
+      finalCity = String(selectedCandidate.province.name);
+      finalWard = String(selectedCandidate.ward.name);
+      finalProvinceCode = String(selectedCandidate.province.code);
+      finalWardCode = String(selectedCandidate.ward.code);
+    }
+
     setBusy(true);
     setError("");
     try {
@@ -121,16 +332,16 @@ function AddressesContent() {
         phone: phone.trim(),
         street: street.trim(),
         defaultAddress: isDefault,
-        city: province ? province.name : editing?.city || "TP. Hồ Chí Minh",
-        ward: ward ? ward.name : editing?.ward || "Phường Bến Nghé",
-        provinceCode: province?.code || editing?.provinceCode,
-        wardCode: ward?.code || editing?.wardCode,
+        city: finalCity,
+        ward: finalWard,
+        provinceCode: finalProvinceCode,
+        wardCode: finalWardCode,
       };
 
       if (editing && !String(editing.addressId).startsWith("addr-")) {
         await api(`/me/addresses/${editing.addressId}`, "PUT", payload);
       } else {
-        await api("/me/addresses", "POST", payload).catch(() => {});
+        await api("/me/addresses", "POST", payload);
       }
       setFormVisible(false);
       state.reload();
@@ -164,7 +375,7 @@ function AddressesContent() {
         <View style={st.introBox}>
           <Text style={st.introTitle}>Địa chỉ giao hàng</Text>
           <Text style={st.introSub}>
-            Lưu các địa chỉ thường dùng để nhận trang phục thử đồ và đơn hàng nhanh chóng nhất.
+            Hỗ trợ chuẩn đơn vị hành chính mới sau sáp nhập (01/07/2025) và tự động chuyển đổi từ địa chỉ cũ.
           </Text>
         </View>
 
@@ -265,6 +476,7 @@ function AddressesContent() {
               </View>
             )}
 
+            {/* Recipient Details */}
             <View style={st.inputGroup}>
               <Text style={st.inputLabel}>Họ và tên người nhận</Text>
               <TextInput
@@ -288,41 +500,264 @@ function AddressesContent() {
               />
             </View>
 
-            <SelectField
-              label="Tỉnh / Thành phố"
-              value={String(province?.code || "")}
-              options={(provinces.data || [
-                { code: "79", name: "TP. Hồ Chí Minh" },
-                { code: "01", name: "Hà Nội" },
-                { code: "48", name: "Đà Nẵng" },
-              ]).map((p) => ({
-                value: String(p.code),
-                label: String(p.name),
-              }))}
-              onChange={(code) => {
-                setProvince(
-                  (provinces.data || [
-                    { code: "79", name: "TP. Hồ Chí Minh" },
-                    { code: "01", name: "Hà Nội" },
-                    { code: "48", name: "Đà Nẵng" },
-                  ]).find((p) => String(p.code) === code)
-                );
-                setWard(undefined);
-              }}
-            />
+            {/* Dual Mode Switch */}
+            <View style={st.modeSection}>
+              <Text style={st.inputLabel}>Phương thức chọn khu vực</Text>
+              <View style={st.modeTabsContainer}>
+                <Pressable
+                  onPress={() => setMode("new")}
+                  style={[st.modeTab, mode === "new" && st.modeTabActive]}
+                >
+                  <Ionicons
+                    name="sparkles"
+                    size={13}
+                    color={mode === "new" ? Colors.primary : Colors.muted}
+                  />
+                  <Text style={[st.modeTabText, mode === "new" && st.modeTabTextActive]}>
+                    Địa chỉ mới
+                  </Text>
+                </Pressable>
 
+                <Pressable
+                  onPress={() => setMode("legacy")}
+                  style={[st.modeTab, mode === "legacy" && st.modeTabActive]}
+                >
+                  <Ionicons
+                    name="time-outline"
+                    size={13}
+                    color={mode === "legacy" ? Colors.primary : Colors.muted}
+                  />
+                  <Text style={[st.modeTabText, mode === "legacy" && st.modeTabTextActive]}>
+                    Địa chỉ cũ
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+
+            {/* MODE 1: ĐỊA CHỈ MỚI (TỈNH -> PHƯỜNG/XÃ TRỰC THUỘC) */}
+            {mode === "new" ? (
+              <View style={st.sectionBlock}>
+                <View style={st.guideBanner}>
+                  <Ionicons name="information-circle-outline" size={15} color={Colors.champagneDeep} />
+                  <Text style={[st.guideBannerText, { textAlign: "justify" }]}>
+                    Theo mô hình hành chính mới, Tỉnh/Thành phố trực tiếp quản lý Phường/Xã (không còn Quận/Huyện).
+                  </Text>
+                </View>
+
+                <SelectField
+                  label="Tỉnh / Thành phố mới"
+                  value={String(newProvince?.code || "")}
+                  displayValue={
+                    newProvince
+                      ? `${newProvince.type ? newProvince.type + " " : ""}${newProvince.name}`
+                      : editing ? String(editing.city || "") : undefined
+                  }
+                  options={(newProvinces.data || []).map((p) => ({
+                    value: String(p.code),
+                    label: `${p.type ? p.type + " " : ""}${p.name}`,
+                  }))}
+                  onChange={(code) => {
+                    const selected = newProvinces.data?.find((p) => String(p.code) === code);
+                    setNewProvince(selected);
+                    setNewWard(undefined);
+                    setPendingSyncCity(null);
+                    setPendingSyncWard(null);
+                  }}
+                />
+
+                <SelectField
+                  label="Phường / Xã mới"
+                  value={String(newWard?.code || "")}
+                  displayValue={
+                    newWard
+                      ? `${newWard.type ? newWard.type + " " : ""}${newWard.name}`
+                      : editing && (newProvince || !pendingSyncCity)
+                      ? String(editing.ward || "")
+                      : undefined
+                  }
+                  options={(newWards.data || []).map((w) => ({
+                    value: String(w.code),
+                    label: `${w.type ? w.type + " " : ""}${w.name}`,
+                  }))}
+                  onChange={(code) => {
+                    const selected = newWards.data?.find((w) => String(w.code) === code);
+                    setNewWard(selected);
+                    setPendingSyncWard(null);
+                  }}
+                  error={!newProvince ? "Vui lòng chọn Tỉnh / Thành phố mới trước" : undefined}
+                  disabled={!newProvince}
+                />
+              </View>
+            ) : (
+              /* MODE 2: ĐỊA CHỈ CŨ (TỈNH -> QUẬN/HUYỆN -> PHƯỜNG/XÃ) -> TỰ ĐỘNG CHUYỂN ĐỔI */
+              <View style={st.sectionBlock}>
+                <View style={st.guideBanner}>
+                  <Ionicons name="sync-outline" size={15} color={Colors.champagneDeep} />
+                  <Text style={[st.guideBannerText, { textAlign: "justify" }]}>
+                    Chọn địa chỉ cũ quen thuộc, hệ thống sẽ tự động quy đổi sang địa chỉ mới sau sáp nhập để lưu vào hệ thống.
+                  </Text>
+                </View>
+
+                <SelectField
+                  label="Tỉnh / Thành phố cũ (63 tỉnh thành)"
+                  value={String(legacyProvince?.code || "")}
+                  displayValue={
+                    legacyProvince
+                      ? `${legacyProvince.type ? legacyProvince.type + " " : ""}${legacyProvince.name}`
+                      : undefined
+                  }
+                  options={(legacyProvinces.data || []).map((p) => ({
+                    value: String(p.code),
+                    label: `${p.type ? p.type + " " : ""}${p.name}`,
+                  }))}
+                  onChange={(code) => {
+                    const selected = legacyProvinces.data?.find((p) => String(p.code) === code);
+                    setLegacyProvince(selected);
+                    setLegacyDistrict(undefined);
+                    setLegacyWard(undefined);
+                    setConversionResult(null);
+                    setSelectedCandidate(null);
+                  }}
+                />
+
+                <SelectField
+                  label="Quận / Huyện cũ"
+                  value={String(legacyDistrict?.code || "")}
+                  displayValue={
+                    legacyDistrict
+                      ? `${legacyDistrict.type ? legacyDistrict.type + " " : ""}${legacyDistrict.name}`
+                      : undefined
+                  }
+                  options={(legacyDistricts.data || []).map((d) => ({
+                    value: String(d.code),
+                    label: `${d.type ? d.type + " " : ""}${d.name}`,
+                  }))}
+                  onChange={(code) => {
+                    const selected = legacyDistricts.data?.find((d) => String(d.code) === code);
+                    setLegacyDistrict(selected);
+                    setLegacyWard(undefined);
+                    setConversionResult(null);
+                    setSelectedCandidate(null);
+                  }}
+                  error={!legacyProvince ? "Vui lòng chọn Tỉnh/Thành cũ trước" : undefined}
+                  disabled={!legacyProvince}
+                />
+
+                <SelectField
+                  label="Phường / Xã cũ"
+                  value={String(legacyWard?.code || "")}
+                  displayValue={
+                    legacyWard
+                      ? `${legacyWard.type ? legacyWard.type + " " : ""}${legacyWard.name}`
+                      : undefined
+                  }
+                  options={(legacyWards.data || []).map((w) => ({
+                    value: String(w.code),
+                    label: `${w.type ? w.type + " " : ""}${w.name}`,
+                  }))}
+                  onChange={(code) => {
+                    const selected = legacyWards.data?.find((w) => String(w.code) === code);
+                    setLegacyWard(selected);
+                    if (legacyProvince && legacyDistrict) {
+                      void runConversion(
+                        String(legacyProvince.code),
+                        String(legacyDistrict.code),
+                        code,
+                        street
+                      );
+                    }
+                  }}
+                  error={!legacyDistrict ? "Vui lòng chọn Quận/Huyện cũ trước" : undefined}
+                />
+
+                {/* Conversion Status & Candidate Card */}
+                {converting && (
+                  <View style={st.convertingCard}>
+                    <ActivityIndicator size="small" color={Colors.champagneDeep} />
+                    <Text style={st.convertingText}>Đang đối soát lịch sử sáp nhập 01/07/2025...</Text>
+                  </View>
+                )}
+
+                {!converting && conversionResult && (
+                  <View style={st.conversionCard}>
+                    <View style={st.conversionHeader}>
+                      <Ionicons
+                        name={conversionResult.status === "EXACT" ? "checkmark-circle" : "alert-circle"}
+                        size={18}
+                        color={conversionResult.status === "EXACT" ? Colors.statusSuccess : Colors.statusWarning}
+                      />
+                      <Text style={st.conversionTitle}>
+                        {conversionResult.status === "EXACT"
+                          ? "Quy đổi tự động chính xác"
+                          : "Cần bạn xác nhận khu vực sáp nhập"}
+                      </Text>
+                    </View>
+
+                    {conversionResult.candidates && conversionResult.candidates.length > 0 ? (
+                      <View style={{ gap: 8 }}>
+                        <Text style={st.conversionNotice}>
+                          Địa chỉ lưu vào database sau chuyển đổi:
+                        </Text>
+                        {conversionResult.candidates.map((cand, idx) => {
+                          const isPicked = selectedCandidate?.ward.code === cand.ward.code;
+                          return (
+                            <Pressable
+                              key={`${cand.ward.code}-${idx}`}
+                              onPress={() => setSelectedCandidate(cand)}
+                              style={[st.candidateItem, isPicked && st.candidateItemActive]}
+                            >
+                              <Ionicons
+                                name={isPicked ? "radio-button-on" : "radio-button-off"}
+                                size={16}
+                                color={isPicked ? Colors.champagneDeep : Colors.muted}
+                              />
+                              <View style={{ flex: 1 }}>
+                                <Text style={[st.candidateTitle, isPicked && st.candidateTitleActive]}>
+                                  {cand.ward.type} {cand.ward.name}, {cand.province.type} {cand.province.name}
+                                </Text>
+                                <Text style={st.candidateSub}>
+                                  Mã phường: {cand.ward.code} · Mã tỉnh: {cand.province.code}
+                                </Text>
+                              </View>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    ) : (
+                      <Text style={st.conversionErrorText}>
+                        Không tìm thấy quy hoạch sáp nhập tự động. Vui lòng chuyển sang tab "Địa chỉ mới" để chọn trực tiếp.
+                      </Text>
+                    )}
+                  </View>
+                )}
+              </View>
+            )}
+
+            {/* Street input */}
             <View style={st.inputGroup}>
               <Text style={st.inputLabel}>Địa chỉ chi tiết (Số nhà, tên đường, tòa nhà)</Text>
               <TextInput
-                style={[st.textInput, { height: 80, textAlignVertical: "top" }]}
+                style={[st.textInput, { height: 75, textAlignVertical: "top" }]}
                 value={street}
-                onChangeText={setStreet}
-                placeholder="Ví dụ: 123 Lê Lợi, Phường Bến Nghé"
+                onChangeText={(val) => {
+                  setStreet(val);
+                  // Nếu đang ở tab legacy và đã có kết quả chuyển đổi, cập nhật lại
+                  if (mode === "legacy" && legacyProvince && legacyDistrict && legacyWard) {
+                    void runConversion(
+                      String(legacyProvince.code),
+                      String(legacyDistrict.code),
+                      String(legacyWard.code),
+                      val
+                    );
+                  }
+                }}
+                placeholder="Ví dụ: Số 88 Đồng Khởi"
                 placeholderTextColor={Colors.muted}
                 multiline
               />
             </View>
 
+            {/* Default Address Switch */}
             <View style={st.switchRow}>
               <View style={{ flex: 1 }}>
                 <Text style={st.switchLabel}>Đặt làm địa chỉ mặc định</Text>
@@ -338,6 +773,7 @@ function AddressesContent() {
               />
             </View>
 
+            {/* Save CTA */}
             <Pressable
               style={({ pressed }) => [
                 st.saveBtn,
@@ -397,7 +833,6 @@ const st = StyleSheet.create({
   },
   addressCardDefault: {
     borderColor: Colors.champagne,
-    // backgroundColor: "rgba(251, 248, 243, 0.4)",
   },
   cardTopRow: {
     flexDirection: "row",
@@ -545,6 +980,130 @@ const st = StyleSheet.create({
     borderRadius: Radii.sm,
     paddingHorizontal: 14,
     paddingVertical: 10,
+  },
+  modeSection: {
+    gap: 8,
+  },
+  modeTabsContainer: {
+    flexDirection: "row",
+    backgroundColor: Colors.surfaceMuted,
+    borderRadius: Radii.md,
+    padding: 4,
+    gap: 4,
+  },
+  modeTab: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: Radii.sm,
+  },
+  modeTabActive: {
+    backgroundColor: Colors.surface,
+    ...Shadows.sm,
+  },
+  modeTabText: {
+    fontFamily: Fonts.sans,
+    fontSize: 12,
+    color: Colors.muted,
+  },
+  modeTabTextActive: {
+    fontFamily: Fonts.sansSemiBold,
+    color: Colors.primary,
+  },
+  sectionBlock: {
+    gap: 12,
+  },
+  guideBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: Colors.champagneSubtle,
+    borderWidth: 1,
+    borderColor: "rgba(197, 168, 128, 0.4)",
+    padding: 10,
+    borderRadius: Radii.sm,
+  },
+  guideBannerText: {
+    flex: 1,
+    fontFamily: Fonts.sans,
+    fontSize: 12,
+    color: Colors.champagneDeep,
+    lineHeight: 16,
+  },
+  convertingCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    padding: 14,
+    backgroundColor: Colors.surface,
+    borderRadius: Radii.sm,
+    borderWidth: 1,
+    borderColor: Colors.hairline,
+  },
+  convertingText: {
+    fontFamily: Fonts.sans,
+    fontSize: 13,
+    color: Colors.champagneDeep,
+  },
+  conversionCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radii.md,
+    borderWidth: 1,
+    borderColor: Colors.champagne,
+    padding: Spacing.md,
+    gap: 10,
+  },
+  conversionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  conversionTitle: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: 13,
+    color: Colors.primary,
+  },
+  conversionNotice: {
+    fontFamily: Fonts.sans,
+    fontSize: 12,
+    color: Colors.muted,
+  },
+  candidateItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    padding: 10,
+    borderRadius: Radii.sm,
+    backgroundColor: Colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: "transparent",
+  },
+  candidateItemActive: {
+    backgroundColor: Colors.champagneSubtle,
+    borderColor: Colors.champagne,
+  },
+  candidateTitle: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: 13,
+    color: Colors.primary,
+  },
+  candidateTitleActive: {
+    color: Colors.champagneDeep,
+  },
+  candidateSub: {
+    fontFamily: Fonts.mono,
+    fontSize: 11,
+    color: Colors.muted,
+    marginTop: 2,
+  },
+  conversionErrorText: {
+    fontFamily: Fonts.sans,
+    fontSize: 12,
+    color: "#DC2626",
   },
   switchRow: {
     flexDirection: "row",

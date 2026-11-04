@@ -49,7 +49,7 @@ export function Logo({
   size = "md",
   style,
 }: {
-  size?: "sm" | "md" | "lg" | "xl" | "2xl" | "3xl";
+  size?: "sm" | "md" | "lg" | "xl" | "2xl" | "3xl" | "4xl";
   style?: ViewStyle | TextStyle | any;
 }) {
   const dims = {
@@ -59,6 +59,7 @@ export function Logo({
     xl: { width: 250, height: 100 },
     "2xl": { width: 300, height: 120 },
     "3xl": { width: 450, height: 150 },
+    "4xl": { width: 750, height: 300 },
   }[size];
 
   return (

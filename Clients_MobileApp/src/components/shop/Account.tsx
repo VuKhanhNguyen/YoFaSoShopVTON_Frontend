@@ -12,12 +12,14 @@ import {
 } from "react-native";
 import { router } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
+import { File as ExpoFile } from "expo-file-system";
 import { Ionicons } from "@expo/vector-icons";
 import { useSession } from "@/lib/session";
 import { useResource } from "@/hooks/use-resource";
 import { api, publicUrl } from "@/lib/api";
 import type { Row, User } from "@/lib/models";
 import { Colors, Radii, Shadows } from "@/constants/theme";
+import { formatMembershipBadge, formatMembershipRank } from "@/lib/catalog-data";
 import { ShopHeader } from "@/components/shop/ShopHeader";
 
 export const Account = memo(function Account() {
@@ -62,7 +64,8 @@ export const Account = memo(function Account() {
           quality: 0.85,
         });
         if (!result.canceled && result.assets[0]) {
-          await uploadAvatarFile(result.assets[0].uri);
+          const asset = result.assets[0];
+          await uploadAvatarFile(asset.uri, asset.mimeType);
         }
       } catch (e: any) {
         setToast(e.message || "Không thể chọn ảnh.");
@@ -82,7 +85,8 @@ export const Account = memo(function Account() {
           quality: 0.85,
         });
         if (!result.canceled && result.assets[0]) {
-          await uploadAvatarFile(result.assets[0].uri);
+          const asset = result.assets[0];
+          await uploadAvatarFile(asset.uri, asset.mimeType);
         }
       } catch (e: any) {
         setToast(e.message || "Không thể chụp ảnh.");
@@ -105,21 +109,31 @@ export const Account = memo(function Account() {
     }
   };
 
-  const uploadAvatarFile = async (uri: string) => {
+  const uploadAvatarFile = async (uri: string, mime?: string | null) => {
     setUploadingAvatar(true);
-    setToast("Đang tải ảnh đại diện lên R2...");
+    setToast("Đang tải ảnh đại diện lên Cloudflare R2...");
     try {
       const form = new FormData();
+      const ext = (uri.split(".").pop() || "").toLowerCase();
+      const isPng = ext === "png" || mime?.includes("png");
+      const mimeType = isPng ? "image/png" : "image/jpeg";
+      const fileName = isPng ? "avatar.png" : "avatar.jpg";
+
       if (Platform.OS === "web") {
         const res = await fetch(uri);
         const blob = await res.blob();
-        form.append("file", blob, "avatar.png");
+        form.append("file", blob, fileName);
       } else {
-        form.append("file", {
-          uri,
-          type: "image/jpeg",
-          name: "avatar.jpg",
-        } as any);
+        try {
+          const file = new ExpoFile(uri);
+          form.append("file", file as unknown as Blob, fileName);
+        } catch {
+          form.append("file", {
+            uri,
+            type: mimeType,
+            name: fileName,
+          } as any);
+        }
       }
 
       const updatedUser = await api<User>("/me/avatar", "POST", form);
@@ -134,6 +148,7 @@ export const Account = memo(function Account() {
         setToast("Cập nhật ảnh đại diện thành công!");
       }
     } catch (e: any) {
+      console.warn("[Upload avatar error]", e);
       setToast(e.message || "Tải ảnh đại diện thất bại.");
     } finally {
       setUploadingAvatar(false);
@@ -162,18 +177,21 @@ export const Account = memo(function Account() {
                 accessibilityLabel="Đổi ảnh đại diện"
                 style={st.avatarWrapper}
               >
-                {user.avatarUrl && !avatarError ? (
-                  <Image
-                    key={user.avatarUrl}
-                    source={{ uri: publicUrl(user.avatarUrl) }}
-                    style={st.avatarImage}
-                    onError={() => setAvatarError(true)}
-                  />
-                ) : (
-                  <View style={st.avatarCircle}>
-                    <Text style={st.avatarInitials}>{getInitials(user.fullName)}</Text>
-                  </View>
-                )}
+                {(() => {
+                  const avatarUri = user.avatarDirectUrl || (user.avatarUrl ? publicUrl(user.avatarUrl) : null);
+                  return avatarUri && !avatarError ? (
+                    <Image
+                      key={avatarUri}
+                      source={{ uri: avatarUri }}
+                      style={st.avatarImage}
+                      onError={() => setAvatarError(true)}
+                    />
+                  ) : (
+                    <View style={st.avatarCircle}>
+                      <Text style={st.avatarInitials}>{getInitials(user.fullName)}</Text>
+                    </View>
+                  );
+                })()}
 
                 {uploadingAvatar ? (
                   <View style={st.avatarLoadingOverlay}>
@@ -204,12 +222,12 @@ export const Account = memo(function Account() {
                 <View style={st.vipTierBadge}>
                   <Ionicons name="diamond-outline" size={11} color={Colors.champagne} />
                   <Text style={st.vipTierText}>
-                    {user.membership ? `${user.membership.toUpperCase()} MEMBER` : "VIP MEMBER"}
+                    {formatMembershipBadge(user.membership, user.membershipLabel)}
                   </Text>
                 </View>
               </View>
               <Text style={st.vipTierSub}>
-                Hạng {user.membership || "Thành viên"} · Thẻ Hội Viên Thân Thiết
+                {formatMembershipRank(user.membership, user.membershipLabel)} · Thẻ Hội Viên Thân Thiết
               </Text>
 
               <View style={st.pointsBlock}>

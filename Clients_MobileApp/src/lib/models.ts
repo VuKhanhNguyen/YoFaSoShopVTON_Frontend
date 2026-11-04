@@ -10,7 +10,9 @@ export type User = {
   roles: string[];
   loyaltyPoints: number;
   membership: string;
+  membershipLabel?: string;
   avatarUrl?: string | null;
+  avatarDirectUrl?: string | null;
   avatarKey?: string | null;
 };
 

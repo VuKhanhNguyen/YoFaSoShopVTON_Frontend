@@ -440,7 +440,7 @@ export default function WelcomeIndex() {
             },
           ]}
         >
-          <Logo size="3xl" />
+          <Logo size="4xl" />
           <View style={st.splashDivider} />
           <Text
             style={st.splashTagline}
@@ -448,7 +448,8 @@ export default function WelcomeIndex() {
             adjustsFontSizeToFit
             minimumFontScale={0.8}
           >
-            YoFaSo Atelier · Your Fashion, Your Own Soul
+            {/* YoFaSo Atelier ·  */}
+            Your Fashion, Your Own Soul
           </Text>
         </Animated.View>
       </View>
@@ -460,7 +461,8 @@ export default function WelcomeIndex() {
   return (
     <View style={[st.container, stage === "onboarding" && st.containerOnboarding]}>
       <StatusBar
-        barStyle={stage === "auth" ? "dark-content" : "light-content"}
+        // barStyle={stage === "auth" ? "dark-content" : "light-content"}
+          barStyle="dark-content"
         translucent
         backgroundColor="transparent"
       />

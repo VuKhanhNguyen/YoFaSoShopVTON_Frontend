@@ -60,6 +60,11 @@ export async function saveTokens(tokens: Tokens | null) {
   }
   // Expo Web chỉ giữ token trong bộ nhớ; không ghi localStorage/AsyncStorage.
 }
+export function updateSessionUser(user: User) {
+  if (current) {
+    current = { ...current, user };
+  }
+}
 async function renew() {
   if (!current) return;
   if (refreshing) return refreshing;
@@ -145,10 +150,16 @@ export async function api<T>(
   key?: string,
   retry = true,
 ): Promise<T> {
+  const isFormData =
+    body instanceof FormData ||
+    (body !== null &&
+      typeof body === "object" &&
+      ("_parts" in (body as any) || (body as any).constructor?.name === "FormData"));
+
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(),
-    body instanceof FormData ? 60000 : 20000,
+    isFormData ? 60000 : 20000,
   );
   let response: Response;
   try {
@@ -156,7 +167,7 @@ export async function api<T>(
       method,
       signal: controller.signal,
       headers: {
-        ...(body instanceof FormData
+        ...(isFormData
           ? {}
           : { "Content-Type": "application/json" }),
         ...(current ? { Authorization: `Bearer ${current.accessToken}` } : {}),
@@ -165,13 +176,25 @@ export async function api<T>(
       body:
         body === undefined
           ? undefined
-          : body instanceof FormData
-            ? body
+          : isFormData
+            ? (body as any)
             : JSON.stringify(body),
     });
-  } catch {
+  } catch (err: any) {
+    if (err?.name === "AbortError" || controller.signal.aborted) {
+      throw new ApiError(
+        "Quá thời gian chờ phản hồi từ máy chủ (timeout). Vui lòng thử lại.",
+        408,
+      );
+    }
+    if (err instanceof ApiError) {
+      throw err;
+    }
+    console.warn(`[API Network Error] ${method} ${path}:`, err);
     throw new ApiError(
-      "Không kết nối được máy chủ. Kiểm tra mạng rồi thử lại.",
+      err?.message && err.message !== "Network request failed"
+        ? `Lỗi kết nối máy chủ: ${err.message}`
+        : "Không kết nối được máy chủ. Kiểm tra mạng rồi thử lại.",
       0,
     );
   } finally {

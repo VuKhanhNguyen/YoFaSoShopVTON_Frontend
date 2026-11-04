@@ -40,6 +40,56 @@ export const formatVND = (n: number | string | undefined | null): string => {
     .replace("₫", "đ");
 };
 
+/**
+ * Danh từ tiếng Việt chuẩn cho các hạng thành viên YoFaSo Atelier
+ */
+export const MEMBERSHIP_TIER_NAMES: Record<string, string> = {
+  DONG: "Đồng",
+  BAC: "Bạc",
+  VANG: "Vàng",
+  KIM_CUONG: "Kim cương",
+  VIP: "VIP",
+};
+
+/**
+ * Trả về tên hiển thị của hạng thẻ (vd: "Vàng", "Kim cương", "VIP", "Đồng", "Bạc")
+ */
+export function getMembershipTierName(
+  membership?: string | null,
+  membershipLabel?: string | null
+): string {
+  if (membershipLabel && membershipLabel.trim()) {
+    return membershipLabel.trim();
+  }
+  if (!membership || !membership.trim()) {
+    return "VIP";
+  }
+  const code = membership.trim().toUpperCase();
+  return MEMBERSHIP_TIER_NAMES[code] || membership.trim();
+}
+
+/**
+ * Định dạng nhãn hiển thị cho Thẻ Hội Viên (vd: "Thành viên Vàng", "Thành viên VIP")
+ */
+export function formatMembershipBadge(
+  membership?: string | null,
+  membershipLabel?: string | null
+): string {
+  const tierName = getMembershipTierName(membership, membershipLabel);
+  return `Thành viên ${tierName}`;
+}
+
+/**
+ * Định dạng hiển thị hạng đầy đủ trên UI (vd: "Hạng Vàng", "Hạng Kim cương", "Hạng VIP")
+ */
+export function formatMembershipRank(
+  membership?: string | null,
+  membershipLabel?: string | null
+): string {
+  const tierName = getMembershipTierName(membership, membershipLabel);
+  return `Hạng ${tierName}`;
+};
+
 // Local fallback editorial images
 export const EditorialImages = {
   hero: require("../../assets/editorial/home-hero.jpg"),

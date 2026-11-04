@@ -1,5 +1,6 @@
 import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
+import { StatusBar } from "expo-status-bar";
 import { SessionProvider } from "@/lib/session";
 import { colors } from "@/components/shop/ui";
 export default function RootLayout() {
@@ -12,6 +13,7 @@ export default function RootLayout() {
   if (!loaded && !fontError) return null;
   return (
     <SessionProvider>
+      <StatusBar style="dark" />
       <Stack
         screenOptions={{
           headerTintColor: colors.primary,

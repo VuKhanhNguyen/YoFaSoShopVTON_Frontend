@@ -13,11 +13,13 @@ import {
 } from "react-native";
 import { router, Stack } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
+import { File as ExpoFile } from "expo-file-system";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors, Fonts, Radii, Shadows, Spacing } from "@/constants/theme";
 import { api, publicUrl } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import type { User } from "@/lib/models";
+import { formatMembershipBadge } from "@/lib/catalog-data";
 import { RequireAccount } from "@/components/shop/RequireAccount";
 import { PasswordMeter } from "@/components/shop/ui";
 
@@ -77,7 +79,8 @@ function SettingsContent() {
           quality: 0.85,
         });
         if (!result.canceled && result.assets[0]) {
-          await uploadAvatarFile(result.assets[0].uri);
+          const asset = result.assets[0];
+          await uploadAvatarFile(asset.uri, asset.mimeType);
         }
       } catch (e: any) {
         setProfileMessage(e.message || "Không thể chọn ảnh.");
@@ -97,7 +100,8 @@ function SettingsContent() {
           quality: 0.85,
         });
         if (!result.canceled && result.assets[0]) {
-          await uploadAvatarFile(result.assets[0].uri);
+          const asset = result.assets[0];
+          await uploadAvatarFile(asset.uri, asset.mimeType);
         }
       } catch (e: any) {
         setProfileMessage(e.message || "Không thể chụp ảnh.");
@@ -120,21 +124,31 @@ function SettingsContent() {
     }
   };
 
-  const uploadAvatarFile = async (uri: string) => {
+  const uploadAvatarFile = async (uri: string, mime?: string | null) => {
     setUploadingAvatar(true);
     setProfileMessage("Đang tải ảnh đại diện lên Cloudflare R2...");
     try {
       const form = new FormData();
+      const ext = (uri.split(".").pop() || "").toLowerCase();
+      const isPng = ext === "png" || mime?.includes("png");
+      const mimeType = isPng ? "image/png" : "image/jpeg";
+      const fileName = isPng ? "avatar.png" : "avatar.jpg";
+
       if (Platform.OS === "web") {
         const res = await fetch(uri);
         const blob = await res.blob();
-        form.append("file", blob, "avatar.png");
+        form.append("file", blob, fileName);
       } else {
-        form.append("file", {
-          uri,
-          type: "image/jpeg",
-          name: "avatar.jpg",
-        } as any);
+        try {
+          const file = new ExpoFile(uri);
+          form.append("file", file as unknown as Blob, fileName);
+        } catch {
+          form.append("file", {
+            uri,
+            type: mimeType,
+            name: fileName,
+          } as any);
+        }
       }
 
       const updatedUser = await api<User>("/me/avatar", "POST", form);
@@ -149,6 +163,7 @@ function SettingsContent() {
         setProfileMessage("Cập nhật ảnh đại diện thành công!");
       }
     } catch (e: any) {
+      console.warn("[Upload avatar error]", e);
       setProfileMessage(e instanceof Error ? e.message : "Tải ảnh đại diện thất bại.");
     } finally {
       setUploadingAvatar(false);
@@ -252,18 +267,21 @@ function SettingsContent() {
         {/* User Avatar & Tier Header Card */}
         <View style={st.userHeaderCard}>
           <Pressable onPress={handlePickAvatar} style={st.avatarRing}>
-            {user?.avatarUrl && !avatarError ? (
-              <Image
-                key={user.avatarUrl}
-                source={{ uri: publicUrl(user.avatarUrl) }}
-                style={st.avatarImage}
-                onError={() => setAvatarError(true)}
-              />
-            ) : (
-              <View style={st.avatarInner}>
-                <Text style={st.avatarText}>{getInitials(user?.fullName || fullName)}</Text>
-              </View>
-            )}
+            {(() => {
+              const avatarUri = user?.avatarDirectUrl || (user?.avatarUrl ? publicUrl(user.avatarUrl) : null);
+              return avatarUri && !avatarError ? (
+                <Image
+                  key={avatarUri}
+                  source={{ uri: avatarUri }}
+                  style={st.avatarImage}
+                  onError={() => setAvatarError(true)}
+                />
+              ) : (
+                <View style={st.avatarInner}>
+                  <Text style={st.avatarText}>{getInitials(user?.fullName || fullName)}</Text>
+                </View>
+              );
+            })()}
 
             {uploadingAvatar ? (
               <View style={st.avatarLoadingOverlay}>
@@ -281,14 +299,10 @@ function SettingsContent() {
             <View style={st.tierBadge}>
               <Ionicons name="sparkles" size={11} color={Colors.champagneDeep} />
               <Text style={st.tierBadgeText}>
-                {user?.membership ? `${user.membership.toUpperCase()} MEMBER` : "VIP MEMBER"}
+                {formatMembershipBadge(user?.membership, user?.membershipLabel)}
               </Text>
             </View>
             <Text style={st.userSubText}>{user?.phone || phone || "Chưa cập nhật SĐT"}</Text>
-            <Pressable onPress={handlePickAvatar} style={st.changeAvatarTextBtn}>
-              <Ionicons name="camera-outline" size={13} color={Colors.champagneDeep} />
-              <Text style={st.changeAvatarText}>Đổi ảnh đại diện (R2)</Text>
-            </Pressable>
           </View>
         </View>
 
@@ -540,17 +554,6 @@ const st = StyleSheet.create({
     fontFamily: "Editorial",
     fontSize: 20,
     color: Colors.canvas,
-  },
-  changeAvatarTextBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    marginTop: 5,
-  },
-  changeAvatarText: {
-    fontSize: 11,
-    fontFamily: "JakartaSemiBold",
-    color: Colors.champagneDeep,
   },
   userHeaderTextWrap: {
     flex: 1,
