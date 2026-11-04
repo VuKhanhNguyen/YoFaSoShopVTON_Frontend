@@ -297,3 +297,226 @@ export const vtonHint = (loai: LoaiDanhMuc): string => {
       return "Nhóm Đầm Liền VTON: Ảnh toàn thân đứng thẳng tự nhiên, khoảng cách chụp cách ống kính 1.8m - 2.5m.";
   }
 };
+
+export interface Voucher {
+  maKhuyenMai: string;
+  maPhieuGiamGia: string;
+  tenChuongTrinh: string;
+  loaiGiamGia: "PHAN_TRAM" | "TIEN_MAT_TRUC_TIEP" | "MIEN_PHI_VAN_CHUYEN";
+  giaTriGiam: number;
+  giaTriDonHangToiThieu: number;
+  giamToiDa?: number | null;
+  soLuongPhatHanh: number;
+  soLuongDaDung: number;
+  ngayBatDau: string;
+  ngayKetThuc: string;
+  trangThai: "DANG_DIEN_RA" | "TAM_DUNG" | "KET_THUC";
+  tag: string;
+  category: "ALL" | "NEW" | "SHIPPING" | "VTON" | "VIP";
+}
+
+export const VOUCHERS_MOCK: Voucher[] = [
+  {
+    maKhuyenMai: "KM000007",
+    maPhieuGiamGia: "YOFASO15",
+    tenChuongTrinh: "Ưu đãi 15% đơn hàng đầu tiên",
+    loaiGiamGia: "PHAN_TRAM",
+    giaTriGiam: 15,
+    giaTriDonHangToiThieu: 350000,
+    giamToiDa: 150000,
+    soLuongPhatHanh: 500,
+    soLuongDaDung: 62,
+    ngayBatDau: "01/01/2026",
+    ngayKetThuc: "31/12/2026",
+    trangThai: "DANG_DIEN_RA",
+    tag: "Khách hàng mới",
+    category: "NEW",
+  },
+  {
+    maKhuyenMai: "KM000008",
+    maPhieuGiamGia: "FREESHIP",
+    tenChuongTrinh: "Miễn phí vận chuyển giao hàng toàn quốc",
+    loaiGiamGia: "MIEN_PHI_VAN_CHUYEN",
+    giaTriGiam: 30000,
+    giaTriDonHangToiThieu: 500000,
+    giamToiDa: 30000,
+    soLuongPhatHanh: 1000,
+    soLuongDaDung: 185,
+    ngayBatDau: "01/01/2026",
+    ngayKetThuc: "31/12/2026",
+    trangThai: "DANG_DIEN_RA",
+    tag: "Giao hàng toàn quốc",
+    category: "SHIPPING",
+  },
+  {
+    maKhuyenMai: "KM000009",
+    maPhieuGiamGia: "VTON100",
+    tenChuongTrinh: "Voucher kích hoạt hồ sơ AI dáng người",
+    loaiGiamGia: "TIEN_MAT_TRUC_TIEP",
+    giaTriGiam: 100000,
+    giaTriDonHangToiThieu: 600000,
+    giamToiDa: 100000,
+    soLuongPhatHanh: 300,
+    soLuongDaDung: 41,
+    ngayBatDau: "01/01/2026",
+    ngayKetThuc: "31/12/2026",
+    trangThai: "DANG_DIEN_RA",
+    tag: "Đặc quyền AI VTON",
+    category: "VTON",
+  },
+  {
+    maKhuyenMai: "KM000001",
+    maPhieuGiamGia: "YOFASO10",
+    tenChuongTrinh: "Ưu đãi 10% đơn hàng đầu tiên",
+    loaiGiamGia: "PHAN_TRAM",
+    giaTriGiam: 10,
+    giaTriDonHangToiThieu: 300000,
+    giamToiDa: 100000,
+    soLuongPhatHanh: 500,
+    soLuongDaDung: 48,
+    ngayBatDau: "01/01/2026",
+    ngayKetThuc: "31/12/2026",
+    trangThai: "DANG_DIEN_RA",
+    tag: "Chào bạn mới",
+    category: "NEW",
+  },
+  {
+    maKhuyenMai: "KM000002",
+    maPhieuGiamGia: "FREESHIP50",
+    tenChuongTrinh: "Miễn phí vận chuyển toàn quốc",
+    loaiGiamGia: "MIEN_PHI_VAN_CHUYEN",
+    giaTriGiam: 30000,
+    giaTriDonHangToiThieu: 250000,
+    giamToiDa: 30000,
+    soLuongPhatHanh: 1000,
+    soLuongDaDung: 126,
+    ngayBatDau: "01/01/2026",
+    ngayKetThuc: "31/12/2026",
+    trangThai: "DANG_DIEN_RA",
+    tag: "Freeship đơn từ 250k",
+    category: "SHIPPING",
+  },
+  {
+    maKhuyenMai: "KM000003",
+    maPhieuGiamGia: "GIAM50K",
+    tenChuongTrinh: "Giảm ngay 50.000đ cho đơn từ 500.000đ",
+    loaiGiamGia: "TIEN_MAT_TRUC_TIEP",
+    giaTriGiam: 50000,
+    giaTriDonHangToiThieu: 500000,
+    giamToiDa: 50000,
+    soLuongPhatHanh: 300,
+    soLuongDaDung: 89,
+    ngayBatDau: "01/01/2026",
+    ngayKetThuc: "31/12/2026",
+    trangThai: "DANG_DIEN_RA",
+    tag: "Đơn từ 500k",
+    category: "VIP",
+  },
+  {
+    maKhuyenMai: "KM000004",
+    maPhieuGiamGia: "VIPGOLD15",
+    tenChuongTrinh: "Đặc quyền tri ân hội viên Vàng & Kim Cương",
+    loaiGiamGia: "PHAN_TRAM",
+    giaTriGiam: 15,
+    giaTriDonHangToiThieu: 600000,
+    giamToiDa: 200000,
+    soLuongPhatHanh: 200,
+    soLuongDaDung: 35,
+    ngayBatDau: "01/01/2026",
+    ngayKetThuc: "31/12/2026",
+    trangThai: "DANG_DIEN_RA",
+    tag: "Hội viên Vàng",
+    category: "VIP",
+  },
+  {
+    maKhuyenMai: "KM000006",
+    maPhieuGiamGia: "HEVTON2026",
+    tenChuongTrinh: "Lễ hội thử đồ ảo mùa hè VTON",
+    loaiGiamGia: "TIEN_MAT_TRUC_TIEP",
+    giaTriGiam: 70000,
+    giaTriDonHangToiThieu: 700000,
+    giamToiDa: 70000,
+    soLuongPhatHanh: 400,
+    soLuongDaDung: 95,
+    ngayBatDau: "01/06/2026",
+    ngayKetThuc: "31/08/2026",
+    trangThai: "DANG_DIEN_RA",
+    tag: "Lễ hội AI hè 2026",
+    category: "VTON",
+  },
+  {
+    maKhuyenMai: "KM000005",
+    maPhieuGiamGia: "SINHNHATYOFASO",
+    tenChuongTrinh: "Quà tặng sinh nhật tháng vàng",
+    loaiGiamGia: "PHAN_TRAM",
+    giaTriGiam: 20,
+    giaTriDonHangToiThieu: 400000,
+    giamToiDa: 250000,
+    soLuongPhatHanh: 100,
+    soLuongDaDung: 12,
+    ngayBatDau: "01/05/2026",
+    ngayKetThuc: "31/05/2026",
+    trangThai: "TAM_DUNG",
+    tag: "Sinh nhật hội viên",
+    category: "VIP",
+  },
+];
+
+export interface UserVoucherWallet {
+  maNguoiDung: string;
+  maKhuyenMai: string;
+  ngayThuThap: string;
+  trangThai: "CHUA_DUNG" | "DA_DUNG" | "HET_HAN";
+  ngaySuDung?: string | null;
+  maDonHangDaDung?: string | null;
+}
+
+export const USER_VOUCHER_WALLET_MOCK: Record<string, UserVoucherWallet[]> = {
+  ND00000002: [
+    { maNguoiDung: "ND00000002", maKhuyenMai: "KM000001", ngayThuThap: "2026-10-20 09:00:00", trangThai: "DA_DUNG", ngaySuDung: "2026-10-28 09:30:00", maDonHangDaDung: "DH00000001" },
+    { maNguoiDung: "ND00000002", maKhuyenMai: "KM000002", ngayThuThap: "2026-10-22 14:00:00", trangThai: "CHUA_DUNG" },
+    { maNguoiDung: "ND00000002", maKhuyenMai: "KM000007", ngayThuThap: "2026-10-25 10:15:00", trangThai: "CHUA_DUNG" },
+    { maNguoiDung: "ND00000002", maKhuyenMai: "KM000008", ngayThuThap: "2026-10-26 11:30:00", trangThai: "CHUA_DUNG" },
+    { maNguoiDung: "ND00000002", maKhuyenMai: "KM000009", ngayThuThap: "2026-10-28 08:45:00", trangThai: "CHUA_DUNG" },
+  ],
+  ND00000003: [
+    { maNguoiDung: "ND00000003", maKhuyenMai: "KM000001", ngayThuThap: "2026-10-21 10:00:00", trangThai: "DA_DUNG", ngaySuDung: "2026-10-28 10:15:00", maDonHangDaDung: "DH00000002" },
+    { maNguoiDung: "ND00000003", maKhuyenMai: "KM000008", ngayThuThap: "2026-10-27 15:20:00", trangThai: "CHUA_DUNG" },
+  ],
+  ND00000004: [
+    { maNguoiDung: "ND00000004", maKhuyenMai: "KM000002", ngayThuThap: "2026-10-22 09:10:00", trangThai: "DA_DUNG", ngaySuDung: "2026-10-28 10:45:00", maDonHangDaDung: "DH00000003" },
+    { maNguoiDung: "ND00000004", maKhuyenMai: "KM000003", ngayThuThap: "2026-10-25 16:30:00", trangThai: "CHUA_DUNG" },
+  ],
+  ND00000005: [
+    { maNguoiDung: "ND00000005", maKhuyenMai: "KM000007", ngayThuThap: "2026-10-27 08:00:00", trangThai: "CHUA_DUNG" },
+    { maNguoiDung: "ND00000005", maKhuyenMai: "KM000008", ngayThuThap: "2026-10-27 08:05:00", trangThai: "CHUA_DUNG" },
+  ],
+  ND00000006: [
+    { maNguoiDung: "ND00000006", maKhuyenMai: "KM000001", ngayThuThap: "2026-10-26 14:00:00", trangThai: "CHUA_DUNG" },
+    { maNguoiDung: "ND00000006", maKhuyenMai: "KM000009", ngayThuThap: "2026-10-28 09:00:00", trangThai: "CHUA_DUNG" },
+  ],
+};
+
+export type UserWalletVoucherItem = Voucher & {
+  walletStatus: "CHUA_DUNG" | "DA_DUNG" | "HET_HAN";
+  ngayThuThap: string;
+  maDonHangDaDung: string | null | undefined;
+};
+
+export function getUserVouchers(userId?: string): UserWalletVoucherItem[] {
+  const currentUserId = userId || "ND00000002";
+  const records = USER_VOUCHER_WALLET_MOCK[currentUserId] || USER_VOUCHER_WALLET_MOCK["ND00000002"];
+  const list: UserWalletVoucherItem[] = [];
+  for (const rec of records) {
+    const v = VOUCHERS_MOCK.find((item) => item.maKhuyenMai === rec.maKhuyenMai);
+    if (v) {
+      list.push({
+        ...v,
+        walletStatus: rec.trangThai,
+        ngayThuThap: rec.ngayThuThap,
+        maDonHangDaDung: rec.maDonHangDaDung ?? null,
+      });
+    }
+  }
+  return list;
+}

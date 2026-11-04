@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Image as ExpoImage } from "expo-image";
 import {
   Dimensions,
   Image,
@@ -30,6 +31,19 @@ import {
 import { Button, Notice, Sheet, colors } from "@/components/shop/ui";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
+
+const matchColor = (a?: string, b?: string): boolean => {
+  if (!a || !b) return false;
+  const normA = a.trim().toLowerCase();
+  const normB = b.trim().toLowerCase();
+  if (normA === normB) return true;
+  const pA = normA.split(",")[0].trim();
+  const pB = normB.split(",")[0].trim();
+  if (pA === pB) return true;
+  const tokensA = normA.split(",").map((s) => s.trim());
+  const tokensB = normB.split(",").map((s) => s.trim());
+  return tokensA.some((t) => tokensB.includes(t));
+};
 
 // Curated size charts per Category & Gender
 const SIZE_GUIDES = {
@@ -81,11 +95,11 @@ const SIZE_GUIDES = {
     title: "Quần Nam (Trousers & Jeans)",
     headers: ["Size", "Cao (cm)", "Nặng (kg)", "Vòng eo", "Dài quần"],
     rows: [
-      ["29/S", "160–167", "52–58", "74–76", "96–98"],
-      ["30/M", "168–173", "59–65", "77–80", "98–100"],
-      ["31/L", "173–176", "66–72", "81–84", "100–102"],
-      ["32/XL", "176–180", "73–78", "85–88", "102–104"],
-      ["33/XXL", "180–185", "79–85", "89–92", "104–106"],
+      ["S", "160–167", "52–58", "74–76", "96–98"],
+      ["M", "168–173", "59–65", "77–80", "98–100"],
+      ["L", "173–176", "66–72", "81–84", "100–102"],
+      ["XL", "176–180", "73–78", "85–88", "102–104"],
+      ["XXL", "180–185", "79–85", "89–92", "104–106"],
     ],
   },
 };
@@ -140,6 +154,18 @@ export default function ProductDetailScreen() {
         });
       }
     });
+    // Bổ sung màu sắc từ ảnh nếu có màu chưa xuất hiện trong biến thể
+    if (p.images && p.images.length > 0) {
+      p.images.forEach((img) => {
+        if (img.colors && !colorOptions.some((co) => matchColor(co.hex, img.colors))) {
+          colorOptions.push({
+            name: "Màu sắc",
+            hex: img.colors,
+            sku: "",
+          });
+        }
+      });
+    }
   } else {
     mockItem.bienThe.forEach((b, idx) => {
       colorOptions.push({
@@ -157,6 +183,42 @@ export default function ProductDetailScreen() {
   const productCategory = !isMock && p?.vtonCategory ? p.vtonCategory : mockItem.loai;
   const isMen = (!isMock && p?.name && (p.name.toLowerCase().includes("nam") || p.name.toLowerCase().includes("quý ông"))) || false;
 
+  // Candidate sizes based on gender / product
+  const baseSizes = isMen
+    ? ["S", "M", "L", "XL", "XXL"]
+    : ["XS", "S", "M", "L", "XL"];
+  const extraSizes = !isMock && p?.variants
+    ? Array.from(new Set(p.variants.map((v) => v.size))).filter((s) => !baseSizes.includes(s))
+    : [];
+  const displayedSizes = [...baseSizes, ...extraSizes];
+
+  // Check if a size is available for the currently selected color
+  const isSizeAvailable = (size: string) => {
+    if (isMock) {
+      const currentMock = mockItem.bienThe[selectedColorIndex] ?? mockItem.bienThe[0];
+      return tonKho(currentMock, size as any) > 0;
+    }
+    if (!p?.variants || p.variants.length === 0) return true;
+    return p.variants.some(
+      (v) =>
+        matchColor(v.colors, activeColor.hex) &&
+        v.size === size &&
+        v.status !== "NGUNG_BAN" &&
+        v.stock > 0
+    );
+  };
+
+  useEffect(() => {
+    if (p?.variants && p.variants.length > 0) {
+      if (!isSizeAvailable(selectedSize)) {
+        const firstAvail = displayedSizes.find((s) => isSizeAvailable(s));
+        if (firstAvail) {
+          setSelectedSize(firstAvail);
+        }
+      }
+    }
+  }, [activeColor.hex, p?.variants]);
+
   useEffect(() => {
     if (isMen) {
       setSizeGuideTab(productCategory === "lower_body" ? "QUAN_NAM" : "AO_NAM");
@@ -173,14 +235,17 @@ export default function ProductDetailScreen() {
     p.images.forEach((img) => {
       const url = publicUrl(img.originalUrl);
       const matchedColor = colorOptions.find(
-        (c) => img.colors && c.hex.toLowerCase() === img.colors.toLowerCase()
+        (c) => img.colors && matchColor(c.hex, img.colors)
+      );
+      const isModelPhoto = Boolean(
+        img.cover || !img.cutoutUrl || (img.originalUrl && img.originalUrl.includes("--ref"))
       );
       gallerySlides.push({
         uri: url,
         colorHex: img.colors || matchedColor?.hex,
         colorName: matchedColor?.name,
         sku: matchedColor?.sku,
-        isModel: img.cover,
+        isModel: isModelPhoto,
       });
     });
   } else {
@@ -230,8 +295,8 @@ export default function ProductDetailScreen() {
 
   // Active SKU derived from active slide or active color (Requirement 8)
   const currentVariantByOption = !isMock && p?.variants
-    ? p.variants.find((v) => v.colors?.toLowerCase() === activeColor.hex.toLowerCase() && v.size === selectedSize)
-      || p.variants.find((v) => v.colors?.toLowerCase() === activeColor.hex.toLowerCase())
+    ? p.variants.find((v) => matchColor(v.colors, activeColor.hex) && v.size === selectedSize)
+      || p.variants.find((v) => matchColor(v.colors, activeColor.hex))
       || p.variants[0]
     : null;
 
@@ -251,9 +316,15 @@ export default function ProductDetailScreen() {
     setSelectedColorIndex(index);
     const chosenColor = colorOptions[index];
     if (chosenColor) {
-      const slideIndex = gallerySlides.findIndex(
-        (s) => s.colorHex && s.colorHex.toLowerCase() === chosenColor.hex.toLowerCase()
+      // Ưu tiên tìm ảnh sản phẩm thật (!isModel) có màu sắc khớp, fallback tới bất kỳ slide nào cùng màu
+      let slideIndex = gallerySlides.findIndex(
+        (s) => s.colorHex && matchColor(s.colorHex, chosenColor.hex) && !s.isModel
       );
+      if (slideIndex === -1) {
+        slideIndex = gallerySlides.findIndex(
+          (s) => s.colorHex && matchColor(s.colorHex, chosenColor.hex)
+        );
+      }
       if (slideIndex !== -1 && galleryRef.current) {
         galleryRef.current.scrollTo({
           x: slideIndex * SCREEN_WIDTH,
@@ -272,7 +343,7 @@ export default function ProductDetailScreen() {
       const targetSlide = gallerySlides[slide];
       if (targetSlide && targetSlide.colorHex) {
         const foundColorIndex = colorOptions.findIndex(
-          (c) => c.hex.toLowerCase() === targetSlide.colorHex?.toLowerCase()
+          (c) => matchColor(c.hex, targetSlide.colorHex)
         );
         if (foundColorIndex !== -1 && foundColorIndex !== selectedColorIndex) {
           setSelectedColorIndex(foundColorIndex);
@@ -320,35 +391,12 @@ export default function ProductDetailScreen() {
     });
   };
 
-  // Reviews fallback data if backend has none yet
-  const reviews: Review[] = reviewsState.data && reviewsState.data.length > 0
-    ? reviewsState.data
-    : [
-        {
-          reviewId: "DG00000001",
-          userName: "Trần Thị Mai Anh",
-          stars: 5,
-          createdAt: "2026-10-28T09:30:00",
-          colorName: activeColor.name,
-          size: "M",
-          comment: "Chất liệu vải cực kỳ mềm mại, đường kim mũi chỉ may giấu chỉ chuẩn phom cao cấp. Mình ướm thử AI trước khi đặt thấy form ôm chuẩn y như trên hình, rất ưng ý!",
-          shopReply: "YoFaSo Shop cảm ơn bạn Mai Anh! Chúc bạn luôn tỏa sáng và thanh lịch trong mọi khoảnh khắc cùng trang phục của YoFaSo nhé.",
-        },
-        {
-          reviewId: "DG00000002",
-          userName: "Phạm Quỳnh Chi",
-          stars: 5,
-          createdAt: "2026-10-25T14:15:00",
-          colorName: colorOptions[1]?.name || "Đen",
-          size: "S",
-          comment: "Áo đứng phom, màu sắc chuẩn xác với hình chụp trên app. Giao hàng nhanh và đóng gói trong hộp sang xịn mịn.",
-          shopReply: "Cảm ơn bạn Quỳnh Chi đã đồng hành cùng thương hiệu thời trang YoFaSo!",
-        },
-      ];
-
-  const avgStars = p?.avgRating ? Number(p.avgRating).toFixed(1) : "4.9";
-  const reviewCount = p?.reviewCount || reviews.length;
-  const soldCount = p?.soldCount || 238;
+  // Reviews data directly from database (no fake fallback)
+  const reviews: Review[] = reviewsState.data ?? [];
+  const rawRating = Number(p?.avgRating);
+  const avgStars = !isNaN(rawRating) && rawRating > 0 ? rawRating.toFixed(1) : "0.0";
+  const reviewCount = p?.reviewCount ?? reviews.length;
+  const soldCount = p?.soldCount ?? 0;
 
   return (
     <View style={st.container}>
@@ -370,11 +418,13 @@ export default function ProductDetailScreen() {
           >
             {gallerySlides.map((slide, i) => (
               <View key={i} style={st.imageSlide}>
-                {typeof slide.uri === "number" ? (
-                  <Image source={slide.uri} style={st.slideImage} resizeMode="cover" />
-                ) : (
-                  <Image source={{ uri: slide.uri }} style={st.slideImage} resizeMode="cover" />
-                )}
+                <ExpoImage
+                  source={typeof slide.uri === "number" ? slide.uri : { uri: slide.uri }}
+                  style={st.slideImage}
+                  contentFit="cover"
+                  transition={200}
+                  cachePolicy="memory-disk"
+                />
               </View>
             ))}
           </ScrollView>
@@ -443,9 +493,22 @@ export default function ProductDetailScreen() {
               <Text style={st.skuText}>{activeSku}</Text>
             </View>
             <View style={st.ratingBadge}>
-              <Ionicons name="star" size={12} color="#EAB308" />
-              <Text style={st.ratingScoreText}>{avgStars}</Text>
-              <Text style={st.ratingReviewsText}>({reviewCount}) · Đã bán {soldCount}</Text>
+              <Ionicons
+                name={Number(avgStars) > 0 ? "star" : "star-outline"}
+                size={12}
+                color={Number(avgStars) > 0 ? "#EAB308" : Colors.textMuted}
+              />
+              <Text
+                style={[
+                  st.ratingScoreText,
+                  Number(avgStars) <= 0 && { color: Colors.textMuted },
+                ]}
+              >
+                {Number(avgStars) > 0 ? avgStars : "0 sao"}
+              </Text>
+              <Text style={st.ratingReviewsText}>
+                {reviewCount > 0 ? `(${reviewCount}) · ` : ""}Đã bán {soldCount}
+              </Text>
             </View>
           </View>
 
@@ -486,7 +549,12 @@ export default function ProductDetailScreen() {
               <Text style={st.hexText}>{activeColor.hex}</Text>
             </View>
 
-            <View style={st.swatchesRow}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={st.swatchesScrollContent}
+              style={st.swatchesScroll}
+            >
               {colorOptions.map((c, i) => {
                 const on = i === selectedColorIndex;
                 return (
@@ -501,14 +569,14 @@ export default function ProductDetailScreen() {
                     <View
                       style={[
                         st.swatchColor,
-                        { backgroundColor: c.hex },
-                        c.hex.toLowerCase() === "#ffffff" && { borderWidth: 1, borderColor: "#CBD5E1" },
+                        { backgroundColor: c.hex.split(",")[0].trim() },
+                        c.hex.split(",")[0].trim().toLowerCase() === "#ffffff" && { borderWidth: 1, borderColor: "#CBD5E1" },
                       ]}
                     />
                   </Pressable>
                 );
               })}
-            </View>
+            </ScrollView>
           </View>
 
           {/* Size Selection */}
@@ -524,25 +592,30 @@ export default function ProductDetailScreen() {
               </Pressable>
             </View>
             <View style={st.sizePillsGrid}>
-              {KICH_CO.map((s) => {
+              {displayedSizes.map((s) => {
                 const on = selectedSize === s;
+                const available = isSizeAvailable(s);
                 return (
                   <Pressable
                     key={s}
-                    onPress={() => setSelectedSize(s)}
+                    disabled={!available}
+                    onPress={() => available && setSelectedSize(s)}
                     style={[
                       st.sizePill,
                       on && st.sizePillActive,
+                      !available && st.sizePillDisabled,
                     ]}
                   >
                     <Text
                       style={[
                         st.sizePillText,
                         on && st.sizePillTextActive,
+                        !available && st.sizePillTextDisabled,
                       ]}
                     >
                       {s}
                     </Text>
+                    {!available && <View style={st.sizePillSlash} />}
                   </Pressable>
                 );
               })}
@@ -615,91 +688,106 @@ export default function ProductDetailScreen() {
               <Text style={st.reviewsCountBadge}>{reviews.length} nhận xét</Text>
             </View>
 
-            {/* Overall Score Summary Card */}
-            <View style={st.ratingOverviewCard}>
-              <View style={st.ratingBigBox}>
-                <Text style={st.ratingBigScore}>{avgStars}</Text>
-                <View style={st.starsRow}>
-                  {[1, 2, 3, 4, 5].map((s) => (
-                    <Ionicons key={s} name="star" size={13} color="#EAB308" />
-                  ))}
-                </View>
-                <Text style={st.verifiedBuyerSub}>100% Verified Buyer</Text>
+            {reviews.length === 0 ? (
+              <View style={st.emptyReviews}>
+                <Ionicons name="chatbox-ellipses-outline" size={32} color={Colors.textMuted} />
+                <Text style={st.emptyReviewsTitle}>Sản phẩm này chưa có đánh giá nào!</Text>
+                <Text style={st.emptyReviewsSub}>Hãy là người đầu tiên mua và chia sẻ trải nghiệm nhé.</Text>
               </View>
-
-              <View style={st.ratingDivider} />
-
-              <View style={st.ratingHighlights}>
-                <View style={st.highlightRow}>
-                  <Ionicons name="shield-checkmark" size={14} color={Colors.statusSuccess} />
-                  <Text style={st.highlightText}>Xác thực đã nhận hàng</Text>
-                </View>
-                <View style={st.highlightRow}>
-                  <Ionicons name="color-palette-outline" size={14} color={Colors.champagneDeep} />
-                  <Text style={st.highlightText}>Màu chuẩn 98% ảnh chụp</Text>
-                </View>
-                <View style={st.highlightRow}>
-                  <Ionicons name="sparkles" size={14} color={Colors.champagneDeep} />
-                  <Text style={st.highlightText}>Form dáng đúng chuẩn AI VTON</Text>
-                </View>
-              </View>
-            </View>
-
-            {/* List of Reviews */}
-            <View style={st.reviewsList}>
-              {reviews.map((rev) => (
-                <View key={rev.reviewId} style={st.reviewCard}>
-                  <View style={st.reviewTopRow}>
-                    <View style={st.reviewerInfo}>
-                      <View style={st.avatarCircle}>
-                        <Text style={st.avatarInitial}>
-                          {rev.userName ? rev.userName.charAt(0) : "K"}
-                        </Text>
-                      </View>
-                      <View>
-                        <Text style={st.reviewerName}>{rev.userName || "Khách hàng YoFaSo"}</Text>
-                        <View style={st.verifiedBadgeRow}>
-                          <Ionicons name="checkmark-circle" size={11} color={Colors.statusSuccess} />
-                          <Text style={st.verifiedText}>Đã mua hàng</Text>
-                        </View>
-                      </View>
-                    </View>
-
-                    <View style={st.reviewStarsRow}>
+            ) : (
+              <>
+                {/* Overall Score Summary Card */}
+                <View style={st.ratingOverviewCard}>
+                  <View style={st.ratingBigBox}>
+                    <Text style={st.ratingBigScore}>{avgStars}</Text>
+                    <View style={st.starsRow}>
                       {[1, 2, 3, 4, 5].map((s) => (
                         <Ionicons
                           key={s}
-                          name={s <= rev.stars ? "star" : "star-outline"}
-                          size={12}
+                          name={s <= Math.round(Number(avgStars)) ? "star" : "star-outline"}
+                          size={13}
                           color="#EAB308"
                         />
                       ))}
                     </View>
+                    <Text style={st.verifiedBuyerSub}>100% Verified Buyer</Text>
                   </View>
 
-                  {/* Purchased variant info */}
-                  {(rev.size || rev.colorName) && (
-                    <Text style={st.variantPurchasedText}>
-                      Phân loại: Size {rev.size || "M"} · {rev.colorName || activeColor.name}
-                    </Text>
-                  )}
+                  <View style={st.ratingDivider} />
 
-                  {/* Comment text */}
-                  <Text style={st.reviewCommentText}>{rev.comment}</Text>
-
-                  {/* Shop Reply Box if present */}
-                  {rev.shopReply && (
-                    <View style={st.shopReplyBox}>
-                      <View style={st.shopReplyHeader}>
-                        <Ionicons name="arrow-undo" size={12} color={Colors.champagneDeep} />
-                        <Text style={st.shopReplyTitle}>Phản hồi từ YoFaSo Shop</Text>
-                      </View>
-                      <Text style={st.shopReplyText}>{rev.shopReply}</Text>
+                  <View style={st.ratingHighlights}>
+                    <View style={st.highlightRow}>
+                      <Ionicons name="shield-checkmark" size={14} color={Colors.statusSuccess} />
+                      <Text style={st.highlightText}>Xác thực đã nhận hàng</Text>
                     </View>
-                  )}
+                    <View style={st.highlightRow}>
+                      <Ionicons name="color-palette-outline" size={14} color={Colors.champagneDeep} />
+                      <Text style={st.highlightText}>Màu chuẩn 98% ảnh chụp</Text>
+                    </View>
+                    <View style={st.highlightRow}>
+                      <Ionicons name="sparkles" size={14} color={Colors.champagneDeep} />
+                      <Text style={st.highlightText}>Form dáng đúng chuẩn AI VTON</Text>
+                    </View>
+                  </View>
                 </View>
-              ))}
-            </View>
+
+                {/* List of Reviews */}
+                <View style={st.reviewsList}>
+                  {reviews.map((rev) => (
+                    <View key={rev.reviewId} style={st.reviewCard}>
+                      <View style={st.reviewTopRow}>
+                        <View style={st.reviewerInfo}>
+                          <View style={st.avatarCircle}>
+                            <Text style={st.avatarInitial}>
+                              {rev.userName ? rev.userName.charAt(0) : "K"}
+                            </Text>
+                          </View>
+                          <View>
+                            <Text style={st.reviewerName}>{rev.userName || "Khách hàng YoFaSo"}</Text>
+                            <View style={st.verifiedBadgeRow}>
+                              <Ionicons name="checkmark-circle" size={11} color={Colors.statusSuccess} />
+                              <Text style={st.verifiedText}>Đã mua hàng</Text>
+                            </View>
+                          </View>
+                        </View>
+
+                        <View style={st.reviewStarsRow}>
+                          {[1, 2, 3, 4, 5].map((s) => (
+                            <Ionicons
+                              key={s}
+                              name={s <= rev.stars ? "star" : "star-outline"}
+                              size={12}
+                              color="#EAB308"
+                            />
+                          ))}
+                        </View>
+                      </View>
+
+                      {/* Purchased variant info */}
+                      {(rev.size || rev.colorName) && (
+                        <Text style={st.variantPurchasedText}>
+                          Phân loại: Size {rev.size || "M"} · {rev.colorName || activeColor.name}
+                        </Text>
+                      )}
+
+                      {/* Comment text */}
+                      <Text style={st.reviewCommentText}>{rev.comment}</Text>
+
+                      {/* Shop Reply Box if present */}
+                      {rev.shopReply && (
+                        <View style={st.shopReplyBox}>
+                          <View style={st.shopReplyHeader}>
+                            <Ionicons name="arrow-undo" size={12} color={Colors.champagneDeep} />
+                            <Text style={st.shopReplyTitle}>Phản hồi từ YoFaSo Shop</Text>
+                          </View>
+                          <Text style={st.shopReplyText}>{rev.shopReply}</Text>
+                        </View>
+                      )}
+                    </View>
+                  ))}
+                </View>
+              </>
+            )}
           </View>
         </View>
       </ScrollView>
@@ -1022,6 +1110,15 @@ const st = StyleSheet.create({
     gap: 12,
     marginTop: 10,
   },
+  swatchesScroll: {
+    marginTop: 10,
+  },
+  swatchesScrollContent: {
+    flexDirection: "row",
+    gap: 12,
+    paddingVertical: 4,
+    paddingRight: 16,
+  },
   swatchRing: {
     width: 38,
     height: 38,
@@ -1059,10 +1156,12 @@ const st = StyleSheet.create({
   },
   sizePillsGrid: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
     marginTop: 10,
   },
   sizePill: {
+    minWidth: 52,
     flex: 1,
     height: 44,
     borderRadius: Radii.md,
@@ -1071,10 +1170,17 @@ const st = StyleSheet.create({
     backgroundColor: Colors.surface,
     alignItems: "center",
     justifyContent: "center",
+    position: "relative",
+    overflow: "hidden",
   },
   sizePillActive: {
     backgroundColor: Colors.primary,
     borderColor: Colors.primary,
+  },
+  sizePillDisabled: {
+    backgroundColor: "#F8FAFC",
+    borderColor: "#E2E8F0",
+    opacity: 0.5,
   },
   sizePillText: {
     fontSize: 13,
@@ -1083,6 +1189,17 @@ const st = StyleSheet.create({
   },
   sizePillTextActive: {
     color: "#FFFFFF",
+  },
+  sizePillTextDisabled: {
+    color: "#94A3B8",
+    textDecorationLine: "line-through",
+  },
+  sizePillSlash: {
+    position: "absolute",
+    width: "70%",
+    height: 1.5,
+    backgroundColor: "#CBD5E1",
+    transform: [{ rotate: "-35deg" }],
   },
   stockRow: {
     flexDirection: "row",

@@ -14,7 +14,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/lib/api";
 import type { Page, Product } from "@/lib/models";
 import { Colors, Radii, Shadows } from "@/constants/theme";
-import { EditorialImages, formatVND } from "@/lib/catalog-data";
+import { EditorialImages, formatVND, VOUCHERS_MOCK, type Voucher } from "@/lib/catalog-data";
 import { ShopHeader } from "./ShopHeader";
 import { ProductCard, mapApiProduct, type UnifiedProduct } from "./ProductCard";
 
@@ -27,6 +27,18 @@ export const Explore = memo(function Explore() {
 
   // Editorial tab: Women vs Men
   const [editorialTab, setEditorialTab] = useState<"NU" | "NAM">("NU");
+
+  // Voucher programs collection state (Requirement 3)
+  const [voucherCategory, setVoucherCategory] = useState<"ALL" | "NEW" | "SHIPPING" | "VTON" | "VIP">("ALL");
+  const [collectedCodes, setCollectedCodes] = useState<string[]>(["YOFASO15"]);
+  const [exploreToast, setExploreToast] = useState("");
+
+  const handleCollectVoucher = (code: string) => {
+    if (collectedCodes.includes(code)) return;
+    setCollectedCodes((prev) => [...prev, code]);
+    setExploreToast(`Đã thu thập mã ${code} vào Kho Voucher của bạn!`);
+    setTimeout(() => setExploreToast(""), 2200);
+  };
 
   // Explore featured data lists
   const [newestItems, setNewestItems] = useState<UnifiedProduct[]>([]);
@@ -234,53 +246,106 @@ export const Explore = memo(function Explore() {
           </View>
         </View>
 
-        {/* Voucher Ưu Đãi Carousel */}
+        {/* TRẠM THU THẬP VOUCHER & ƯU ĐÃI (Chương trình thu thập voucher đa năng) */}
         <View style={st.voucherSection}>
           <View style={st.sectionHeaderExplore}>
             <View style={st.sectionTitleRow}>
-              <Ionicons name="gift-outline" size={16} color={Colors.champagneDeep} />
-              <Text style={st.exploreSectionTitle}>Voucher & Đặc Quyền Khách Hàng</Text>
+              <Ionicons name="ticket-outline" size={17} color={Colors.champagneDeep} />
+              <View>
+                <Text style={st.exploreSectionTitle}>Trạm Thu Thập Voucher & Săn Ưu Đãi</Text>
+                <Text style={st.exploreSectionSub}>
+                  Thu thập mã giảm giá để tự động lưu vào Kho Voucher của bạn
+                </Text>
+              </View>
             </View>
           </View>
+
+          {/* Area / Program Category Filter Tabs */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={st.voucherProgramTabs}
+          >
+            {[
+              { id: "ALL" as const, label: "Tất cả" },
+              { id: "NEW" as const, label: "🎁 Chào bạn mới" },
+              { id: "SHIPPING" as const, label: "🚚 Freeship" },
+              { id: "VTON" as const, label: "👗 Đặc quyền VTON" },
+              { id: "VIP" as const, label: "👑 Hội viên VIP" },
+            ].map((p) => {
+              const active = voucherCategory === p.id;
+              return (
+                <Pressable
+                  key={p.id}
+                  onPress={() => setVoucherCategory(p.id)}
+                  style={[st.voucherProgramPill, active && st.voucherProgramPillActive]}
+                >
+                  <Text style={[st.voucherProgramText, active && st.voucherProgramTextActive]}>
+                    {p.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+
+          {/* Voucher Carousel */}
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={st.voucherScroll}
           >
-            {[
-              {
-                code: "YOFASO15",
-                discount: "Giảm 15%",
-                title: "Đơn Hàng Đầu Tiên",
-                condition: "Áp dụng cho đơn từ 350.000 đ",
-              },
-              {
-                code: "FREESHIP",
-                discount: "Miễn Phí Vận Chuyển",
-                title: "Giao Hàng Toàn Quốc",
-                condition: "Áp dụng cho đơn từ 500.000 đ",
-              },
-              {
-                code: "VTON100",
-                discount: "Voucher 100.000 đ",
-                title: "Kích Hoạt Hồ Sơ AI",
-                condition: "Tặng khi lưu dáng người lần đầu",
-              },
-            ].map((v, i) => (
-              <View key={i} style={st.voucherCard}>
-                <View style={st.voucherLeft}>
-                  <Text style={st.voucherDiscount}>{v.discount}</Text>
-                  <Text style={st.voucherTitle}>{v.title}</Text>
-                  <Text style={st.voucherCond}>{v.condition}</Text>
-                </View>
-                <View style={st.voucherDivider} />
-                <View style={st.voucherRight}>
-                  <Text style={st.voucherCodeLabel}>MÃ VOUCHER</Text>
-                  <Text style={st.voucherCodeText}>{v.code}</Text>
-                </View>
-              </View>
-            ))}
+            {VOUCHERS_MOCK
+              .filter((v) => voucherCategory === "ALL" || v.category === voucherCategory)
+              .map((v) => {
+                const isCollected = collectedCodes.includes(v.maPhieuGiamGia);
+                const isShipping = v.loaiGiamGia === "MIEN_PHI_VAN_CHUYEN";
+                const isPercent = v.loaiGiamGia === "PHAN_TRAM";
+
+                const discountLabel = isShipping
+                  ? "Miễn Phí VC"
+                  : isPercent
+                  ? `Giảm ${v.giaTriGiam}%`
+                  : `Giảm ${formatVND(v.giaTriGiam)}`;
+
+                return (
+                  <View key={v.maKhuyenMai} style={st.voucherCard}>
+                    <View style={st.voucherLeft}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                        <Text style={st.voucherDiscount}>{discountLabel}</Text>
+                        <View style={st.voucherTagPill}>
+                          <Text style={st.voucherTagText}>{v.tag}</Text>
+                        </View>
+                      </View>
+                      <Text style={st.voucherTitle} numberOfLines={1}>{v.tenChuongTrinh}</Text>
+                      <Text style={st.voucherCond}>
+                        Đơn từ {formatVND(v.giaTriDonHangToiThieu)} · HSD: {v.ngayKetThuc}
+                      </Text>
+                    </View>
+                    <View style={st.voucherDivider} />
+                    <View style={st.voucherRight}>
+                      <Text style={st.voucherCodeText}>{v.maPhieuGiamGia}</Text>
+                      <Pressable
+                        onPress={() => handleCollectVoucher(v.maPhieuGiamGia)}
+                        style={[st.collectBtn, isCollected && st.collectBtnDone]}
+                      >
+                        <Text style={[st.collectBtnText, isCollected && st.collectBtnTextDone]}>
+                          {isCollected ? "Đã lưu ✓" : "Lưu mã"}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                );
+              })}
           </ScrollView>
+
+          {/* Special Campaign Info Banner */}
+          <View style={st.voucherCampaignBanner}>
+            <Ionicons name="sparkles" size={16} color={Colors.champagneDeep} />
+            <Text style={st.voucherCampaignText}>
+              <Text style={{ fontFamily: "JakartaBold" }}>Đặc quyền AI VTON: </Text>
+              Tạo hồ sơ dáng người lần đầu nhận ngay Voucher 100K (VTON100) tự động lưu vào ví.
+            </Text>
+          </View>
         </View>
 
         {/* GENDER FASHION EDITORIAL SHOWCASE (Thời trang Nam & Nữ tabs) */}
@@ -553,6 +618,14 @@ export const Explore = memo(function Explore() {
         {/* Bottom padding for tab bar */}
         <View style={{ height: 80 }} />
       </ScrollView>
+
+      {/* Toast Feedback */}
+      {!!exploreToast && (
+        <View style={st.toastPopup}>
+          <Ionicons name="checkmark-circle" size={17} color={Colors.statusSuccess} />
+          <Text style={st.toastPopupText}>{exploreToast}</Text>
+        </View>
+      )}
     </View>
   );
 });
@@ -777,9 +850,34 @@ const st = StyleSheet.create({
     color: Colors.textSecondary,
     marginTop: 2,
   },
+  voucherProgramTabs: {
+    gap: 8,
+    paddingVertical: 2,
+    marginBottom: 4,
+  },
+  voucherProgramPill: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: Radii.full,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.borderHairline,
+  },
+  voucherProgramPillActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  voucherProgramText: {
+    fontSize: 11.5,
+    fontFamily: "JakartaSemiBold",
+    color: Colors.textSecondary,
+  },
+  voucherProgramTextActive: {
+    color: "#FFFFFF",
+  },
   voucherScroll: {
-    gap: 10,
-    paddingRight: 10,
+    gap: 12,
+    paddingRight: 12,
   },
   voucherCard: {
     flexDirection: "row",
@@ -788,30 +886,42 @@ const st = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(197, 168, 128, 0.35)",
     overflow: "hidden",
-    width: 250,
+    width: 270,
     ...Shadows.dock,
   },
   voucherLeft: {
     flex: 1,
     padding: 10,
     justifyContent: "center",
+    gap: 3,
   },
   voucherDiscount: {
     fontSize: 13,
     fontFamily: "JakartaBold",
     color: Colors.champagneDeep,
   },
+  voucherTagPill: {
+    backgroundColor: "#FAF7F2",
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
+    borderRadius: Radii.sm,
+    borderWidth: 0.5,
+    borderColor: "rgba(197, 168, 128, 0.4)",
+  },
+  voucherTagText: {
+    fontSize: 8.5,
+    fontFamily: "JakartaSemiBold",
+    color: Colors.champagneDeep,
+  },
   voucherTitle: {
     fontSize: 11,
     fontFamily: "JakartaSemiBold",
     color: Colors.primary,
-    marginTop: 1,
   },
   voucherCond: {
     fontSize: 9.5,
     fontFamily: "Jakarta",
     color: Colors.textMuted,
-    marginTop: 2,
   },
   voucherDivider: {
     width: 1,
@@ -821,11 +931,12 @@ const st = StyleSheet.create({
     marginVertical: 6,
   },
   voucherRight: {
-    width: 75,
+    width: 82,
     backgroundColor: "#FAF7F2",
     alignItems: "center",
     justifyContent: "center",
     padding: 6,
+    gap: 2,
   },
   voucherCodeLabel: {
     fontSize: 7.5,
@@ -839,6 +950,65 @@ const st = StyleSheet.create({
     color: Colors.primary,
     fontWeight: "700",
     marginTop: 2,
+  },
+  collectBtn: {
+    marginTop: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: Radii.sm,
+    backgroundColor: Colors.primary,
+  },
+  collectBtnDone: {
+    backgroundColor: "#F1F5F9",
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+  },
+  collectBtnText: {
+    fontSize: 10,
+    fontFamily: "JakartaSemiBold",
+    color: "#FFFFFF",
+  },
+  collectBtnTextDone: {
+    color: Colors.statusSuccess,
+  },
+  voucherCampaignBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: Colors.champagneSubtle,
+    borderWidth: 1,
+    borderColor: "rgba(197, 168, 128, 0.4)",
+    borderRadius: Radii.md,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginTop: 4,
+  },
+  voucherCampaignText: {
+    flex: 1,
+    fontSize: 11.5,
+    fontFamily: "Jakarta",
+    color: Colors.primary,
+    lineHeight: 16,
+  },
+  toastPopup: {
+    position: "absolute",
+    bottom: 24,
+    left: 20,
+    right: 20,
+    backgroundColor: Colors.primary,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: Radii.lg,
+    ...Shadows.dock,
+  },
+  toastPopupText: {
+    fontSize: 13,
+    fontFamily: "JakartaSemiBold",
+    color: "#FFFFFF",
+    flex: 1,
   },
 
   // GENDER FASHION EDITORIAL SECTION

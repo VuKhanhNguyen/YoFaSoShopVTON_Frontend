@@ -1,11 +1,14 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { strength } from "@/lib/validation";
 import { noteActivity } from "@/lib/api";
 import {
+  Animated,
+  Dimensions,
   Image,
   KeyboardAvoidingView,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -391,43 +394,194 @@ export function Panel({
   return <View style={[s.panel, style]}>{children}</View>;
 }
 
+const SCREEN_HEIGHT = Dimensions.get("window").height || 800;
+
 export function Sheet({
   visible,
   onClose,
   title,
+  headerExtra,
   children,
+  scrollable = true,
 }: {
   visible: boolean;
   onClose: () => void;
   title?: string;
+  headerExtra?: ReactNode;
   children: ReactNode;
+  scrollable?: boolean;
 }) {
+  const [modalVisible, setModalVisible] = useState(visible);
+  const panY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+  const backdropOpacity = useRef(new Animated.Value(0)).current;
+
+  // Open / Close driven by prop
+  useEffect(() => {
+    if (visible) {
+      setModalVisible(true);
+      panY.setValue(SCREEN_HEIGHT);
+      backdropOpacity.setValue(0);
+      Animated.parallel([
+        Animated.timing(panY, {
+          toValue: 0,
+          duration: 240,
+          useNativeDriver: true,
+        }),
+        Animated.timing(backdropOpacity, {
+          toValue: 1,
+          duration: 240,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    } else {
+      Animated.parallel([
+        Animated.timing(panY, {
+          toValue: SCREEN_HEIGHT,
+          duration: 180,
+          useNativeDriver: true,
+        }),
+        Animated.timing(backdropOpacity, {
+          toValue: 0,
+          duration: 180,
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        setModalVisible(false);
+      });
+    }
+  }, [visible, panY, backdropOpacity]);
+
+  // Smooth dismiss handler
+  const handleDismiss = () => {
+    Animated.parallel([
+      Animated.timing(panY, {
+        toValue: SCREEN_HEIGHT,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+      Animated.timing(backdropOpacity, {
+        toValue: 0,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      onClose();
+    });
+  };
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: (_, gestureState) => {
+          return gestureState.dy > 4;
+        },
+        onPanResponderMove: (_, gestureState) => {
+          if (gestureState.dy > 0) {
+            panY.setValue(gestureState.dy);
+            const fade = Math.max(0, 1 - gestureState.dy / 300);
+            backdropOpacity.setValue(fade);
+          }
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          // If dragged down past 80px or flicked down with velocity > 0.4
+          if (gestureState.dy > 80 || gestureState.vy > 0.4) {
+            // Dismiss immediately without flashing back
+            Animated.parallel([
+              Animated.timing(panY, {
+                toValue: SCREEN_HEIGHT,
+                duration: 160,
+                useNativeDriver: true,
+              }),
+              Animated.timing(backdropOpacity, {
+                toValue: 0,
+                duration: 160,
+                useNativeDriver: true,
+              }),
+            ]).start(() => {
+              onClose();
+            });
+          } else {
+            // Spring back to open
+            Animated.parallel([
+              Animated.spring(panY, {
+                toValue: 0,
+                bounciness: 4,
+                useNativeDriver: true,
+              }),
+              Animated.timing(backdropOpacity, {
+                toValue: 1,
+                duration: 150,
+                useNativeDriver: true,
+              }),
+            ]).start();
+          }
+        },
+      }),
+    [onClose, panY, backdropOpacity]
+  );
+
   return (
     <Modal
-      visible={visible}
+      visible={modalVisible}
       transparent
-      animationType="slide"
-      onRequestClose={onClose}
+      animationType="none"
+      onRequestClose={handleDismiss}
     >
       <View style={s.modalOverlay}>
-        <Pressable style={s.modalBackdrop} onPress={onClose} />
-        <View style={s.sheetContent}>
-          <View style={s.sheetHandle} />
-          {title ? (
-            <View style={s.sheetHeader}>
-              <Text style={s.sheetTitle}>{title}</Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Đóng"
-                onPress={onClose}
-                style={s.closeButton}
-              >
-                <Ionicons name="close" size={20} color={colors.primary} />
-              </Pressable>
-            </View>
+        {/* Animated Dim Backdrop */}
+        <Animated.View
+          style={[
+            s.modalBackdropAnimated,
+            {
+              opacity: backdropOpacity,
+            },
+          ]}
+        >
+          <Pressable style={StyleSheet.absoluteFill} onPress={handleDismiss} />
+        </Animated.View>
+
+        {/* Sliding Sheet Content */}
+        <Animated.View
+          style={[
+            s.sheetContent,
+            {
+              transform: [{ translateY: panY }],
+            },
+          ]}
+        >
+          {/* Draggable Handle and Header Area */}
+          <View {...panResponder.panHandlers} style={s.sheetDragArea}>
+            <View style={s.sheetHandle} />
+            {title ? (
+              <View style={s.sheetHeader}>
+                <Text style={s.sheetTitle}>{title}</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Đóng"
+                  onPress={handleDismiss}
+                  style={s.closeButton}
+                >
+                  <Ionicons name="close" size={20} color={colors.primary} />
+                </Pressable>
+              </View>
+            ) : null}
+          </View>
+
+          {/* Pinned Extra Header Elements (Tabs, Filters) */}
+          {headerExtra ? (
+            <View style={s.sheetHeaderExtra}>{headerExtra}</View>
           ) : null}
-          <ScrollView showsVerticalScrollIndicator={false}>{children}</ScrollView>
-        </View>
+
+          {/* Sheet Body Content */}
+          {scrollable ? (
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              {children}
+            </ScrollView>
+          ) : (
+            <View style={{ flexShrink: 1 }}>{children}</View>
+          )}
+        </Animated.View>
       </View>
     </Modal>
   );
@@ -642,8 +796,12 @@ export const s = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(15, 23, 42, 0.45)",
+    backgroundColor: "transparent",
     justifyContent: "flex-end",
+  },
+  modalBackdropAnimated: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: "rgba(15, 23, 42, 0.45)",
   },
   modalBackdrop: {
     flex: 1,
@@ -671,6 +829,13 @@ export const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: 16,
+  },
+  sheetDragArea: {
+    paddingTop: 2,
+    paddingBottom: 2,
+  },
+  sheetHeaderExtra: {
+    marginBottom: 12,
   },
   sheetTitle: {
     fontSize: 19,

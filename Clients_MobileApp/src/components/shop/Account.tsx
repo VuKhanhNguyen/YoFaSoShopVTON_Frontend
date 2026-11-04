@@ -1,4 +1,4 @@
-import { memo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -19,8 +19,9 @@ import { useResource } from "@/hooks/use-resource";
 import { api, publicUrl } from "@/lib/api";
 import type { Row, User } from "@/lib/models";
 import { Colors, Radii, Shadows } from "@/constants/theme";
-import { formatMembershipBadge, formatMembershipRank } from "@/lib/catalog-data";
+import { formatMembershipBadge, formatMembershipRank, formatVND, getUserVouchers, type UserWalletVoucherItem } from "@/lib/catalog-data";
 import { ShopHeader } from "@/components/shop/ShopHeader";
+import { Sheet } from "@/components/shop/ui";
 
 export const Account = memo(function Account() {
   const { user, setUser, signOut } = useSession();
@@ -29,6 +30,29 @@ export const Account = memo(function Account() {
   const [toast, setToast] = useState("");
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
+  const [voucherSheetOpen, setVoucherSheetOpen] = useState(false);
+  const [voucherTab, setVoucherTab] = useState<"ALL" | "READY" | "USED">("ALL");
+
+  const userVouchers = useMemo(
+    () => getUserVouchers(user?.userId || "ND00000002"),
+    [user?.userId]
+  );
+
+  const readyVouchers = useMemo(
+    () => userVouchers.filter((v) => v.walletStatus === "CHUA_DUNG" && v.trangThai === "DANG_DIEN_RA"),
+    [userVouchers]
+  );
+
+  const usedVouchers = useMemo(
+    () => userVouchers.filter((v) => v.walletStatus === "DA_DUNG"),
+    [userVouchers]
+  );
+
+  const displayedVouchers = useMemo(() => {
+    if (voucherTab === "READY") return readyVouchers;
+    if (voucherTab === "USED") return usedVouchers;
+    return userVouchers;
+  }, [voucherTab, readyVouchers, usedVouchers, userVouchers]);
 
   const showSoon = () => {
     setToast("Tính năng sẽ sớm ra mắt");
@@ -310,7 +334,7 @@ export const Account = memo(function Account() {
                     icon: "ticket-outline" as const,
                     title: "Kho Voucher & Mã Khuyến Mãi",
                     sub: "Mã ưu đãi thành viên sẵn sàng áp dụng",
-                    action: () => router.push("/cart"),
+                    action: () => setVoucherSheetOpen(true),
                   },
                   {
                     icon: "sparkles-outline" as const,
@@ -508,6 +532,171 @@ export const Account = memo(function Account() {
         </Text>
       
       </ScrollView>
+
+      {/* Kho Voucher & Mã Khuyến Mãi Sheet */}
+      <Sheet
+        visible={voucherSheetOpen}
+        onClose={() => setVoucherSheetOpen(false)}
+        title="Kho Voucher & Mã Khuyến Mãi"
+        headerExtra={
+          <View style={st.voucherSheetTabsRow}>
+            {[
+              { id: "ALL" as const, label: `Tất cả (${userVouchers.length})` },
+              { id: "READY" as const, label: `Sẵn sàng (${readyVouchers.length})` },
+              { id: "USED" as const, label: `Đã dùng (${usedVouchers.length})` },
+            ].map((tab) => {
+              const active = voucherTab === tab.id;
+              return (
+                <Pressable
+                  key={tab.id}
+                  onPress={() => setVoucherTab(tab.id)}
+                  style={[st.voucherSheetTab, active && st.voucherSheetTabActive]}
+                >
+                  <Text style={[st.voucherSheetTabText, active && st.voucherSheetTabTextActive]}>
+                    {tab.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        }
+        scrollable={false}
+      >
+        <ScrollView
+          showsVerticalScrollIndicator={true}
+          style={st.voucherSheetScrollContainer}
+          contentContainerStyle={st.voucherSheetList}
+          nestedScrollEnabled={true}
+        >
+          {displayedVouchers.map((v) => {
+            const isUsed = v.walletStatus === "DA_DUNG";
+            const isPaused = v.trangThai === "TAM_DUNG";
+            const isPercent = v.loaiGiamGia === "PHAN_TRAM";
+            const isShipping = v.loaiGiamGia === "MIEN_PHI_VAN_CHUYEN";
+
+            const percentUsed =
+              v.soLuongPhatHanh > 0
+                ? Math.min(100, Math.round((v.soLuongDaDung / v.soLuongPhatHanh) * 100))
+                : 0;
+            const isSoldOut = percentUsed >= 100;
+
+            return (
+              <View
+                key={v.maKhuyenMai}
+                style={[
+                  st.voucherWalletCard,
+                  (isPaused || isUsed) && st.voucherWalletCardPaused,
+                ]}
+              >
+                {/* Left Coupon Badge */}
+                <View
+                  style={[
+                    st.voucherWalletLeft,
+                    isShipping && { backgroundColor: "#ECFDF5" },
+                    isUsed && { backgroundColor: "#F1F5F9" },
+                  ]}
+                >
+                  <Ionicons
+                    name={isShipping ? "car-outline" : isPercent ? "pricetag-outline" : "cash-outline"}
+                    size={20}
+                    color={
+                      isUsed
+                        ? Colors.textMuted
+                        : isShipping
+                        ? Colors.statusSuccess
+                        : Colors.champagneDeep
+                    }
+                  />
+                  <Text
+                    style={[
+                      st.voucherWalletType,
+                      isShipping && { color: Colors.statusSuccess },
+                      isUsed && { color: Colors.textMuted },
+                    ]}
+                  >
+                    {isShipping ? "FREESHIP" : isPercent ? "GIẢM %" : "TIỀN MẶT"}
+                  </Text>
+                </View>
+
+                {/* Middle Info */}
+                <View style={st.voucherWalletMid}>
+                  <Text style={st.voucherWalletTitle} numberOfLines={1}>
+                    {v.tenChuongTrinh}
+                  </Text>
+                  <Text style={st.voucherWalletDiscount}>
+                    {isShipping
+                      ? "Miễn phí vận chuyển 30.000 đ"
+                      : isPercent
+                      ? `Giảm ${v.giaTriGiam}% ${v.giamToiDa ? `(tối đa ${formatVND(v.giamToiDa)})` : ""}`
+                      : `Giảm ${formatVND(v.giaTriGiam)}`}
+                  </Text>
+                  <Text style={st.voucherWalletCondition}>
+                    Đơn tối thiểu: {formatVND(v.giaTriDonHangToiThieu)}
+                  </Text>
+
+                  <View style={st.voucherWalletMetaRow}>
+                    <Text style={st.voucherWalletDate}>
+                      HSD: {v.ngayBatDau} - {v.ngayKetThuc}
+                    </Text>
+                  </View>
+
+                  {/* Shopee-style Progress Bar */}
+                  <View style={st.shopeeUsageRow}>
+                    <View style={st.shopeeTrack}>
+                      <View
+                        style={[
+                          st.shopeeFill,
+                          { width: `${percentUsed}%` },
+                          percentUsed >= 85 && { backgroundColor: "#EF4444" },
+                        ]}
+                      />
+                    </View>
+                    <Text style={[st.shopeeText, percentUsed >= 85 && { color: "#EF4444" }]}>
+                      {isSoldOut ? "Hết 100%" : `Đã dùng ${percentUsed}%`}
+                    </Text>
+                  </View>
+
+                  {isUsed && (
+                    <Text style={st.voucherUsedOrderText}>
+                      ✓ Đã dùng cho đơn {v.maDonHangDaDung || "DH00000001"}
+                    </Text>
+                  )}
+                </View>
+
+                {/* Right Action */}
+                <View style={st.voucherWalletRight}>
+                  <View style={st.voucherCodeBadge}>
+                    <Text style={st.voucherCodeText}>{v.maPhieuGiamGia}</Text>
+                  </View>
+                  <Pressable
+                    disabled={isPaused || isUsed}
+                    onPress={() => {
+                      setVoucherSheetOpen(false);
+                      setToast(`Đã chọn mã ${v.maPhieuGiamGia}`);
+                      setTimeout(() => setToast(""), 2000);
+                      router.push("/cart");
+                    }}
+                    style={[
+                      st.voucherUseBtn,
+                      (isPaused || isUsed) && st.voucherUseBtnDisabled,
+                    ]}
+                  >
+                    <Text
+                      numberOfLines={1}
+                      style={[
+                        st.voucherUseBtnText,
+                        (isPaused || isUsed) && { color: Colors.textMuted },
+                      ]}
+                    >
+                      {isUsed ? "Đã dùng" : isPaused ? "Tạm dừng" : "Dùng ngay"}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            );
+          })}
+        </ScrollView>
+      </Sheet>
 
       {/* Toast Feedback */}
       {!!toast && (
@@ -978,6 +1167,175 @@ const st = StyleSheet.create({
     fontSize: 12,
     fontFamily: "JakartaSemiBold",
     color: Colors.champagne,
+  },
+  voucherSheetTabsRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 4,
+  },
+  voucherSheetTab: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: Radii.full,
+    backgroundColor: Colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: Colors.borderHairline,
+  },
+  voucherSheetTabActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  voucherSheetTabText: {
+    fontSize: 12,
+    fontFamily: "JakartaSemiBold",
+    color: Colors.textSecondary,
+  },
+  voucherSheetTabTextActive: {
+    color: "#FFFFFF",
+  },
+  voucherSheetScrollContainer: {
+    maxHeight: 500,
+  },
+  voucherSheetList: {
+    gap: 12,
+    paddingBottom: 28,
+  },
+  voucherWalletCard: {
+    flexDirection: "row",
+    backgroundColor: Colors.surface,
+    borderRadius: Radii.lg,
+    borderWidth: 1,
+    borderColor: "rgba(197, 168, 128, 0.35)",
+    overflow: "hidden",
+    ...Shadows.dock,
+  },
+  voucherWalletCardPaused: {
+    opacity: 0.65,
+    backgroundColor: "#F8FAFC",
+  },
+  voucherWalletLeft: {
+    width: 65,
+    backgroundColor: "#FAF7F2",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 8,
+    borderRightWidth: 1,
+    borderRightColor: Colors.borderHairline,
+    borderStyle: "dashed",
+  },
+  voucherWalletType: {
+    fontSize: 8.5,
+    fontFamily: "Mono",
+    color: Colors.champagneDeep,
+    fontWeight: "700",
+    marginTop: 4,
+  },
+  voucherWalletMid: {
+    flex: 1,
+    padding: 10,
+    justifyContent: "center",
+    gap: 2,
+  },
+  voucherWalletTitle: {
+    fontSize: 12.5,
+    fontFamily: "JakartaSemiBold",
+    color: Colors.primary,
+  },
+  voucherWalletDiscount: {
+    fontSize: 12,
+    fontFamily: "JakartaBold",
+    color: Colors.champagneDeep,
+  },
+  voucherWalletCondition: {
+    fontSize: 10.5,
+    fontFamily: "Jakarta",
+    color: Colors.textSecondary,
+  },
+  voucherWalletMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 2,
+  },
+  voucherWalletDate: {
+    fontSize: 9.5,
+    fontFamily: "Mono",
+    color: Colors.textMuted,
+  },
+  voucherUsedOrderText: {
+    fontSize: 9.5,
+    fontFamily: "JakartaMedium",
+    color: Colors.champagneDeep,
+    marginTop: 2,
+  },
+  shopeeUsageRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 3,
+  },
+  shopeeTrack: {
+    flex: 1,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: "#F1F5F9",
+    overflow: "hidden",
+  },
+  shopeeFill: {
+    height: "100%",
+    borderRadius: 3,
+    backgroundColor: Colors.champagneDeep,
+  },
+  shopeeText: {
+    fontSize: 9.5,
+    fontFamily: "JakartaMedium",
+    color: Colors.textMuted,
+  },
+  voucherWalletRight: {
+    width: 104,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 6,
+    borderLeftWidth: 1,
+    borderLeftColor: Colors.borderHairline,
+    gap: 6,
+  },
+  voucherCodeBadge: {
+    backgroundColor: Colors.surfaceMuted,
+    paddingVertical: 3,
+    paddingHorizontal: 6,
+    borderRadius: Radii.sm,
+    borderWidth: 1,
+    borderColor: Colors.borderHairline,
+    alignItems: "center",
+    maxWidth: 96,
+  },
+  voucherCodeText: {
+    fontSize: 10,
+    fontFamily: "Mono",
+    color: Colors.primary,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  voucherUseBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: Radii.sm,
+    backgroundColor: Colors.primary,
+    minWidth: 82,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  voucherUseBtnDisabled: {
+    backgroundColor: "#F1F5F9",
+    borderWidth: 1,
+    borderColor: Colors.borderHairline,
+  },
+  voucherUseBtnText: {
+    fontSize: 11,
+    fontFamily: "JakartaSemiBold",
+    color: "#FFFFFF",
+    textAlign: "center",
   },
 });
 

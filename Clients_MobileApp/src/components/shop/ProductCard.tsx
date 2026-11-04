@@ -1,7 +1,8 @@
-import { memo } from "react";
+import { memo, useState } from "react";
+import { Image as ExpoImage } from "expo-image";
 import {
   Dimensions,
-  Image,
+
   Pressable,
   StyleProp,
   StyleSheet,
@@ -117,8 +118,14 @@ export const ProductCard = memo(function ProductCard({
   width,
   style,
 }: ProductCardProps) {
+  const [imgError, setImgError] = useState(false);
   const isRightCol = index % 2 === 1;
   const cardW = width ?? CARD_WIDTH;
+  const imageSource = imgError
+    ? EditorialImages.shirt
+    : typeof item.image === "number"
+    ? item.image
+    : { uri: item.image };
 
   return (
     <Pressable
@@ -133,15 +140,15 @@ export const ProductCard = memo(function ProductCard({
       ]}
     >
       <View style={[st.imageContainer, { width: cardW, height: cardW * 1.35 }]}>
-        {typeof item.image === "number" ? (
-          <Image source={item.image} style={st.cardImage} resizeMode="cover" />
-        ) : (
-          <Image
-            source={{ uri: item.image }}
-            style={st.cardImage}
-            resizeMode="cover"
-          />
-        )}
+        <ExpoImage
+          source={imageSource}
+          style={st.cardImage}
+          contentFit="cover"
+          transition={200}
+          cachePolicy="memory-disk"
+          priority="high"
+          onError={() => setImgError(true)}
+        />
 
         {/* VTON Badge */}
         <View style={st.cardBadge}>
@@ -177,23 +184,28 @@ export const ProductCard = memo(function ProductCard({
           {item.name}
         </Text>
 
-        <Text style={st.cardSku}>{item.sku || item.id}</Text>
-
-        {/* Rating & Sold Count */}
-        <View style={st.ratingSoldCountRow}>
+        {/* Rating avg sao thay thế mã biến thể / SKU dưới tên sản phẩm */}
+        <View style={st.cardRatingRow}>
           {item.avgRating > 0 ? (
             <View style={st.starRow}>
               <Ionicons name="star" size={11} color="#EAB308" />
               <Text style={st.ratingVal}>{item.avgRating.toFixed(1)}</Text>
+              {item.reviewCount > 0 && (
+                <Text style={st.ratingCount}>({item.reviewCount})</Text>
+              )}
             </View>
           ) : (
             <View style={st.starRow}>
-              <Ionicons name="sparkles" size={10} color={Colors.champagneDeep} />
-              <Text style={st.ratingNew}>Mới</Text>
+              <Ionicons name="star-outline" size={11} color={Colors.textMuted} />
+              <Text style={st.ratingZero}>0 sao</Text>
             </View>
           )}
-          <Text style={st.ratingDot}>•</Text>
-          <Text style={st.soldCountText}>Đã bán {item.soldCount}</Text>
+          {item.soldCount > 0 && (
+            <>
+              <Text style={st.ratingDot}>•</Text>
+              <Text style={st.soldCountText}>Đã bán {item.soldCount}</Text>
+            </>
+          )}
         </View>
 
         {/* Color Swatches */}
@@ -308,17 +320,21 @@ const st = StyleSheet.create({
     color: Colors.primary,
     lineHeight: 17,
   },
-  cardSku: {
-    fontSize: 9.5,
-    fontFamily: "Mono",
-    color: Colors.textMuted,
-    letterSpacing: 0.3,
-  },
-  ratingSoldCountRow: {
+  cardRatingRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    marginTop: 2,
+    marginTop: 3,
+  },
+  ratingCount: {
+    fontSize: 9.5,
+    fontFamily: "Jakarta",
+    color: Colors.textMuted,
+  },
+  ratingZero: {
+    fontSize: 10,
+    fontFamily: "Jakarta",
+    color: Colors.textMuted,
   },
   starRow: {
     flexDirection: "row",
