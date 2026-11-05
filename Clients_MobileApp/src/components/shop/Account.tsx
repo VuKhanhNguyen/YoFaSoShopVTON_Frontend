@@ -18,7 +18,7 @@ import { useSession } from "@/lib/session";
 import { useResource } from "@/hooks/use-resource";
 import { api, publicUrl } from "@/lib/api";
 import type { Row, User } from "@/lib/models";
-import { Colors, Radii, Shadows } from "@/constants/theme";
+import { Colors, Fonts, Radii, Shadows } from "@/constants/theme";
 import { formatMembershipBadge, formatMembershipRank, formatVND, getUserVouchers, type UserWalletVoucherItem } from "@/lib/catalog-data";
 import { ShopHeader } from "@/components/shop/ShopHeader";
 import { Sheet } from "@/components/shop/ui";
@@ -229,7 +229,38 @@ export const Account = memo(function Account() {
               </Pressable>
 
               <View style={{ flex: 1 }}>
-                <Text style={st.userName}>{user.fullName}</Text>
+                <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+                  <Text style={st.userName}>{user.fullName}</Text>
+                  {/* Trạng thái giới tính (icon + text badge) */}
+                  <View style={st.genderBadge}>
+                    <Ionicons
+                      name={
+                        user.gender === "NAM"
+                          ? "male"
+                          : user.gender === "NU"
+                          ? "female"
+                          : "transgender-outline"
+                      }
+                      size={11}
+                      color={user.gender === "NAM" ? "#2563EB" : user.gender === "NU" ? "#DB2777" : Colors.champagneDeep}
+                    />
+                    <Text
+                      style={[
+                        st.genderBadgeText,
+                        {
+                          color:
+                            user.gender === "NAM"
+                              ? "#2563EB"
+                              : user.gender === "NU"
+                              ? "#DB2777"
+                              : Colors.champagneDeep,
+                        },
+                      ]}
+                    >
+                      {user.gender === "NAM" ? "Nam" : user.gender === "NU" ? "Nữ" : user.gender === "KHAC" ? "Khác" : "Nữ"}
+                    </Text>
+                  </View>
+                </View>
                 <Text style={st.userPhone}>{user.phone || "Chưa cập nhật SĐT"}</Text>
                 <Text style={st.userEmail}>{user.email}</Text>
                 <Pressable onPress={() => router.push("/settings")} style={st.editProfileBtn}>
@@ -435,8 +466,8 @@ export const Account = memo(function Account() {
             <View style={st.vipCard}>
               <View style={st.vipDashedBorder} pointerEvents="none" />
               <View style={st.vipHeaderRow}>
-                <Text style={st.vipBrandText}>YoFaSo Privileges</Text>
-                <View style={st.vipTierBadge}>
+                <Text style={st.vipBrandText}>YoFaSo Privileges </Text>
+                <View style={[st.vipTierBadge, {marginTop: 5}]}>
                   <Ionicons name="sparkles" size={11} color={Colors.champagne} />
                   <Text style={st.vipTierText}>ĐẶC QUYỀN HỘI VIÊN</Text>
                 </View>
@@ -802,6 +833,21 @@ const st = StyleSheet.create({
     fontFamily: "JakartaSemiBold",
     color: Colors.primary,
   },
+  genderBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: Radii.full,
+    backgroundColor: Colors.canvas,
+    borderWidth: 1,
+    borderColor: Colors.borderHairline,
+  },
+  genderBadgeText: {
+    fontSize: 10,
+    fontFamily: Fonts.sansSemiBold,
+  },
   vipCard: {
     backgroundColor: Colors.primary,
     borderRadius: Radii.xl,
@@ -843,7 +889,7 @@ const st = StyleSheet.create({
     borderColor: "rgba(197, 168, 128, 0.6)",
   },
   vipTierText: {
-    fontSize: 9.5,
+    fontSize: 6.5,
     fontFamily: "Mono",
     color: Colors.champagne,
     letterSpacing: 1.2,

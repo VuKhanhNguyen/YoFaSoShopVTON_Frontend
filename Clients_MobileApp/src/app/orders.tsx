@@ -16,7 +16,6 @@ import {
   DonHang,
   LUONG_TRANG_THAI,
   nhanTrangThai,
-  SEED_ORDERS,
   TrangThaiDonHang,
 } from "@/lib/orders-data";
 import { useResource } from "@/hooks/use-resource";
@@ -40,26 +39,28 @@ export default function OrdersScreen() {
   const apiResource = useResource<Row[]>(user ? "/orders?page=0&size=50" : null);
 
   const orders: DonHang[] =
-    apiResource.data && apiResource.data.length > 0
+    apiResource.data
       ? apiResource.data.map((r, i) => ({
           maDonHang: String(r.orderId || `DH${String(i + 1).padStart(8, "0")}`),
           ngayDat: r.createdAt ? new Date(String(r.createdAt)).getTime() : Date.now(),
-          lines: ((r.lines || r.items || []) as any[]).map((l, j) => ({
-            id: String(l.orderItemId || `item-${j}`),
-            maSanPham: String(l.productId || l.maSanPham || "SP00000001"),
+          lines: ((r.items || r.lines || []) as any[]).map((l, j) => ({
+            id: String(l.orderLineId || l.orderItemId || `item-${j}`),
+            maSanPham: String(l.variantId || l.productId || l.maSanPham || "SP00000001"),
             tenSanPham: String(l.productName || l.tenSanPham || "Sản phẩm YoFaSo"),
-            hinhAnh: l.imageUrl || l.hinhAnh,
-            donGia: Number(l.price || l.donGia || 0),
+            hinhAnh: l.coverUrl || l.imageUrl || l.hinhAnh,
+            donGia: Number(l.unitPrice || l.price || l.donGia || 0),
             tenMau: String(l.colorName || l.tenMau || "Màu chuẩn"),
             maMauHex: String(l.colorHex || l.maMauHex || "#1E293B"),
             size: String(l.size || "M"),
             soLuong: Number(l.quantity || l.soLuong || 1),
           })),
-          phuongThuc: (r.paymentMethod === "VIETQR" ? "VIETQR" : "COD") as "COD" | "VIETQR",
-          trangThai: (r.status as TrangThaiDonHang) || "DANG_DONG_GOI",
-          tongTien: Number(r.totalAmount || r.total || 0),
+          phuongThuc: (String(r.paymentMethod || "").includes("VIETQR")
+            ? "VIETQR"
+            : "COD") as "COD" | "VIETQR",
+          trangThai: (r.status as TrangThaiDonHang) || "CHO_XAC_NHAN",
+          tongTien: Number(r.total ?? r.totalAmount ?? r.collectAmount ?? 0),
         }))
-      : SEED_ORDERS;
+      : [];
 
   const filteredOrders = orders.filter(
     (o) => activeTab === "all" || o.trangThai === activeTab

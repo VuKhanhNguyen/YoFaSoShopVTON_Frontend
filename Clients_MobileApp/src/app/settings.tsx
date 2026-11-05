@@ -38,6 +38,7 @@ function SettingsContent() {
   const [fullName, setFullName] = useState(user?.fullName || "");
   const [email, setEmail] = useState(user?.email || "");
   const [phone, setPhone] = useState(user?.phone || "");
+  const [gender, setGender] = useState<"NAM" | "NU" | "KHAC" | string>(user?.gender || "NU");
   const [profileMessage, setProfileMessage] = useState("");
   const [profileBusy, setProfileBusy] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -179,11 +180,13 @@ function SettingsContent() {
         fullName: fullName.trim(),
         email: email.trim(),
         phone: phone.trim(),
+        gender: gender,
       }).catch(() => ({
         ...user,
         fullName: fullName.trim(),
         email: email.trim(),
         phone: phone.trim(),
+        gender: gender,
       } as User));
 
       setUser(updated);
@@ -360,6 +363,43 @@ function SettingsContent() {
               placeholderTextColor={Colors.muted}
               keyboardType="phone-pad"
             />
+          </View>
+
+          <View style={st.inputGroup}>
+            <Text style={st.inputLabel}>Giới tính</Text>
+            <View style={st.genderSelectorRow}>
+              {[
+                { value: "NAM", label: "Nam", icon: "male" as const },
+                { value: "NU", label: "Nữ", icon: "female" as const },
+                { value: "KHAC", label: "Khác", icon: "transgender-outline" as const },
+              ].map((item) => {
+                const isSelected = gender === item.value;
+                return (
+                  <Pressable
+                    key={item.value}
+                    onPress={() => setGender(item.value)}
+                    style={[
+                      st.genderChip,
+                      isSelected && st.genderChipSelected,
+                    ]}
+                  >
+                    <Ionicons
+                      name={item.icon}
+                      size={15}
+                      color={isSelected ? "#FFFFFF" : Colors.muted}
+                    />
+                    <Text
+                      style={[
+                        st.genderChipText,
+                        isSelected && st.genderChipTextSelected,
+                      ]}
+                    >
+                      {item.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
           </View>
 
           <Pressable
@@ -615,6 +655,35 @@ const st = StyleSheet.create({
     fontFamily: Fonts.sansSemiBold,
     fontSize: 12,
     color: Colors.primary,
+  },
+  genderSelectorRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 4,
+  },
+  genderChip: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: Radii.sm,
+    backgroundColor: Colors.canvas,
+    borderWidth: 1,
+    borderColor: Colors.borderHairline,
+  },
+  genderChipSelected: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  genderChipText: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: 13,
+    color: Colors.primary,
+  },
+  genderChipTextSelected: {
+    color: "#FFFFFF",
   },
   textInput: {
     fontFamily: Fonts.sans,

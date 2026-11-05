@@ -20,16 +20,6 @@ import type { Row } from "@/lib/models";
 import { RequireAccount } from "@/components/shop/RequireAccount";
 import { SelectField } from "@/components/shop/SelectField";
 
-const MOCK_DEFAULT_ADDRESS: Row = {
-  addressId: "addr-001",
-  recipientName: "Nguyễn Lê Quỳnh Hương",
-  phone: "0912345678",
-  street: "Số 88 Đồng Khởi",
-  ward: "Phường Bến Nghé",
-  city: "Thành phố Hồ Chí Minh",
-  defaultAddress: true,
-};
-
 type AddressMode = "new" | "legacy";
 
 interface LocationCandidate {
@@ -148,8 +138,7 @@ function AddressesContent() {
   const [conversionResult, setConversionResult] = useState<ConversionResponse | null>(null);
   const [selectedCandidate, setSelectedCandidate] = useState<LocationCandidate | null>(null);
 
-  const addresses =
-    state.data && state.data.length > 0 ? state.data : [MOCK_DEFAULT_ADDRESS];
+  const addresses = state.data || [];
 
   // Thực hiện chuyển đổi địa chỉ cũ sang địa chỉ mới sau sáp nhập
   const runConversion = useCallback(
@@ -381,58 +370,95 @@ function AddressesContent() {
 
         {/* Address Cards List */}
         <View style={st.cardList}>
-          {addresses.map((a) => {
-            const isDef = Boolean(a.defaultAddress);
-            return (
-              <View key={String(a.addressId)} style={[st.addressCard, isDef && st.addressCardDefault]}>
-                <View style={st.cardTopRow}>
-                  <View style={st.nameWithIcon}>
-                    <Ionicons
-                      name="person-circle-outline"
-                      size={20}
-                      color={Colors.champagneDeep}
-                    />
-                    <Text style={st.recipientName}>{String(a.recipientName)}</Text>
-                  </View>
-                  {isDef && (
-                    <View style={st.defaultBadge}>
-                      <Ionicons name="checkmark-circle" size={12} color={Colors.champagneDeep} />
-                      <Text style={st.defaultBadgeText}>Mặc định</Text>
+          {addresses.length === 0 ? (
+            <View
+              style={{
+                backgroundColor: Colors.surface,
+                borderRadius: Radii.md,
+                padding: 24,
+                alignItems: "center",
+                justifyContent: "center",
+                borderWidth: 1,
+                borderColor: Colors.borderHairline,
+                gap: 8,
+              }}
+            >
+              <Ionicons name="location-outline" size={38} color={Colors.champagneDeep} />
+              <Text
+                style={{
+                  fontFamily: Fonts.sansSemiBold,
+                  fontSize: 15,
+                  color: Colors.primary,
+                }}
+              >
+                Chưa có địa chỉ giao hàng
+              </Text>
+              <Text
+                style={{
+                  fontFamily: Fonts.sans,
+                  fontSize: 12,
+                  color: Colors.muted,
+                  textAlign: "center",
+                  lineHeight: 18,
+                }}
+              >
+                Bạn chưa lưu địa chỉ nào trong sổ địa chỉ. Hãy bấm nút "Thêm địa chỉ mới" bên dưới để thiết lập địa chỉ nhận hàng đầu tiên của bạn.
+              </Text>
+            </View>
+          ) : (
+            addresses.map((a) => {
+              const isDef = Boolean(a.defaultAddress);
+              return (
+                <View key={String(a.addressId)} style={[st.addressCard, isDef && st.addressCardDefault]}>
+                  <View style={st.cardTopRow}>
+                    <View style={st.nameWithIcon}>
+                      <Ionicons
+                        name="person-circle-outline"
+                        size={20}
+                        color={Colors.champagneDeep}
+                      />
+                      <Text style={st.recipientName}>{String(a.recipientName)}</Text>
                     </View>
-                  )}
-                </View>
+                    {isDef && (
+                      <View style={st.defaultBadge}>
+                        <Ionicons name="checkmark-circle" size={12} color={Colors.champagneDeep} />
+                        <Text style={st.defaultBadgeText}>Mặc định</Text>
+                      </View>
+                    )}
+                  </View>
 
-                <View style={st.infoRow}>
-                  <Ionicons name="location-outline" size={16} color={Colors.muted} style={{ marginTop: 2 }} />
-                  <Text style={st.addressText}>
-                    {String(a.street)}, {String(a.ward)}, {String(a.city)}
-                  </Text>
-                </View>
+                  <View style={st.infoRow}>
+                    <Ionicons name="location-outline" size={16} color={Colors.muted} style={{ marginTop: 2 }} />
+                    <Text style={st.addressText}>
+                      {String(a.street)}, {String(a.ward)}, {String(a.city)}
+                    </Text>
+                  </View>
 
-                <View style={st.infoRow}>
-                  <Ionicons name="call-outline" size={16} color={Colors.muted} />
-                  <Text style={st.phoneText}>{String(a.phone)}</Text>
-                </View>
+                  <View style={st.infoRow}>
+                    <Ionicons name="call-outline" size={16} color={Colors.muted} />
+                    <Text style={st.phoneText}>{String(a.phone)}</Text>
+                  </View>
 
-                <View style={st.cardActions}>
-                  <Pressable
-                    style={st.actionBtn}
-                    onPress={() => handleOpenEdit(a)}
-                  >
-                    <Ionicons name="create-outline" size={16} color={Colors.primary} />
-                    <Text style={st.actionBtnText}>Sửa</Text>
-                  </Pressable>
-                  <Pressable
-                    style={st.actionBtn}
-                    onPress={() => handleDelete(a)}
-                  >
-                    <Ionicons name="trash-outline" size={16} color="#DC2626" />
-                    <Text style={[st.actionBtnText, { color: "#DC2626" }]}>Xóa</Text>
-                  </Pressable>
+                  <View style={st.cardActions}>
+                    <Pressable
+                      style={st.actionBtn}
+                      onPress={() => handleOpenEdit(a)}
+                    >
+                      <Ionicons name="create-outline" size={16} color={Colors.primary} />
+                      <Text style={st.actionBtnText}>Sửa</Text>
+                    </Pressable>
+                    <Pressable
+                      style={st.actionBtn}
+                      onPress={() => handleDelete(a)}
+                    >
+                      <Ionicons name="trash-outline" size={16} color="#DC2626" />
+                      <Text style={[st.actionBtnText, { color: "#DC2626" }]}>Xóa</Text>
+                    </Pressable>
+                  </View>
                 </View>
-              </View>
-            );
-          })}
+              );
+            })
+          )}
         </View>
 
         {/* Add Address CTA */}

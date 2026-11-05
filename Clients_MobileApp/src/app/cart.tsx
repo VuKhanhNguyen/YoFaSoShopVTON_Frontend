@@ -84,8 +84,20 @@ export default function CartScreen() {
     (acc, item) => acc + item.unitPrice * item.quantity,
     0
   );
-  const discount = voucherApplied ? Math.round(subtotal * 0.05) : 0;
-  const shippingFee = subtotal > 1000000 ? 0 : 30000;
+  let discount = 0;
+  let shippingFee = subtotal > 1000000 ? 0 : 30000;
+
+  if (voucherApplied) {
+    if (voucherCode === "BIRTHDAY15") {
+      discount = Math.round(subtotal * 0.15);
+    } else if (voucherCode === "FREESHIP") {
+      if (subtotal >= 1000000) {
+        shippingFee = 0;
+      }
+    } else {
+      discount = Math.round(subtotal * 0.05);
+    }
+  }
   const total = Math.max(0, subtotal - discount + shippingFee);
 
   const updateQuantity = async (variantId: string, newQty: number) => {
@@ -115,6 +127,10 @@ export default function CartScreen() {
   const handleCheckout = () => {
     router.push({
       pathname: "/checkout",
+      params: {
+        paymentMethod,
+        voucher: voucherApplied ? voucherCode : undefined,
+      },
     });
   };
 
@@ -203,7 +219,13 @@ export default function CartScreen() {
                 )}
               </Text>
               <Text style={st.voucherSub}>
-                {voucherApplied ? "Ưu đãi Combo VTON giảm 5%" : "Nhập voucher sinh nhật hoặc sự kiện"}
+                {voucherApplied
+                  ? voucherCode === "BIRTHDAY15"
+                    ? "Ưu đãi mừng sinh nhật giảm 15%"
+                    : voucherCode === "FREESHIP"
+                    ? "Miễn phí vận chuyển cho đơn từ 1.000.000đ"
+                    : "Ưu đãi Combo VTON giảm 5%"
+                  : "Nhập voucher sinh nhật hoặc sự kiện"}
               </Text>
             </View>
             {voucherApplied ? (
@@ -345,7 +367,7 @@ export default function CartScreen() {
           {[
             { code: "VTON5", desc: "Giảm 5% cho trọn bộ combo thử đồ VTON", tag: "AI Combo" },
             { code: "FREESHIP", desc: "Miễn phí vận chuyển toàn quốc cho đơn từ 1.000.000đ", tag: "Vận chuyển" },
-            { code: "BIRTHDAY15", desc: "Voucher mừng sinh nhật giảm 15% độc quyền", tag: "VIP Member" },
+            { code: "BIRTHDAY15", desc: "Voucher mừng sinh nhật giảm 15% độc quyền", tag: "All Member" },
           ].map((v) => (
             <Pressable
               key={v.code}

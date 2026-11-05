@@ -18,11 +18,10 @@ import { Colors, Fonts, Radii, Shadows } from "@/constants/theme";
 import { EditorialImages, formatVND } from "@/lib/catalog-data";
 import { Button, Notice, Sheet, colors } from "@/components/shop/ui";
 
-const ORDER_STEPS = [
-  { code: "CHO_XAC_NHAN", label: "Đã đặt đơn thành công" },
-  { code: "DA_THANH_TOAN", label: "Shop đã xác nhận đơn hàng" },
+const ORDER_STEPS: { code: string; label: string; sub?: string }[] = [
+  { code: "CHO_XAC_NHAN", label: "Chờ xác nhận đơn hàng" },
   { code: "DANG_DONG_GOI", label: "Kho đang đóng gói kiện hàng" },
-  { code: "DANG_GIAO_HANG", label: "Shipper đang giao hàng", sub: "Shipper nội bộ: Nguyễn Văn Hùng · 0988.***.321" },
+  { code: "DANG_GIAO_HANG", label: "Shipper đang giao hàng", sub: "Đơn hàng đang trên đường vận chuyển" },
   { code: "HOAN_TAT", label: "Đã nhận hàng thành công" },
 ];
 
@@ -30,8 +29,8 @@ export default function OrderDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const state = useResource<Row>(`/orders/${encodeURIComponent(id)}`);
 
-  const [activeStepIndex, setActiveStepIndex] = useState(2); // Simulated progress
   const [cancelSheetVisible, setCancelSheetVisible] = useState(false);
+  const [vietQrSheetVisible, setVietQrSheetVisible] = useState(false);
   const [reviewSheetVisible, setReviewSheetVisible] = useState(false);
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewComment, setReviewComment] = useState("");
@@ -42,6 +41,23 @@ export default function OrderDetailScreen() {
   const o = state.data;
   const isCancelled = o?.status === "DA_HUY";
 
+  const getStepIndex = (status?: string) => {
+    switch (status) {
+      case "CHO_XAC_NHAN":
+        return 0;
+      case "DANG_DONG_GOI":
+        return 1;
+      case "DANG_GIAO_HANG":
+        return 2;
+      case "HOAN_TAT":
+        return 3;
+      default:
+        return 0;
+    }
+  };
+  const activeStepIndex = getStepIndex(o?.status as string);
+  const items = (o?.items || []) as any[];
+
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(""), 2000);
@@ -49,13 +65,26 @@ export default function OrderDetailScreen() {
 
   const handleCancelOrder = async () => {
     try {
-      await api(`/orders/${id}/cancel`, "POST").catch(() => {});
+      await api(`/orders/${encodeURIComponent(id)}/cancel`, "POST");
       setCancelSheetVisible(false);
       state.reload();
       showToast("Đã hủy đơn hàng thành công");
-    } catch {
+    } catch (e: any) {
       setCancelSheetVisible(false);
-      showToast("Đã hủy đơn hàng");
+      showToast(e?.message || "Không thể hủy đơn hàng");
+    }
+  };
+
+  const handleConfirmPaid = async () => {
+    try {
+      await api(`/orders/${encodeURIComponent(id)}/confirm-payment`, "POST", {
+        transactionRef: `VQR-${Date.now()}`,
+      });
+      setVietQrSheetVisible(false);
+      state.reload();
+      showToast("Ghi nhận thanh toán VietQR thành công!");
+    } catch (e: any) {
+      showToast(e?.message || "Không thể xác nhận thanh toán");
     }
   };
 
@@ -139,55 +168,106 @@ export default function OrderDetailScreen() {
             </View>
           )}
 
-          {/* Simulation button */}
-          {!isCancelled && activeStepIndex < ORDER_STEPS.length - 1 && (
-            <Pressable
-              onPress={() => setActiveStepIndex((prev) => prev + 1)}
-              style={st.simulateBtn}
-            >
-              <Text style={st.simulateBtnText}>
-                Mô phỏng cập nhật trạng thái tiếp theo →
-              </Text>
-            </Pressable>
-          )}
         </View>
+
+        {/* VietQR Pending Payment Action if applicable */}
+        {String(o?.paymentMethod || "").includes("VIETQR") &&
+          o?.paymentStatus === "CHUA_THANH_TOAN" &&
+          !isCancelled && (
+            <View
+              style={[
+                st.card,
+                {
+                  backgroundColor: "#FFFBEB",
+                  borderColor: "#FDE68A",
+                  padding: 16,
+                  gap: 10,
+                },
+              ]}
+            >
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Ionicons name="qr-code-outline" size={20} color={Colors.champagneDeep} />
+                <Text style={{ fontFamily: "JakartaSemiBold", fontSize: 14, color: Colors.primary }}>
+                  Chờ thanh toán qua VietQR
+                </Text>
+              </View>
+              <Text style={{ fontFamily: "Jakarta", fontSize: 13, color: Colors.textSecondary, lineHeight: 18 }}>
+                Vui lòng quét mã QR Napas247 để hoàn tất thanh toán cho đơn hàng này.
+              </Text>
+              <Button
+                title="QUÉT MÃ VIETQR THANH TOÁN"
+                accent
+                onPress={() => setVietQrSheetVisible(true)}
+                style={{ height: 44, marginTop: 4 }}
+              />
+            </View>
+          )}
 
         {/* Order Items */}
         <View style={st.card}>
-          <Text style={st.cardTitle}>Sản phẩm trong kiện</Text>
-          <View style={st.orderItemRow}>
-            <Image source={EditorialImages.shirt} style={st.itemThumb} resizeMode="cover" />
-            <View style={{ flex: 1 }}>
-              <Text style={st.itemName}>Áo Sơ Mi Lụa Dáng Rộng Cổ V</Text>
-              <Text style={st.itemVariant}>Trắng ngà · Size M · ×1</Text>
-              <Text style={st.itemPrice}>{formatVND(450000)}</Text>
-              {activeStepIndex === ORDER_STEPS.length - 1 && (
-                <Pressable
-                  onPress={() => setReviewSheetVisible(true)}
-                  style={st.reviewActionBtn}
-                >
-                  <Text style={st.reviewActionText}>Đánh giá sản phẩm</Text>
-                </Pressable>
+          <Text style={st.cardTitle}>Sản phẩm trong kiện ({items.length} món)</Text>
+          {items.map((item, idx) => (
+            <View
+              key={String(item.orderLineId || idx)}
+              style={[
+                st.orderItemRow,
+                idx > 0 && {
+                  borderTopWidth: 1,
+                  borderTopColor: Colors.borderHairline,
+                  paddingTop: 12,
+                },
+              ]}
+            >
+              {item.coverUrl ? (
+                <Image
+                  source={{ uri: String(item.coverUrl) }}
+                  style={st.itemThumb}
+                  resizeMode="cover"
+                />
+              ) : (
+                <Image
+                  source={EditorialImages.shirt}
+                  style={st.itemThumb}
+                  resizeMode="cover"
+                />
               )}
+              <View style={{ flex: 1 }}>
+                <Text style={st.itemName} numberOfLines={2}>
+                  {String(item.productName || "Sản phẩm YoFaSo")}
+                </Text>
+                <Text style={st.itemVariant}>
+                  {String(item.colorName || "Màu chuẩn")} · Size {String(item.size || "M")} · ×{Number(item.quantity || 1)}
+                </Text>
+                <Text style={st.itemPrice}>
+                  {formatVND(Number(item.unitPrice || 0) * Number(item.quantity || 1))}
+                </Text>
+                {o?.status === "HOAN_TAT" && (
+                  <Pressable
+                    onPress={() => setReviewSheetVisible(true)}
+                    style={st.reviewActionBtn}
+                  >
+                    <Text style={st.reviewActionText}>Đánh giá sản phẩm</Text>
+                  </Pressable>
+                )}
+              </View>
             </View>
-          </View>
+          ))}
+        </View>
 
-          <View style={[st.orderItemRow, { borderTopWidth: 1, borderTopColor: Colors.borderHairline, paddingTop: 12 }]}>
-            <Image source={EditorialImages.pants} style={st.itemThumb} resizeMode="cover" />
-            <View style={{ flex: 1 }}>
-              <Text style={st.itemName}>Quần Âu Ống Rộng Xếp Ly Cạp Cao</Text>
-              <Text style={st.itemVariant}>Xanh rêu · Size M · ×1</Text>
-              <Text style={st.itemPrice}>{formatVND(1150000)}</Text>
-              {activeStepIndex === ORDER_STEPS.length - 1 && (
-                <Pressable
-                  onPress={() => setReviewSheetVisible(true)}
-                  style={st.reviewActionBtn}
-                >
-                  <Text style={st.reviewActionText}>Đánh giá sản phẩm</Text>
-                </Pressable>
-              )}
-            </View>
+        {/* Delivery Address */}
+        <View style={st.card}>
+          <Text style={st.cardTitle}>Địa chỉ nhận hàng</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <Text style={{ fontFamily: "JakartaSemiBold", fontSize: 14, color: Colors.primary }}>
+              {String(o?.recipientName || "Khách hàng")}
+            </Text>
+            <Text style={{ fontFamily: "Jakarta", fontSize: 13, color: Colors.textMuted }}>
+              {String(o?.phone || "")}
+            </Text>
           </View>
+          <Text style={{ fontFamily: "Jakarta", fontSize: 13, color: Colors.textSecondary, lineHeight: 18 }}>
+            {String(o?.address || "Nhận tại cửa hàng")}
+          </Text>
         </View>
 
         {/* Shipping & Payment Details */}
@@ -195,29 +275,58 @@ export default function OrderDetailScreen() {
           <Text style={st.cardTitle}>Thông tin thanh toán</Text>
           <View style={st.calcRow}>
             <Text style={st.calcLabel}>Tạm tính tiền hàng</Text>
-            <Text style={st.calcVal}>{formatVND(1600000)}</Text>
+            <Text style={st.calcVal}>{formatVND(Number(o?.subtotal || 0))}</Text>
           </View>
           <View style={st.calcRow}>
-            <Text style={st.calcLabel}>Giảm giá Voucher (VTON5)</Text>
-            <Text style={[st.calcVal, { color: Colors.statusSuccess }]}>−{formatVND(80000)}</Text>
+            <Text style={st.calcLabel}>Giảm giá Voucher</Text>
+            <Text style={[st.calcVal, { color: Colors.statusSuccess }]}>
+              −{formatVND(Number(o?.discount || 0))}
+            </Text>
           </View>
           <View style={st.calcRow}>
             <Text style={st.calcLabel}>Phí vận chuyển</Text>
-            <Text style={st.calcVal}>Miễn phí</Text>
+            <Text style={st.calcVal}>
+              {Number(o?.shippingFee || 0) > 0 ? formatVND(Number(o?.shippingFee)) : "Miễn phí"}
+            </Text>
           </View>
           <View style={st.calcRow}>
             <Text style={st.calcLabel}>Hình thức thanh toán</Text>
-            <Text style={st.calcVal}>COD (Thanh toán khi nhận hàng)</Text>
+            <Text style={st.calcVal}>
+              {String(o?.paymentMethod || "").includes("VIETQR")
+                ? "Chuyển khoản"
+                : "COD (Thanh toán khi nhận hàng)"}
+            </Text>
+          </View>
+          <View style={st.calcRow}>
+            <Text style={st.calcLabel}>Trạng thái thanh toán</Text>
+            <Text
+              style={[
+                st.calcVal,
+                {
+                  color:
+                    o?.paymentStatus === "DA_THANH_TOAN"
+                      ? Colors.statusSuccess
+                      : Colors.champagneDeep,
+                  fontFamily: "JakartaSemiBold",
+                },
+              ]}
+            >
+              {o?.paymentStatus === "DA_THANH_TOAN"
+                ? "Đã thanh toán"
+                : "Chưa thanh toán"}
+            </Text>
           </View>
           <View style={st.dividerHairline} />
           <View style={[st.calcRow, { alignItems: "baseline" }]}>
             <Text style={st.totalTitle}>TỔNG THANH TOÁN</Text>
-            <Text style={st.totalAmount}>{formatVND(1520000)}</Text>
+            <Text style={st.totalAmount}>
+              {formatVND(Number(o?.total ?? o?.totalAmount ?? o?.collectAmount ?? 0))}
+            </Text>
           </View>
         </View>
 
         {/* Cancel Order Action */}
-        {!isCancelled && activeStepIndex === 0 && (
+        {!isCancelled && o?.status === "CHO_XAC_NHAN" && (
           <Pressable
             onPress={() => setCancelSheetVisible(true)}
             style={st.cancelBtn}
@@ -324,6 +433,117 @@ export default function OrderDetailScreen() {
           />
 
           <Button title="GỬI ĐÁNH GIÁ" accent onPress={handleSubmitReview} />
+        </View>
+      </Sheet>
+
+      {/* VietQR Payment Sheet */}
+      <Sheet
+        visible={vietQrSheetVisible}
+        onClose={() => setVietQrSheetVisible(false)}
+        title="Quét mã VietQR Napas247"
+      >
+        <View style={{ alignItems: "center", gap: 14, paddingVertical: 10 }}>
+          <Text
+            style={{
+              fontSize: 13,
+              color: Colors.textSecondary,
+              textAlign: "center",
+              lineHeight: 18,
+            }}
+          >
+            Mở ứng dụng Ngân hàng của bạn và quét mã QR để thanh toán đơn hàng #{id}
+          </Text>
+
+          <View
+            style={{
+              padding: 12,
+              backgroundColor: "#FFFFFF",
+              borderRadius: Radii.md,
+              borderWidth: 1,
+              borderColor: Colors.borderHairline,
+            }}
+          >
+            <Image
+              source={{
+                uri: `https://img.vietqr.io/image/TCB-19038917693011-compact2.png?amount=${Number(
+                  o?.total || o?.totalAmount || 0
+                )}&addInfo=${encodeURIComponent(id)}&accountName=${encodeURIComponent(
+                  "NGUYEN VU KHANH"
+                )}`,
+              }}
+              style={{ width: 220, height: 220, borderRadius: Radii.sm }}
+              resizeMode="contain"
+            />
+          </View>
+
+          <View
+            style={{
+              width: "100%",
+              backgroundColor: Colors.canvas,
+              padding: 14,
+              borderRadius: Radii.md,
+              gap: 8,
+            }}
+          >
+            <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+              <Text style={{ fontSize: 12, color: Colors.textMuted }}>Ngân hàng:</Text>
+              <Text style={{ fontSize: 12, fontFamily: "JakartaSemiBold", color: Colors.primary }}>
+                Techcombank (Ngân hàng Kỹ Thương)
+              </Text>
+            </View>
+            <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+              <Text style={{ fontSize: 12, color: Colors.textMuted }}>Số tài khoản:</Text>
+              <Text
+                style={{
+                  fontSize: 12,
+                  fontFamily: "Mono",
+                  fontWeight: "700",
+                  color: Colors.primary,
+                }}
+              >
+                19038917693011
+              </Text>
+            </View>
+            <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+              <Text style={{ fontSize: 12, color: Colors.textMuted }}>Chủ tài khoản:</Text>
+              <Text style={{ fontSize: 12, fontFamily: "JakartaSemiBold", color: Colors.primary }}>
+                NGUYEN VU KHANH
+              </Text>
+            </View>
+            <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+              <Text style={{ fontSize: 12, color: Colors.textMuted }}>Số tiền:</Text>
+              <Text
+                style={{
+                  fontSize: 13,
+                  fontFamily: "Mono",
+                  fontWeight: "700",
+                  color: Colors.statusSuccess,
+                }}
+              >
+                {formatVND(Number(o?.total || o?.totalAmount || 0))}
+              </Text>
+            </View>
+            <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+              <Text style={{ fontSize: 12, color: Colors.textMuted }}>Nội dung chuyển khoản:</Text>
+              <Text
+                style={{
+                  fontSize: 12,
+                  fontFamily: "Mono",
+                  fontWeight: "700",
+                  color: Colors.champagneDeep,
+                }}
+              >
+                {id}
+              </Text>
+            </View>
+          </View>
+
+          <Button
+            title=" Xác nhận đã chuyển khoản thành công"
+            accent
+            onPress={handleConfirmPaid}
+            style={{ width: "100%", marginTop: 4 }}
+          />
         </View>
       </Sheet>
 

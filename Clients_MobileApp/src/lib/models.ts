@@ -7,6 +7,7 @@ export type User = {
   email: string;
   phone: string;
   dateOfBirth?: string;
+  gender?: "NAM" | "NU" | "KHAC" | string;
   roles: string[];
   loyaltyPoints: number;
   membership: string;

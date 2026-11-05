@@ -10,7 +10,7 @@ import {
   Text,
   View,
 } from "react-native";
-import { router, Stack, useFocusEffect } from "expo-router";
+import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import QRCode from "react-native-qrcode-svg";
 import { api, requestKey } from "@/lib/api";
@@ -24,87 +24,132 @@ export default function CheckoutScreen() {
   const cart = useResource<Row[]>("/cart");
   const addresses = useResource<Row[]>("/me/addresses");
 
+  const params = useLocalSearchParams<{ paymentMethod?: string; voucher?: string }>();
   const [selectedAddressId, setSelectedAddressId] = useState<string>("");
-  const [paymentMethod, setPaymentMethod] = useState<"COD" | "VIETQR">("COD");
+  const [paymentMethod, setPaymentMethod] = useState<"COD" | "VIETQR">(
+    params.paymentMethod === "VIETQR" ? "VIETQR" : "COD"
+  );
   const [vietQrModalVisible, setVietQrModalVisible] = useState(false);
   const [createdOrderId, setCreatedOrderId] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
 
-  // Default fallback address if user hasn't added one yet
-  const defaultAddress = {
-    addressId: "ADDR-DEFAULT",
-    recipientName: "Trần Mai Anh",
-    phone: "0912.345.789",
-    street: "48 Cao Thắng",
-    ward: "Phường Thanh Bình",
-    city: "Quận Hải Châu, TP. Đà Nẵng",
-  };
+  useEffect(() => {
+    if (params.paymentMethod === "VIETQR" || params.paymentMethod === "COD") {
+      setPaymentMethod(params.paymentMethod);
+    }
+  }, [params.paymentMethod]);
 
-  const addressList =
-    addresses.data && addresses.data.length > 0
-      ? addresses.data
-      : [defaultAddress];
+  const addressList = addresses.data || [];
 
   useEffect(() => {
-    if (addressList.length > 0 && !selectedAddressId) {
-      setSelectedAddressId(String(addressList[0].addressId));
+    if (addressList.length > 0) {
+      if (!selectedAddressId || !addressList.some((a) => String(a.addressId) === selectedAddressId)) {
+        const def = addressList.find((a) => a.defaultAddress) || addressList[0];
+        setSelectedAddressId(String(def.addressId));
+      }
+    } else {
+      setSelectedAddressId("");
     }
   }, [addressList]);
 
-  const subtotal =
-    cart.data?.reduce(
-      (sum, r) => sum + Number(r.unitPrice || 450000) * Number(r.quantity || 1),
-      0
-    ) || 1600000;
-  const discount = Math.round(subtotal * 0.05);
-  const shippingFee = subtotal > 1000000 ? 0 : 30000;
-  const total = subtotal - discount + shippingFee;
+  const cartItems = cart.data || [];
+  const subtotal = cartItems.reduce(
+    (sum, r) => sum + Number(r.unitPrice || 0) * Number(r.quantity || 1),
+    0
+  );
+  const voucherCode = params.voucher;
+  let discount = 0;
+  let shippingFee = subtotal > 1000000 || subtotal === 0 ? 0 : 30000;
+
+  if (voucherCode) {
+    if (voucherCode === "BIRTHDAY15") {
+      discount = Math.round(subtotal * 0.15);
+    } else if (voucherCode === "FREESHIP") {
+      if (subtotal >= 1000000) {
+        shippingFee = 0;
+      }
+    } else {
+      discount = Math.round(subtotal * 0.05);
+    }
+  }
+  const total = Math.max(0, subtotal - discount + shippingFee);
 
   const handlePlaceOrder = async () => {
+    if (cartItems.length === 0) {
+      setError("Túi đồ của bạn đang trống. Vui lòng thêm sản phẩm trước khi đặt hàng.");
+      return;
+    }
+    if (!selectedAddressId) {
+      setError("Vui lòng chọn hoặc thêm địa chỉ nhận hàng.");
+      return;
+    }
+
     setBusy(true);
     setError("");
 
-    const orderId = `YFS-ORD-${Date.now().toString().slice(-6)}`;
-    setCreatedOrderId(orderId);
-
     try {
-      const items = cart.data?.map((r) => ({
-        variantId: r.variantId,
-        quantity: r.quantity,
-      })) || [{ variantId: "SP00000001", quantity: 1 }];
+      const items = cartItems.map((r) => ({
+        variantId: String(r.variantId),
+        quantity: Number(r.quantity || 1),
+      }));
 
-      await api(
+      const res = await api<Row>(
         "/orders",
         "POST",
         {
           items,
-          addressId: selectedAddressId || "ADDR-DEFAULT",
-          paymentMethod,
+          addressId: selectedAddressId,
+          paymentMethod:
+            paymentMethod === "VIETQR"
+              ? "VIETQR_CHUYEN_KHOAN_ONLINE"
+              : "COD_TIEN_MAT_KHI_NHAN",
+          voucher: voucherCode,
         },
         requestKey()
-      ).catch(() => {});
+      );
+
+      const realOrderId = String(res.orderId || res.MaDonHang || "");
+      if (!realOrderId) {
+        throw new Error("Không nhận được mã đơn hàng từ hệ thống.");
+      }
+      setCreatedOrderId(realOrderId);
 
       if (paymentMethod === "VIETQR") {
         setVietQrModalVisible(true);
       } else {
         router.replace({
           pathname: "/order/[id]",
-          params: { id: orderId },
+          params: { id: realOrderId },
         });
       }
     } catch (e: any) {
-      if (paymentMethod === "VIETQR") {
-        setVietQrModalVisible(true);
-      } else {
-        router.replace({
-          pathname: "/order/[id]",
-          params: { id: orderId },
-        });
-      }
+      setError(
+        e?.message ||
+          "Không thể tạo đơn hàng. Vui lòng kiểm tra lại kết nối và thử lại."
+      );
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleConfirmVietQrPaid = async () => {
+    if (!createdOrderId) return;
+    setBusy(true);
+    try {
+      await api(
+        `/orders/${encodeURIComponent(createdOrderId)}/confirm-payment`,
+        "POST",
+        { transactionRef: `VQR-${Date.now()}` }
+      ).catch(() => {});
+    } finally {
+      setBusy(false);
+      setVietQrModalVisible(false);
+      router.replace({
+        pathname: "/order/[id]",
+        params: { id: createdOrderId },
+      });
     }
   };
 
@@ -135,51 +180,124 @@ export default function CheckoutScreen() {
           <View style={st.sectionHeaderRow}>
             <Text style={st.sectionTitle}>Địa chỉ nhận hàng</Text>
             <Pressable onPress={() => router.push("/addresses")}>
-              <Text style={st.sectionLink}>Thay đổi</Text>
+              <Text style={st.sectionLink}>
+                {addressList.length > 0 ? "Thay đổi / Thêm" : "+ Thêm địa chỉ"}
+              </Text>
             </Pressable>
           </View>
 
-          {addressList.map((addr) => {
-            const on = selectedAddressId === String(addr.addressId);
-            return (
-              <Pressable
-                key={String(addr.addressId)}
-                onPress={() => setSelectedAddressId(String(addr.addressId))}
-                style={[st.addressCard, on && st.addressCardActive]}
+          {addressList.length === 0 ? (
+            <Pressable
+              onPress={() => router.push("/addresses")}
+              style={[
+                st.addressCard,
+                {
+                  borderStyle: "dashed",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  paddingVertical: 20,
+                  gap: 6,
+                },
+              ]}
+            >
+              <Ionicons name="location-outline" size={26} color={Colors.champagneDeep} />
+              <View style={{ flexDirection: "column" }}>
+              <Text
+                style={{
+                  fontFamily: "JakartaSemiBold",
+                  fontSize: 14,
+                  color: Colors.primary,
+                }}
               >
-                <View style={[st.radioCircle, on && st.radioCircleActive]}>
-                  {on && <View style={st.radioInner} />}
-                </View>
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                    <Text style={st.recipientName}>{String(addr.recipientName || "")}</Text>
-                    <Text style={st.recipientPhone}>{String(addr.phone || "")}</Text>
+                Bạn chưa có địa chỉ nhận hàng
+              </Text>
+              <Text
+                style={{
+                  fontFamily: "Jakarta",
+                  fontSize: 12,
+                  color: Colors.champagneDeep,
+                }}
+              >
+                + Nhấn vào đây để thêm địa chỉ giao hàng
+              </Text>
+              </View>
+            </Pressable>
+          ) : (
+            addressList.map((addr) => {
+              const on = selectedAddressId === String(addr.addressId);
+              return (
+                <Pressable
+                  key={String(addr.addressId)}
+                  onPress={() => setSelectedAddressId(String(addr.addressId))}
+                  style={[st.addressCard, on && st.addressCardActive]}
+                >
+                  <View style={[st.radioCircle, on && st.radioCircleActive]}>
+                    {on && <View style={st.radioInner} />}
                   </View>
-                  <Text style={st.addressText}>
-                    {String(addr.street || "")}, {String(addr.ward || "")}, {String(addr.city || "")}
-                  </Text>
-                </View>
-              </Pressable>
-            );
-          })}
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <Text style={st.recipientName}>{String(addr.recipientName || "")}</Text>
+                      <Text style={st.recipientPhone}>{String(addr.phone || "")}</Text>
+                    </View>
+                    <Text style={st.addressText}>
+                      {String(addr.street || "")}, {String(addr.ward || "")}, {String(addr.city || "")}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })
+          )}
         </View>
 
         {/* Order Items Preview */}
         <View style={st.sectionBlock}>
-          <Text style={st.sectionTitle}>Kiện hàng</Text>
+          <Text style={st.sectionTitle}>Kiện hàng ({cartItems.length} món)</Text>
           <View style={st.orderPreviewBox}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-              <Image
-                source={EditorialImages.shirt}
-                style={st.previewThumb}
-                resizeMode="cover"
-              />
-              <View style={{ flex: 1 }}>
-                <Text style={st.previewName}>Set trang phục thời trang YoFaSo</Text>
-                <Text style={st.previewSub}>2 món đồ · Đóng gói túi vải canvas bảo vệ môi trường</Text>
-                <Text style={st.previewPrice}>{formatVND(subtotal)}</Text>
-              </View>
-            </View>
+            {cartItems.length === 0 ? (
+              <Text style={{ fontSize: 13, color: Colors.textMuted, fontStyle: "italic" }}>
+                Chưa có sản phẩm nào trong túi đồ.
+              </Text>
+            ) : (
+              cartItems.map((item, idx) => (
+                <View
+                  key={String(item.variantId || idx)}
+                  style={[
+                    { flexDirection: "row", alignItems: "center", gap: 12 },
+                    idx > 0 && {
+                      borderTopWidth: 1,
+                      borderTopColor: Colors.borderHairline,
+                      paddingTop: 10,
+                      marginTop: 10,
+                    },
+                  ]}
+                >
+                  {item.coverUrl ? (
+                    <Image
+                      source={{ uri: String(item.coverUrl) }}
+                      style={st.previewThumb}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <Image
+                      source={EditorialImages.shirt}
+                      style={st.previewThumb}
+                      resizeMode="cover"
+                    />
+                  )}
+                  <View style={{ flex: 1 }}>
+                    <Text style={st.previewName} numberOfLines={1}>
+                      {String(item.productName || "Sản phẩm YoFaSo")}
+                    </Text>
+                    <Text style={st.previewSub}>
+                      {String(item.colorName || "")} · Size {String(item.size || "")} · ×{Number(item.quantity || 1)}
+                    </Text>
+                    <Text style={st.previewPrice}>
+                      {formatVND(Number(item.unitPrice || 0) * Number(item.quantity || 1))}
+                    </Text>
+                  </View>
+                </View>
+              ))
+            )}
           </View>
         </View>
 
@@ -223,7 +341,7 @@ export default function CheckoutScreen() {
             <Text style={st.breakdownVal}>{formatVND(subtotal)}</Text>
           </View>
           <View style={st.breakdownRow}>
-            <Text style={st.breakdownLabel}>Ưu đãi Voucher (VTON5)</Text>
+            <Text style={st.breakdownLabel}>Ưu đãi Voucher ({voucherCode || "VTON5"})</Text>
             <Text style={[st.breakdownVal, { color: Colors.statusSuccess }]}>
               −{formatVND(discount)}
             </Text>
@@ -275,32 +393,44 @@ export default function CheckoutScreen() {
           </Text>
 
           <View style={st.qrBox}>
-            <QRCode
-              value={`00020101021238540010A000000727012400069704220110034567890208QRIBFTTA5303704540${total}5802VN62240820${createdOrderId}6304`}
-              size={190}
-              color={Colors.primary}
-              backgroundColor="#FFFFFF"
-            />
+            {createdOrderId ? (
+              <Image
+                source={{
+                  uri: `https://img.vietqr.io/image/TCB-19038917693011-compact2.png?amount=${total}&addInfo=${encodeURIComponent(
+                    createdOrderId
+                  )}&accountName=${encodeURIComponent("NGUYEN VU KHANH")}`,
+                }}
+                style={{ width: 220, height: 220, borderRadius: Radii.sm }}
+                resizeMode="contain"
+              />
+            ) : (
+              <QRCode
+                value={`2|99|19038917693011|NGUYEN VU KHANH||0|0|${total}|${createdOrderId}|transfer_myqr`}
+                size={190}
+                color={Colors.primary}
+                backgroundColor="#FFFFFF"
+              />
+            )}
           </View>
 
           <View style={st.bankInfoCard}>
             <View style={st.bankInfoRow}>
               <Text style={st.bankInfoLabel}>Ngân hàng thụ hưởng:</Text>
-              <Text style={st.bankInfoVal}>MB Bank (Ngân hàng Quân Đội)</Text>
+              <Text style={st.bankInfoVal}>Techcombank (Ngân hàng Kỹ Thương)</Text>
             </View>
             <View style={st.bankInfoRow}>
               <Text style={st.bankInfoLabel}>Số tài khoản:</Text>
               <Pressable
-                onPress={() => copyToClipboard("0345678902")}
+                onPress={() => copyToClipboard("19038917693011")}
                 style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
               >
-                <Text style={st.bankInfoValMono}>0345678902</Text>
+                <Text style={st.bankInfoValMono}>19038917693011</Text>
                 <Ionicons name="copy-outline" size={14} color={Colors.champagneDeep} />
               </Pressable>
             </View>
             <View style={st.bankInfoRow}>
               <Text style={st.bankInfoLabel}>Chủ tài khoản:</Text>
-              <Text style={st.bankInfoVal}>YOFASO SHOP ATELIER</Text>
+              <Text style={st.bankInfoVal}>NGUYEN VU KHANH</Text>
             </View>
             <View style={st.bankInfoRow}>
               <Text style={st.bankInfoLabel}>Số tiền:</Text>
@@ -323,13 +453,8 @@ export default function CheckoutScreen() {
           <Button
             title="TÔI ĐÃ CHUYỂN KHOẢN THÀNH CÔNG"
             accent
-            onPress={() => {
-              setVietQrModalVisible(false);
-              router.replace({
-                pathname: "/order/[id]",
-                params: { id: createdOrderId },
-              });
-            }}
+            disabled={busy}
+            onPress={handleConfirmVietQrPaid}
             style={{ marginTop: 14 }}
           />
         </View>
