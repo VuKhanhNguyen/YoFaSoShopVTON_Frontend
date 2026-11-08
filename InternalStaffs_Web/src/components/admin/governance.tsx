@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   CheckCircle2,
+  Eye,
+  EyeOff,
   Info,
   KeyRound,
   Loader2,
@@ -114,6 +116,7 @@ export function Governance({
   const [shiftPage, setShiftPage] = useState(1);
   const SHIFT_PAGE_SIZE = 10;
   const [shiftFilter, setShiftFilter] = useState("ALL");
+  const [shiftCashierFilter, setShiftCashierFilter] = useState("ALL");
   const [shiftDetailModal, setShiftDetailModal] = useState<RealShift | null>(null);
   const [approvingShift, setApprovingShift] = useState(false);
   const [rejectingShift, setRejectingShift] = useState(false);
@@ -128,6 +131,8 @@ export function Governance({
   const [movementDetailModal, setMovementDetailModal] = useState<RealMovement | null>(null);
 
   // Audit Logs state
+  const [realLogs, setRealLogs] = useState<AuditEntry[]>([]);
+  const [loadingLogs, setLoadingLogs] = useState(false);
   const [logPage, setLogPage] = useState(1);
   const LOG_PAGE_SIZE = 10;
   const [logDetailModal, setLogDetailModal] = useState<AuditEntry | null>(null);
@@ -142,6 +147,7 @@ export function Governance({
   // Form states for Add Staff
   const [newUsername, setNewUsername] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [showNewPassword, setShowNewPassword] = useState(false);
   const [newFullName, setNewFullName] = useState("");
   const [newPhone, setNewPhone] = useState("");
   const [newEmail, setNewEmail] = useState("");
@@ -161,7 +167,9 @@ export function Governance({
   const [otpSent, setOtpSent] = useState(false);
   const [otpCode, setOtpCode] = useState("");
   const [staffNewPassword, setStaffNewPassword] = useState("");
+  const [showStaffNewPassword, setShowStaffNewPassword] = useState(false);
   const [staffConfirmPassword, setStaffConfirmPassword] = useState("");
+  const [showStaffConfirmPassword, setShowStaffConfirmPassword] = useState(false);
   const [otpCooldown, setOtpCooldown] = useState(0);
   const [otpResetError, setOtpResetError] = useState("");
   const [resettingPassword, startResetTransition] = useTransition();
@@ -204,6 +212,19 @@ export function Governance({
       console.warn("Could not load real inventory movements:", err);
     } finally {
       setLoadingMovements(false);
+    }
+  };
+
+  // Load Real Audit Logs from MySQL
+  const loadAuditLogs = async () => {
+    setLoadingLogs(true);
+    try {
+      const data = await api<AuditEntry[]>("/admin/audit-logs");
+      if (Array.isArray(data)) setRealLogs(data);
+    } catch (err) {
+      console.warn("Could not load real audit logs:", err);
+    } finally {
+      setLoadingLogs(false);
     }
   };
 
@@ -285,6 +306,14 @@ export function Governance({
         console.warn("Could not load real inventory movements:", err);
       });
 
+    api<AuditEntry[]>("/admin/audit-logs")
+      .then((data) => {
+        if (active && Array.isArray(data)) setRealLogs(data);
+      })
+      .catch((err) => {
+        console.warn("Could not load real audit logs:", err);
+      });
+
     return () => {
       active = false;
     };
@@ -322,6 +351,7 @@ export function Governance({
       // Reset form
       setNewUsername("");
       setNewPassword("");
+      setShowNewPassword(false);
       setNewFullName("");
       setNewPhone("");
       setNewEmail("");
@@ -477,9 +507,29 @@ export function Governance({
     safeStaffPage * STAFF_PAGE_SIZE
   );
 
-  const filteredShifts = shifts.filter((s) => {
-    return shiftFilter === "ALL" || s.status === shiftFilter;
-  });
+  const cashierOptions = useMemo(() => {
+    const names = new Set<string>();
+    shifts.forEach((s) => {
+      if (s.cashierName) names.add(s.cashierName);
+    });
+    return Array.from(names).sort((a, b) => a.localeCompare(b, "vi"));
+  }, [shifts]);
+
+  const filteredShifts = useMemo(() => {
+    return shifts.filter((s) => {
+      const matchStatus =
+        shiftFilter === "ALL" ||
+        s.status === shiftFilter ||
+        (shiftFilter === "DA_PHE_DUYET_BAN_GIAO" &&
+          (s.status === "DA_PHE_DUYET_BAN_GIAO" || s.status === "DA_DUYET")) ||
+        (shiftFilter === "DA_DUYET" &&
+          (s.status === "DA_PHE_DUYET_BAN_GIAO" || s.status === "DA_DUYET"));
+      const matchCashier =
+        shiftCashierFilter === "ALL" || s.cashierName === shiftCashierFilter;
+      return matchStatus && matchCashier;
+    });
+  }, [shifts, shiftFilter, shiftCashierFilter]);
+
   const totalShiftPages = Math.max(1, Math.ceil(filteredShifts.length / SHIFT_PAGE_SIZE));
   const safeShiftPage = Math.min(shiftPage, totalShiftPages);
   const paginatedShifts = filteredShifts.slice(
@@ -501,9 +551,20 @@ export function Governance({
     safeMovementPage * MOVEMENT_PAGE_SIZE
   );
 
-  const filteredLogs = logs.filter((l) =>
-    `${l.actor} ${l.action} ${l.reason}`.toLowerCase().includes(search.toLowerCase())
-  );
+  const allLogs = realLogs.length > 0 ? realLogs : logs;
+  const filteredLogs = useMemo(() => {
+    return allLogs.filter((l) => {
+      const q = search.trim().toLowerCase();
+      if (!q) return true;
+      return (
+        l.actor.toLowerCase().includes(q) ||
+        l.action.toLowerCase().includes(q) ||
+        l.reason.toLowerCase().includes(q) ||
+        l.id.toLowerCase().includes(q)
+      );
+    });
+  }, [allLogs, search]);
+
   const totalLogPages = Math.max(1, Math.ceil(filteredLogs.length / LOG_PAGE_SIZE));
   const safeLogPage = Math.min(logPage, totalLogPages);
   const paginatedLogs = filteredLogs.slice(
@@ -548,10 +609,10 @@ export function Governance({
             </div>
           </div>
 
-          <div className="mb-4 flex flex-wrap items-center gap-3">
+          <div className="mb-4 flex items-center gap-3">
             <select
               aria-label="Lọc theo trạng thái ca"
-              className={inputClass}
+              className={`${inputClass} !w-56 shrink-0`}
               value={shiftFilter}
               onChange={(e) => {
                 setShiftFilter(e.target.value);
@@ -560,8 +621,25 @@ export function Governance({
             >
               <option value="ALL">Tất cả trạng thái ca</option>
               <option value="DA_DONG_CHO_DUYET">Chờ phê duyệt kết ca</option>
-              <option value="DA_DUYET">Đã phê duyệt</option>
+              <option value="DA_PHE_DUYET_BAN_GIAO">Đã phê duyệt bàn giao</option>
               <option value="DANG_MO">Đang mở (đang phục vụ)</option>
+            </select>
+
+            <select
+              aria-label="Lọc theo tên thu ngân"
+              className={`${inputClass} !w-56 shrink-0`}
+              value={shiftCashierFilter}
+              onChange={(e) => {
+                setShiftCashierFilter(e.target.value);
+                setShiftPage(1);
+              }}
+            >
+              <option value="ALL">Tất cả thu ngân ({cashierOptions.length})</option>
+              {cashierOptions.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -573,8 +651,8 @@ export function Governance({
                   <th>Thu ngân</th>
                   <th>Thời gian mở ca</th>
                   <th>Thời gian đóng ca</th>
-                  <th>Tiền đầu ca</th>
-                  <th>Tiền đếm thực tế</th>
+                  <th>Tiền mặt đầu ca</th>
+                  <th>Tiền mặt cuối ca</th>
                   <th>Trạng thái</th>
                   <th>Thao tác</th>
                 </tr>
@@ -582,7 +660,7 @@ export function Governance({
               <tbody>
                 {paginatedShifts.map((s) => {
                   const isPending = s.status === "DA_DONG_CHO_DUYET";
-                  const isApproved = s.status === "DA_DUYET";
+                  const isApproved = s.status === "DA_PHE_DUYET_BAN_GIAO" || s.status === "DA_DUYET";
                   return (
                     <tr
                       key={s.shiftId}
@@ -852,6 +930,7 @@ export function Governance({
               <Button
                 onClick={() => {
                   setFormError("");
+                  setShowNewPassword(false);
                   setAddModalOpen(true);
                 }}
               >
@@ -985,6 +1064,8 @@ export function Governance({
                               setOtpCode("");
                               setStaffNewPassword("");
                               setStaffConfirmPassword("");
+                              setShowStaffNewPassword(false);
+                              setShowStaffConfirmPassword(false);
                               setOtpResetTarget(s);
                             }}
                           >
@@ -1023,12 +1104,27 @@ export function Governance({
       {/* VIEW 4: AUDIT LOGS */}
       {view === "logs" && (
         <>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="font-semibold">Nhật ký kiểm toán & Giám sát hệ thống (Audit Logs)</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Truy vết hành vi trọng yếu: sổ cái biến động kho hàng, quản lý ca và nộp két Web POS, cập nhật đơn hàng.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={loadAuditLogs} disabled={loadingLogs}>
+                <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loadingLogs ? "animate-spin" : ""}`} />
+                Làm mới dữ liệu
+              </Button>
+            </div>
+          </div>
+
           <div className="relative mb-4 max-w-md">
             <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
             <input
               aria-label="Tìm nhật ký"
               className={`${inputClass} pl-9`}
-              placeholder="Nhân viên, hành động, mã đơn…"
+              placeholder="Tìm theo nhân viên, hành động, mã đơn, SKU…"
               value={search}
               onChange={(e) => {
                 setSearch(e.target.value);
@@ -1077,7 +1173,9 @@ export function Governance({
                 {filteredLogs.length === 0 && (
                   <tr>
                     <td colSpan={5} className="py-8 text-center text-muted-foreground">
-                      Không tìm thấy sự kiện kiểm toán phù hợp.
+                      {loadingLogs
+                        ? "Đang tải dữ liệu nhật ký kiểm toán từ máy chủ..."
+                        : "Không tìm thấy sự kiện kiểm toán phù hợp."}
                     </td>
                   </tr>
                 )}
@@ -1093,7 +1191,7 @@ export function Governance({
             unit="sự kiện"
           />
           <p className="mt-3 text-xs text-muted-foreground">
-            {filteredLogs.length} sự kiện kiểm toán hệ thống.
+            Hiển thị {filteredLogs.length} sự kiện · Dữ liệu đồng bộ trực tiếp từ các bảng sổ cái MySQL (<code>BienDongKho</code>, <code>CaLamViecThuNgan</code>, <code>DonHang</code>).
           </p>
         </>
       )}
@@ -1125,14 +1223,25 @@ export function Governance({
                   />
                 </Field>
                 <Field label="Mật khẩu khởi tạo (≥10 ký tự)">
-                  <input
-                    required
-                    type="password"
-                    placeholder="Mật khẩu ban đầu"
-                    className={inputClass}
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                  />
+                  <div className="relative">
+                    <input
+                      required
+                      type={showNewPassword ? "text" : "password"}
+                      placeholder="Mật khẩu ban đầu"
+                      className={`${inputClass} pr-9`}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      aria-label={showNewPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+                      onClick={() => setShowNewPassword((v) => !v)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-0.5"
+                    >
+                      {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
                 </Field>
                 <Field label="Họ và tên">
                   <input
@@ -1330,22 +1439,44 @@ export function Governance({
 
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Field label="Mật khẩu mới (≥10 ký tự)">
-                      <input
-                        type="password"
-                        placeholder="Mật khẩu mới"
-                        className={inputClass}
-                        value={staffNewPassword}
-                        onChange={(e) => setStaffNewPassword(e.target.value)}
-                      />
+                      <div className="relative">
+                        <input
+                          type={showStaffNewPassword ? "text" : "password"}
+                          placeholder="Mật khẩu mới"
+                          className={`${inputClass} pr-9`}
+                          value={staffNewPassword}
+                          onChange={(e) => setStaffNewPassword(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          tabIndex={-1}
+                          aria-label={showStaffNewPassword ? "Ẩn mật khẩu mới" : "Hiện mật khẩu mới"}
+                          onClick={() => setShowStaffNewPassword((v) => !v)}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-0.5"
+                        >
+                          {showStaffNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
                     </Field>
                     <Field label="Xác nhận mật khẩu">
-                      <input
-                        type="password"
-                        placeholder="Nhập lại mật khẩu"
-                        className={inputClass}
-                        value={staffConfirmPassword}
-                        onChange={(e) => setStaffConfirmPassword(e.target.value)}
-                      />
+                      <div className="relative">
+                        <input
+                          type={showStaffConfirmPassword ? "text" : "password"}
+                          placeholder="Nhập lại mật khẩu"
+                          className={`${inputClass} pr-9`}
+                          value={staffConfirmPassword}
+                          onChange={(e) => setStaffConfirmPassword(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          tabIndex={-1}
+                          aria-label={showStaffConfirmPassword ? "Ẩn xác nhận mật khẩu" : "Hiện xác nhận mật khẩu"}
+                          onClick={() => setShowStaffConfirmPassword((v) => !v)}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-0.5"
+                        >
+                          {showStaffConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
                     </Field>
                   </div>
 
@@ -1549,7 +1680,7 @@ export function Governance({
                 <p className="font-mono font-bold text-foreground">{vnd(shiftDetailModal.openingCash)}</p>
               </div>
               <div className="rounded-lg border border-border bg-muted/20 p-3">
-                <p className="text-xs text-muted-foreground">Tiền mặt đếm thực tế</p>
+                <p className="text-xs text-muted-foreground">Tiền mặt cuối ca</p>
                 <p className="font-mono font-bold text-foreground">
                   {shiftDetailModal.countedCash != null ? vnd(shiftDetailModal.countedCash) : "Chưa kiểm đếm"}
                 </p>

@@ -43,6 +43,7 @@ export function Login() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showNewPass, setShowNewPass] = useState(false);
+  const [showConfirmPass, setShowConfirmPass] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
   const [resetError, setResetError] = useState("");
   const [resetSuccess, setResetSuccess] = useState("");
@@ -579,12 +580,20 @@ export function Login() {
                   <span className="relative mt-1.5 block">
                     <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <input
-                      type={showNewPass ? "text" : "password"}
+                      type={showConfirmPass ? "text" : "password"}
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       placeholder="••••••••••"
                       className="h-11 w-full rounded-md border border-border bg-canvas pl-9 pr-10 text-sm outline-none focus:border-primary"
                     />
+                    <button
+                      type="button"
+                      aria-label={showConfirmPass ? "Ẩn xác nhận mật khẩu" : "Hiện xác nhận mật khẩu"}
+                      onClick={() => setShowConfirmPass((s) => !s)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      {showConfirmPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
                   </span>
                 </label>
 
