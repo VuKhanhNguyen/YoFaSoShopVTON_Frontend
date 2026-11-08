@@ -16,7 +16,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="vi">
+    <html lang="vi" suppressHydrationWarning>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
@@ -24,8 +24,14 @@ export default function RootLayout({
           rel="stylesheet"
           href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Playfair+Display:wght@600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
         />
+        {/* shortcut: xoa thuoc tinh bis_skin_checked do browser extension (Urban VPN) bom vao DOM truoc khi React hydrate, tat extension hoac mo an danh neu can test moi truong sach tuyet doi */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var c=function(){document.querySelectorAll('[bis_skin_checked]').forEach(function(e){e.removeAttribute('bis_skin_checked')})};c();var o=new MutationObserver(function(m){for(var i=0;i<m.length;i++){if(m[i].attributeName==='bis_skin_checked'&&m[i].target.removeAttribute){m[i].target.removeAttribute('bis_skin_checked')}}});o.observe(document.documentElement,{subtree:true,attributes:true,attributeFilter:['bis_skin_checked']});window.addEventListener('DOMContentLoaded',c);setTimeout(function(){o.disconnect()},3000)}catch(e){}})()`,
+          }}
+        />
       </head>
-      <body className="min-h-dvh bg-background text-foreground antialiased selection:bg-accent selection:text-primary">
+      <body className="min-h-dvh bg-background text-foreground antialiased selection:bg-accent selection:text-primary" suppressHydrationWarning>
         <AuthProvider>
           <ServerOfflineBanner />
           {children}

@@ -8,10 +8,20 @@ import { RoleSwitcher } from "@/components/role-switcher";
 import { useAuth } from "@/lib/auth";
 
 /** Header dùng chung cho các phân hệ nội bộ: logo, tiêu đề, chuông thông báo, widget đổi vai trò. */
-export function StaffHeader({ title, children }: { title: string; children?: ReactNode }) {
+export function StaffHeader({
+  title,
+  children,
+  className = "",
+}: {
+  title: string;
+  children?: ReactNode;
+  className?: string;
+}) {
   const { user } = useAuth();
   return (
-    <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-surface px-4 py-2">
+    <header
+      className={`sticky top-0 z-40 flex min-h-14 shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-surface/95 px-4 py-2 backdrop-blur-xs ${className}`}
+    >
       <Link href="/" className="flex items-center gap-2 transition-opacity hover:opacity-90">
         <Image
           src="/brand/logo.png"

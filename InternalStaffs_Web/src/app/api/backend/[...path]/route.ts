@@ -143,7 +143,13 @@ async function handle(
       },
       cache: "no-store",
       redirect: "error",
-      signal: AbortSignal.timeout(path === "/assets" ? 60000 : 20000),
+      signal: AbortSignal.timeout(
+      path === "/assets" ||
+        path.startsWith("/catalog/images/") ||
+        path === "/me/avatar"
+        ? 60000
+        : 20000,
+    ),
     });
   try {
     let tokens: TokenPair | null | undefined,

@@ -99,21 +99,21 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<StaffUser | null>(null);
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    // 1. Kiểm tra session cục bộ (cho demo / offline)
+  const [user, setUser] = useState<StaffUser | null>(() => {
     try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        setUser(JSON.parse(raw) as StaffUser);
+      if (typeof window !== "undefined") {
+        const raw = window.localStorage.getItem(STORAGE_KEY);
+        if (raw) return JSON.parse(raw) as StaffUser;
       }
     } catch {
       // bỏ qua lỗi parse
     }
+    return null;
+  });
+  const [ready, setReady] = useState(false);
 
-    // 2. Thử đồng bộ với backend nếu có cookie đăng nhập thực tế
+  useEffect(() => {
+    // Thử đồng bộ với backend nếu có cookie đăng nhập thực tế
     api<{ id?: string; fullName?: string; email?: string; roles?: string[] }>("/me")
       .then((me) => {
         if (me && me.roles && me.roles.length > 0) {
@@ -139,26 +139,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = async (email: string, pass: string, remember: boolean): Promise<StaffUser | null> => {
-    // Ưu tiên kiểm tra demo accounts để đảm bảo 1-click login mượt mà
-    const demo = authenticateDemo(email, pass);
-    if (demo) {
-      setUser(demo);
-      if (remember) {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(demo));
-      } else {
-        window.localStorage.removeItem(STORAGE_KEY);
-      }
-      // Thử login backend ngầm để đồng bộ cookie nếu backend có tài khoản tương ứng
-      api("/auth/login", "POST", { email, password: pass }, undefined, remember).catch(() => {});
-      return demo;
-    }
+    const cleanEmail = email.trim();
 
-    // Nếu không khớp demo, thử gọi API backend thực tế
+    // 1. Gọi API backend thực tế trước với payload { username, password }
     try {
       const res = await api<{ user?: { fullName?: string; email?: string; roles?: string[] } }>(
         "/auth/login",
         "POST",
-        { email, password: pass },
+        { username: cleanEmail, password: pass },
         undefined,
         remember
       );
@@ -169,13 +157,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         role: mappedRole,
         name: bUser?.fullName || "Nhân viên YoFaSo",
         code: "NV-REAL",
-        email: bUser?.email || email,
+        email: bUser?.email || cleanEmail,
         roles: bUser?.roles || [mappedRole],
       };
       setUser(u);
-      if (remember) window.localStorage.setItem(STORAGE_KEY, JSON.stringify(u));
+      if (remember) {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(u));
+      } else {
+        window.localStorage.removeItem(STORAGE_KEY);
+      }
       return u;
-    } catch {
+    } catch (err) {
+      // Nếu API trả về lỗi xác thực cụ thể (401, 403, 400...), ném lỗi để giao diện hiển thị đúng nguyên nhân
+      if (err instanceof Error && "status" in err && (err as { status: number }).status !== 0) {
+        throw err;
+      }
+
+      // Chỉ fallback sang tài khoản demo khi backend hoàn toàn offline (mất mạng / status 0)
+      const demo = authenticateDemo(cleanEmail, pass);
+      if (demo) {
+        setUser(demo);
+        if (remember) {
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(demo));
+        } else {
+          window.localStorage.removeItem(STORAGE_KEY);
+        }
+        return demo;
+      }
       return null;
     }
   };

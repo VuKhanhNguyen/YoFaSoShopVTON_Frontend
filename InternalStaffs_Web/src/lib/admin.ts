@@ -1,4 +1,4 @@
-export type AdminOrderStatus = "CHO_XAC_NHAN" | "DANG_DONG_GOI" | "DANG_GIAO_HANG" | "HOAN_TAT" | "DA_HUY";
+export type AdminOrderStatus = "CHO_XAC_NHAN" | "DANG_DONG_GOI" | "DANG_GIAO_HANG" | "HOAN_TAT" | "DA_HUY" | "TRA_HANG";
 
 export interface AdminOrder {
   id: string;
@@ -106,8 +106,15 @@ export interface AdminVoucher {
 }
 
 export const ADMIN_VOUCHERS: AdminVoucher[] = [
-  { code: "YOFASO10", name: "Giảm 10% đơn từ 500k", kind: "PERCENT", value: 10, minimum: 500000, cap: 100000, quantity: 100, used: 42, expires: "2026-10-31" },
-  { code: "FREESHIP", name: "Miễn phí vận chuyển", kind: "SHIPPING", value: 30000, minimum: 0, cap: 30000, quantity: 200, used: 88, expires: "2026-10-31" },
+  { code: "YOFASO15", name: "Ưu đãi 15% đơn hàng đầu tiên", kind: "PERCENT", value: 15, minimum: 350000, cap: 150000, quantity: 500, used: 62, expires: "2026-12-31" },
+  { code: "FREESHIP", name: "Miễn phí vận chuyển toàn quốc", kind: "SHIPPING", value: 30000, minimum: 500000, cap: 30000, quantity: 1000, used: 185, expires: "2026-12-31" },
+  { code: "VTON100", name: "Voucher kích hoạt hồ sơ AI dáng người", kind: "FIXED", value: 100000, minimum: 600000, cap: 100000, quantity: 300, used: 41, expires: "2026-12-31" },
+  { code: "YOFASO10", name: "Ưu đãi 10% đơn hàng đầu tiên", kind: "PERCENT", value: 10, minimum: 300000, cap: 100000, quantity: 500, used: 48, expires: "2026-12-31" },
+  { code: "FREESHIP50", name: "Miễn phí vận chuyển 50k", kind: "SHIPPING", value: 50000, minimum: 500000, cap: 50000, quantity: 1000, used: 126, expires: "2026-12-31" },
+  { code: "VIPGOLD15", name: "Đặc quyền tri ân hội viên Vàng & Kim Cương", kind: "PERCENT", value: 15, minimum: 600000, cap: 200000, quantity: 200, used: 35, expires: "2026-12-31" },
+  { code: "GIAM50K", name: "Giảm ngay 50.000đ cho đơn từ 400.000đ", kind: "FIXED", value: 50000, minimum: 400000, cap: 50000, quantity: 300, used: 89, expires: "2026-12-31" },
+  { code: "HEVTON2026", name: "Lễ hội thử đồ ảo mùa hè VTON", kind: "PERCENT", value: 12, minimum: 350000, cap: 150000, quantity: 400, used: 95, expires: "2026-12-31" },
+  { code: "SINHNHATYOFASO", name: "Quà tặng sinh nhật tháng vàng", kind: "PERCENT", value: 20, minimum: 500000, cap: 300000, quantity: 100, used: 12, expires: "2026-10-31" },
 ];
 
 export function voucherError(v: AdminVoucher, existing: AdminVoucher[] = []) {
@@ -135,6 +142,7 @@ export function voucherDiscount(v: AdminVoucher, subtotal: number, day: string, 
 export interface AdminReview {
   id: string;
   lineId: string;
+  orderId?: string;
   verified: boolean;
   customer: string;
   product: string;
@@ -142,12 +150,15 @@ export interface AdminReview {
   comment: string;
   status: "CHO_DUYET" | "HIEN_THI" | "DA_AN";
   reply: string;
+  photoUrl?: string | null;
+  createdAt?: string;
 }
 
 export const ADMIN_REVIEWS: AdminReview[] = [
   {
     id: "DG001",
     lineId: "CTDH-0091",
+    orderId: "DH00000001",
     verified: true,
     customer: "Trần Thu Hà",
     product: "Áo Sơ Mi Lụa Trắng · Size M",
@@ -155,10 +166,12 @@ export const ADMIN_REVIEWS: AdminReview[] = [
     comment: "Áo mặc vừa vặn y hệt như lúc thử bằng AI VTON trên app, vải mát mịn!",
     status: "CHO_DUYET",
     reply: "Cảm ơn bạn đã tin tưởng ủng hộ shop!",
+    createdAt: "2026-10-28 14:00:00",
   },
   {
     id: "DG002",
     lineId: "CTDH-0105",
+    orderId: "DH00000002",
     verified: true,
     customer: "Nguyễn Mai Anh",
     product: "Đầm lụa Slip · Size S",
@@ -166,6 +179,7 @@ export const ADMIN_REVIEWS: AdminReview[] = [
     comment: "Màu đẹp, giao hàng nhanh. Shop tư vấn size rất chuẩn.",
     status: "HIEN_THI",
     reply: "YoFaSo cảm ơn bạn, mong được phục vụ bạn lần tới.",
+    createdAt: "2026-10-28 14:00:00",
   },
 ];
 

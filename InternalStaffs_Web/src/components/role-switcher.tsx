@@ -1,97 +1,114 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
-import { ChevronDown, LogOut } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { ACCOUNTS, ROLES, roleHome, useAuth, type Role } from "@/lib/auth";
+import { useEffect, useState } from "react";
+import { ACCOUNTS, useAuth } from "@/lib/auth";
+import { ProfileModal } from "@/components/admin/profile-modal";
+import { api } from "@/lib/api";
 
-/** Widget chuyển vai trò demo 1-chạm: avatar + tên + badge vai trò, đổi vai trò không cần đăng xuất. */
+/**
+ * Widget hiển thị cố định người dùng và vai trò (viên thuốc cố định có viền).
+ * Tự động tải avatar thực từ Cloudflare R2 / Backend.
+ * Bấm vào viên thuốc để mở xem/chỉnh sửa Hồ sơ cá nhân & Địa chỉ cho mọi vai trò nội bộ.
+ */
 export function RoleSwitcher() {
-  const { user, switchRole, logout } = useAuth();
-  const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
+  const { user } = useAuth();
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [fallbackSrc, setFallbackSrc] = useState<string | null>(null);
+  const [avatarError, setAvatarError] = useState(false);
 
   useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    if (!user) return;
+    let active = true;
+
+    const fetchAvatar = () => {
+      api<{
+        avatarKey?: string;
+        avatarUrl?: string;
+        avatarDirectUrl?: string;
+        userId?: string;
+      }>("/me")
+        .then((me) => {
+          if (!active || !me) return;
+          const proxy = me.avatarUrl
+            ? `/api/backend${me.avatarUrl.replace(/^\/api\/v1/, "")}`
+            : me.avatarKey && me.userId
+            ? `/api/backend/users/${me.userId}/avatar`
+            : null;
+          const direct = me.avatarDirectUrl || null;
+          if (direct) {
+            setAvatarUrl(direct);
+            setFallbackSrc(proxy);
+          } else {
+            setAvatarUrl(proxy);
+            setFallbackSrc(null);
+          }
+          setAvatarError(false);
+        })
+        .catch(() => {});
     };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
+
+    fetchAvatar();
+
+    const onAvatarUpdated = (e: Event) => {
+      const custom = e as CustomEvent<{ avatarUrl?: string }>;
+      if (custom.detail?.avatarUrl) {
+        setAvatarUrl(custom.detail.avatarUrl);
+        setFallbackSrc(null);
+        setAvatarError(false);
+      } else {
+        fetchAvatar();
+      }
+    };
+
+    window.addEventListener("yofaso:avatar-updated", onAvatarUpdated);
+    return () => {
+      active = false;
+      window.removeEventListener("yofaso:avatar-updated", onAvatarUpdated);
+    };
+  }, [user]);
 
   if (!user) return null;
   const acc = ACCOUNTS[user.role] ?? ACCOUNTS.ROLE_SHOP_ADMIN;
 
-  const pick = (role: Role) => {
-    switchRole(role);
-    setOpen(false);
-    router.push(roleHome(role));
-  };
-
   return (
-    <div ref={rootRef} className="relative">
-      <Button
-        variant="outline"
-        aria-label="Đổi vai trò demo"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-        className="h-9 gap-2 rounded-full pl-1.5 pr-2"
+    <>
+      <button
+        type="button"
+        onClick={() => setProfileOpen(true)}
+        title="Xem và chỉnh sửa hồ sơ cá nhân"
+        aria-label={`Người dùng hiện tại: ${user.name} - ${acc.label}. Bấm để xem và sửa hồ sơ cá nhân.`}
+        className="flex h-9 cursor-pointer items-center gap-2 rounded-full border border-border bg-surface pl-1.5 pr-3 shadow-xs transition-colors hover:border-accent hover:bg-surface-muted/60"
       >
-        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary font-mono text-[10px] font-bold text-primary-foreground">
-          {user.name.split(" ").slice(-1)[0]?.slice(0, 1) ?? "?"}
+        <span className="relative flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-primary font-mono text-[10px] font-bold text-primary-foreground">
+          {avatarUrl && !avatarError ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={avatarUrl}
+              alt={user.name}
+              className="h-full w-full object-cover"
+              onError={() => {
+                if (fallbackSrc && avatarUrl !== fallbackSrc) {
+                  setAvatarUrl(fallbackSrc);
+                  setFallbackSrc(null);
+                } else {
+                  setAvatarError(true);
+                }
+              }}
+            />
+          ) : (
+            <span>{user.name.split(" ").slice(-1)[0]?.slice(0, 1) ?? "?"}</span>
+          )}
         </span>
-        <span className="hidden text-xs font-semibold sm:inline">{user.name}</span>
-        <span className="hidden rounded-full bg-accent-subtle px-2 py-0.5 text-[10px] font-bold text-accent-hover md:inline">
-          {acc.icon} {acc.label}
+        <span className="hidden text-xs font-semibold text-foreground sm:inline">{user.name}</span>
+        <span className="inline-flex items-center gap-1 rounded-full bg-accent-subtle px-2 py-0.5 text-[10px] font-bold text-accent-hover">
+          <span aria-hidden>{acc.icon}</span> {acc.label}
         </span>
-        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-      </Button>
+      </button>
 
-      {open && (
-        <div className="absolute right-0 top-11 z-50 w-72 overflow-hidden rounded-xl border border-border bg-surface shadow-modal">
-          <p className="border-b border-border bg-accent-subtle px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-accent-hover">
-            Chuyển vai trò tức thì (demo chấm điểm)
-          </p>
-          {ROLES.map((role) => {
-            const a = ACCOUNTS[role];
-            const active = role === user.role;
-            return (
-              <button
-                key={role}
-                type="button"
-                onClick={() => pick(role)}
-                className={`flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm transition-colors hover:bg-muted ${
-                  active ? "bg-accent-subtle" : ""
-                }`}
-              >
-                <span className="text-lg" aria-hidden>
-                  {a.icon}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block font-semibold">{a.label}</span>
-                  <span className="block font-mono text-[11px] text-muted-foreground">{a.email}</span>
-                </span>
-                {active && <span className="h-2 w-2 rounded-full bg-success" aria-label="Đang dùng" />}
-              </button>
-            );
-          })}
-          <button
-            type="button"
-            onClick={async () => {
-              await logout();
-              setOpen(false);
-              router.push("/login");
-            }}
-            className="flex w-full items-center gap-3 border-t border-border px-3 py-2.5 text-left text-sm font-semibold text-destructive transition-colors hover:bg-danger-subtle"
-          >
-            <LogOut className="h-4 w-4" />
-            Đăng xuất khỏi cổng vận hành
-          </button>
-        </div>
-      )}
-    </div>
+      <ProfileModal open={profileOpen} onClose={() => setProfileOpen(false)} />
+    </>
   );
 }
+
+export const UserBadge = RoleSwitcher;

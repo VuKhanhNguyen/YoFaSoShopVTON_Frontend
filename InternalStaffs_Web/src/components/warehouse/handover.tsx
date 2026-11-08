@@ -118,7 +118,7 @@ function Handover({ orders, onHandover }: { orders: WhOrder[]; onHandover?: ((id
                   <td className="px-3 py-2 font-mono font-bold">#{o.id}</td>
                   <td className="px-3 py-2">{o.receiver}</td>
                   <td className="px-3 py-2 text-right font-mono">{o.cod > 0 ? vnd(o.cod) : "0 đ"}</td>
-                  <td className="px-3 py-2 text-right font-mono text-xs text-muted-foreground">{new Date(Date.now() - (scannedOrders.length - i) * 15000).toLocaleTimeString("vi-VN")}</td>
+                  <td className="px-3 py-2 text-right font-mono text-xs text-muted-foreground">{new Date(Date.now() - (scannedOrders.length - i) * 15000).toLocaleTimeString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })}</td>
                 </tr>
               ))}
             </tbody>
