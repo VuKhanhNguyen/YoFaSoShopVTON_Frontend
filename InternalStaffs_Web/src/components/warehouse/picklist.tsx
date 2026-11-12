@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
-import { AlertTriangle, FileText, Printer, XCircle } from "lucide-react";
+import { AlertTriangle, FileText, Package, Printer, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { buildPickList, countItems, type WhOrder, type WhStatus } from "@/lib/warehouse";
+import { api } from "@/lib/api";
+import { pushToast } from "@/lib/feedback";
 
 const STATUS_LABEL: Record<WhStatus, { label: string; cls: string }> = {
   CHO_XAC_NHAN: { label: "Chờ nhặt hàng", cls: "bg-warning-subtle text-warning" },
@@ -10,23 +12,64 @@ const STATUS_LABEL: Record<WhStatus, { label: string; cls: string }> = {
   CHO_SHIPPER: { label: "Chờ shipper nhận", cls: "bg-accent-subtle text-accent-hover" },
   DANG_GIAO_HANG: { label: "Đang giao hàng", cls: "bg-success-subtle text-success" },
   DA_HUY: { label: "Đã hủy", cls: "bg-danger-subtle text-destructive" },
+  TRA_HANG: { label: "Hoàn hàng", cls: "bg-danger-subtle text-destructive" },
+  HOAN_TAT: { label: "Hoàn tất", cls: "bg-success-subtle text-success" },
 };
 
-const DAY_LABEL: Record<string, string> = { A: "Dãy Kệ A (Áo Tops)", B: "Dãy Kệ B (Quần Bottoms)", C: "Dãy Kệ C (Váy)", D: "Dãy Kệ D (Đầm)" };
+const DAY_LABEL: Record<string, string> = {
+  A: "Dãy Kệ A (Áo Tops)",
+  B: "Dãy Kệ B (Quần Bottoms)",
+  C: "Dãy Kệ C (Váy)",
+  D: "Dãy Kệ D (Đầm)",
+  F: "Dãy Kệ F (Thời trang nữ / Áo Tops & Váy)",
+  M: "Dãy Kệ M (Thời trang nam / Sơ mi & Quần)",
+};
 
 /** UC_WH_01 — Bảng điều phối đơn online & sinh Phiếu nhặt hàng theo cụm giá kệ. RBAC: ẩn 100% giá bán/doanh thu. */
-export function PickListBoard({ orders, onPrint }: { orders: WhOrder[]; onPrint?: () => void }) {
+export function PickListBoard({
+  orders,
+  onPrint,
+  onRefresh,
+}: {
+  orders: WhOrder[];
+  onPrint?: () => void;
+  onRefresh?: () => void;
+}) {
   const [selected, setSelected] = useState<string[]>([]);
   const [showPick, setShowPick] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
+  const [packing, setPacking] = useState(false);
 
-  const active = orders.filter((o) => o.status !== "DA_HUY");
-  const cancelled = orders.filter((o) => o.status === "DA_HUY");
+  const active = orders.filter((o) => o.status !== "DA_HUY" && o.status !== "TRA_HANG");
+  const cancelled = orders.filter((o) => o.status === "DA_HUY" || o.status === "TRA_HANG");
   const chosen = active.filter((o) => selected.includes(o.id));
   const groups = useMemo(() => buildPickList(chosen), [chosen]);
 
   const toggle = (id: string) => setSelected((ds) => (ds.includes(id) ? ds.filter((x) => x !== id) : [...ds, id]));
   const togglePick = (key: string) => setPicked((ds) => (ds.includes(key) ? ds.filter((x) => x !== key) : [...ds, key]));
+
+  const startPacking = async () => {
+    if (selected.length === 0) return;
+    setPacking(true);
+    let count = 0;
+    for (const orderId of selected) {
+      const ord = orders.find((o) => o.id === orderId);
+      if (ord && ord.status === "CHO_XAC_NHAN") {
+        try {
+          await api(`/staff/orders/${orderId}/pack`, "POST");
+          count++;
+        } catch (e: any) {
+          console.error(e);
+        }
+      }
+    }
+    setPacking(false);
+    if (count > 0) {
+      pushToast({ tone: "success", title: `Đã chuyển ${count} đơn sang trạng thái ĐANG ĐÓNG GÓI!` });
+      onRefresh?.();
+      setSelected([]);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -96,10 +139,21 @@ export function PickListBoard({ orders, onPrint }: { orders: WhOrder[]; onPrint?
             Đã chọn <span className="font-mono font-bold">{selected.length}</span> đơn hàng (gồm{" "}
             <span className="font-mono font-bold">{countItems(chosen)}</span> món đồ)
           </span>
-          <Button className="ml-auto h-12 gap-2 px-6 text-sm font-bold" onClick={() => { setPicked([]); setShowPick(true); }}>
-            <FileText className="h-5 w-5" />
-            SINH PHIẾU NHẶT HÀNG TỔNG HỢP (PICK LIST)
-          </Button>
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant="outline"
+              disabled={packing}
+              className="h-12 gap-2 px-5 text-sm font-bold"
+              onClick={startPacking}
+            >
+              <Package className="h-4 w-4" />
+              {packing ? "Đang xử lý…" : "CHUYỂN SANG ĐÓNG GÓI"}
+            </Button>
+            <Button className="h-12 gap-2 px-6 text-sm font-bold" onClick={() => { setPicked([]); setShowPick(true); }}>
+              <FileText className="h-5 w-5" />
+              SINH PHIẾU NHẶT HÀNG TỔNG HỢP (PICK LIST)
+            </Button>
+          </div>
         </div>
       )}
 
@@ -108,7 +162,7 @@ export function PickListBoard({ orders, onPrint }: { orders: WhOrder[]; onPrint?
         <DialogContent className="max-w-3xl">
           <DialogTitle className="text-lg">Phiếu Nhặt Hàng Tổng Hợp — Tối ưu lộ trình kệ</DialogTitle>
           <DialogDescription>
-            {selected.length} đơn · {countItems(chosen)} món · Lộ trình: Dãy A → B → C → D (mô phỏng)
+            {selected.length} đơn · {countItems(chosen)} món · Lộ trình theo tọa độ kệ thực tế
           </DialogDescription>
           <div className="max-h-[55vh] space-y-4 overflow-y-auto pr-1">
             {groups.map((g) => (

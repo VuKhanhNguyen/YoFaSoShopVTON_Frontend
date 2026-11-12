@@ -1,65 +1,188 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { CheckCircle2, AlertCircle, Printer, ArrowLeftRight, Send } from "lucide-react";
+import { CheckCircle2, AlertCircle, Printer, ArrowLeftRight, RotateCcw, Loader2, RefreshCw } from "lucide-react";
 import { pushToast } from "@/lib/feedback";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Receipt } from "./receipt";
-import { canReturn, countCash, DENOMINATIONS, orderDue, shiftVariance, type Order } from "@/lib/pos-workflows";
+import { api } from "@/lib/api";
+import { canReturn, countCash, DENOMINATIONS, shiftVariance, type Order } from "@/lib/pos-workflows";
 import { type BienThe, vnd } from "@/lib/pos";
+import { vnLabel } from "@/lib/vietnamese-labels";
 
 export function Operations({
   initialTab,
-  orders,
+  orders: localOrders,
   catalog,
+  shiftId: currentShiftId,
   shiftStatus,
   onCloseShift,
-  onExchange,
   onPrint,
+  onOrderUpdated,
 }: {
   initialTab: "orders" | "shift";
   orders: Order[];
   catalog: BienThe[];
+  shiftId?: string;
   shiftStatus: string;
   onCloseShift: (counts: Record<number, number>, note: string) => void;
-  onExchange: (id: number, from: string, to: string) => string;
   onPrint: (order: Order) => void;
+  onOrderUpdated?: () => void;
 }) {
   const [tab, setTab] = useState(initialTab);
   const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState<number | null>(null);
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [message, setMessage] = useState("");
+  const [dbOrders, setDbOrders] = useState<any[]>([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [returning, setReturning] = useState(false);
+
+  // Shift state
+  const [shiftData, setShiftData] = useState<{
+    shiftId: string;
+    openingCash: number;
+    cashSales: number;
+    expectedCash: number;
+    status: string;
+  } | null>(null);
+  const [loadingShift, setLoadingShift] = useState(false);
   const [counts, setCounts] = useState<Record<number, number>>({});
   const [note, setNote] = useState("");
 
-  const order = orders.find((o) => o.id === selected);
-  const cashRevenue = orders.filter((o) => o.method === "CASH").reduce((s, o) => s + orderDue(o), 0);
-  const qrRevenue = orders.filter((o) => o.method === "QR").reduce((s, o) => s + orderDue(o), 0);
-  const variance = shiftVariance(counts, 2000000, cashRevenue);
-  const old = order?.lines.find((d) => d.maQuanLy === from);
-  const alternatives = catalog.filter((p) => p.ten === old?.ten && p.maQuanLy !== from);
+  const fetchOrders = async () => {
+    setLoadingOrders(true);
+    try {
+      const res = await api<any[]>("/staff/orders?limit=30");
+      if (Array.isArray(res)) {
+        setDbOrders(res);
+      }
+    } catch {
+      // fallback to local orders
+    } finally {
+      setLoadingOrders(false);
+    }
+  };
 
-  const closeRef = useRef({ tab, counts, note, variance, shiftStatus, onCloseShift });
-  closeRef.current = { tab, counts, note, variance, shiftStatus, onCloseShift };
+  const fetchShiftDetails = async () => {
+    if (!currentShiftId) return;
+    setLoadingShift(true);
+    try {
+      const res = await api<any>(`/pos/shifts/${encodeURIComponent(currentShiftId)}`);
+      if (res && res.shiftId) {
+        setShiftData({
+          shiftId: res.shiftId,
+          openingCash: Number(res.openingCash) || 0,
+          cashSales: Number(res.cashSales) || 0,
+          expectedCash: Number(res.expectedCash) || 0,
+          status: res.status || shiftStatus,
+        });
+      }
+    } catch {
+      // fallback
+    } finally {
+      setLoadingShift(false);
+    }
+  };
 
   useEffect(() => {
-    const key = (e: KeyboardEvent) => {
-      const state = closeRef.current;
-      if (e.key === "F12" && state.tab === "shift") {
-        e.preventDefault();
-        if (state.shiftStatus === "DANG_MO" && (state.variance === 0 || state.note.trim())) {
-          state.onCloseShift(state.counts, state.note);
-        }
-      }
-    };
-    window.addEventListener("keydown", key);
-    return () => window.removeEventListener("keydown", key);
-  }, []);
+    if (tab === "orders") {
+      fetchOrders();
+    } else {
+      fetchShiftDetails();
+    }
+  }, [tab, currentShiftId]);
 
-  const target = alternatives.find((p) => p.maQuanLy === to);
+  const viewOrderDetail = async (orderSummary: any) => {
+    const id = orderSummary.orderId || orderSummary.id;
+    setLoadingDetail(true);
+    try {
+      const res = await api<any>(`/staff/orders/${encodeURIComponent(id)}`);
+      if (res) {
+        const orderObj: Order = {
+          id: res.orderId || id,
+          orderId: res.orderId || id,
+          created: res.createdAt || res.created || new Date().toISOString(),
+          customerName: res.recipientName || orderSummary.recipientName || "Khách tại quầy",
+          customerPhone: res.phone || orderSummary.phone || "",
+          cashierId: res.cashierId || orderSummary.cashierId || "Thu ngân",
+          method: res.paymentMethod === "VIETQR_CHUYEN_KHOAN_ONLINE" ? "QR" : "CASH",
+          discount: Number(res.discount) || 0,
+          pointsUsed: 0,
+          total: Number(res.total) || Number(orderSummary.total) || 0,
+          status: res.status || orderSummary.status,
+          channel: res.channel || "TAI_QUAY_POS",
+          tendered: Number(res.total) || Number(orderSummary.total) || 0,
+          lines: (res.items || []).map((it: any) => ({
+            variantId: it.variantId,
+            maQuanLy: it.sku || it.variantId,
+            sku: it.sku || it.variantId,
+            ten: it.productName || it.name || "Sản phẩm",
+            size: it.size || "",
+            mau: it.colorName || "",
+            donGia: Number(it.price) || 0,
+            soLuong: Number(it.quantity) || 1,
+          })),
+        };
+        setSelectedOrder(orderObj);
+      }
+    } catch {
+      // fallback
+      const matchLocal = localOrders.find((o) => String(o.id) === String(id));
+      if (matchLocal) setSelectedOrder(matchLocal);
+    } finally {
+      setLoadingDetail(false);
+    }
+  };
+
+  const handleReturnOrder = async (orderId: string | number) => {
+    if (!confirm(`Xác nhận nhận trả hàng và hoàn tồn kho cho đơn #${orderId}? Thao tác này sẽ ghi trực tiếp vào cơ sở dữ liệu.`)) {
+      return;
+    }
+    setReturning(true);
+    try {
+      await api(`/staff/orders/${encodeURIComponent(orderId)}/receive-return`, "POST");
+      pushToast({
+        tone: "success",
+        title: `Đã xử lý đổi trả thành công cho đơn #${orderId}`,
+        detail: "Tồn kho đã được hoàn lại vào hệ thống và ghi nhận sổ cái kho",
+      });
+      fetchOrders();
+      if (selectedOrder && (selectedOrder.id === orderId || selectedOrder.orderId === orderId)) {
+        setSelectedOrder({ ...selectedOrder, status: "TRA_HANG" });
+      }
+      onOrderUpdated?.();
+    } catch (err: any) {
+      pushToast({
+        tone: "error",
+        title: "Không thể hoàn trả đơn hàng",
+        detail: err.message || "Vui lòng thử lại sau",
+      });
+    } finally {
+      setReturning(false);
+    }
+  };
+
+  // Cash calculations
+  const totalCounted = countCash(counts);
+  const expectedCash = shiftData?.expectedCash ?? 2000000;
+  const variance = totalCounted - expectedCash;
+
+  const handleCloseShiftSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (variance !== 0 && !note.trim()) {
+      alert("Tiền mặt kiểm đếm có chênh lệch so với kỳ vọng. Bắt buộc nhập ghi chú giải trình!");
+      return;
+    }
+    onCloseShift(counts, note);
+  };
+
+  const displayList = dbOrders.length > 0 ? dbOrders : localOrders;
+  const filteredOrders = displayList.filter((o) => {
+    const code = String(o.orderId || o.id || "");
+    const recipient = String(o.recipientName || o.customerName || "");
+    return code.toLowerCase().includes(search.toLowerCase()) || recipient.toLowerCase().includes(search.toLowerCase());
+  });
 
   return (
     <div className="space-y-5">
@@ -74,252 +197,231 @@ export function Operations({
 
       {tab === "orders" ? (
         <>
-          <Input
-            aria-label="Tìm hóa đơn"
-            placeholder="Tìm số hóa đơn…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="h-11"
-          />
-
-          {orders.length === 0 && (
-            <p className="py-10 text-center text-muted-foreground text-sm">Chưa có hóa đơn đã thanh toán trong ca.</p>
-          )}
-
-          <div className="max-h-52 overflow-auto rounded-lg border border-border">
-            <table className="w-full text-sm">
-              <thead className="bg-surface-muted text-left">
-                <tr>
-                  <th className="p-3">Hóa đơn</th>
-                  <th className="p-3">Thanh toán</th>
-                  <th className="p-3 text-right">Tổng cộng</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {orders
-                  .filter((o) => String(o.id).includes(search))
-                  .map((o) => (
-                    <tr className="border-b border-border hover:bg-muted/50" key={o.id}>
-                      <td className="p-3 font-mono font-bold">#{o.id}</td>
-                      <td className="p-3">{o.method === "CASH" ? "Tiền mặt" : o.method === "QR" ? "VietQR" : "Thẻ POS"}</td>
-                      <td className="p-3 text-right font-mono font-semibold text-accent-hover">{vnd(orderDue(o))}</td>
-                      <td className="p-3 text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setSelected(o.id);
-                            setFrom("");
-                            setTo("");
-                            setMessage("");
-                          }}
-                        >
-                          Chi tiết
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
+          <div className="flex gap-2">
+            <Input
+              aria-label="Tìm hóa đơn"
+              placeholder="Tìm mã đơn hàng (DH...) hoặc tên khách hàng…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="h-11 flex-1"
+            />
+            <Button variant="outline" onClick={fetchOrders} disabled={loadingOrders} className="h-11 gap-1.5">
+              <RefreshCw className={`h-4 w-4 ${loadingOrders ? "animate-spin" : ""}`} />
+              Làm mới
+            </Button>
           </div>
 
-          {order && (
+          {loadingOrders ? (
+            <div className="py-12 text-center text-muted-foreground flex items-center justify-center gap-2">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              Đang tải danh sách đơn hàng…
+            </div>
+          ) : filteredOrders.length === 0 ? (
+            <p className="py-10 text-center text-muted-foreground text-sm">Chưa có hóa đơn nào phù hợp.</p>
+          ) : (
+            <div className="max-h-56 overflow-auto rounded-lg border border-border">
+              <table className="w-full text-xs">
+                <thead className="bg-surface-muted text-left sticky top-0">
+                  <tr>
+                    <th className="p-3">Mã đơn</th>
+                    <th className="p-3">Khách hàng</th>
+                    <th className="p-3">Kênh / Phương thức</th>
+                    <th className="p-3">Trạng thái</th>
+                    <th className="p-3 text-right">Tổng tiền</th>
+                    <th className="p-3 text-right">Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredOrders.map((o) => {
+                    const id = o.orderId || o.id;
+                    const totalVal = Number(o.total) || 0;
+                    const status = o.status || "HOAN_TAT";
+                    const isReturned = status === "TRA_HANG";
+                    return (
+                      <tr className="border-b border-border hover:bg-muted/40 transition-colors" key={id}>
+                        <td className="p-3 font-mono font-bold text-accent-hover">{id}</td>
+                        <td className="p-3">{o.recipientName || o.customerName || "Khách tại quầy"}</td>
+                        <td className="p-3">
+                          <span className="font-mono text-[11px] text-muted-foreground">
+                            {vnLabel(o.channel || "TAI_QUAY_POS")} · {vnLabel(o.paymentMethod || o.method || "TIEN_MAT_TAI_QUAY")}
+                          </span>
+                        </td>
+                        <td className="p-3">
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                              isReturned
+                                ? "bg-danger-subtle text-destructive"
+                                : "bg-success-subtle text-success"
+                            }`}
+                          >
+                            {isReturned ? "ĐÃ ĐỔI TRẢ" : "HOÀN TẤT"}
+                          </span>
+                        </td>
+                        <td className="p-3 text-right font-mono font-semibold">{vnd(totalVal)}</td>
+                        <td className="p-3 text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => viewOrderDetail(o)}
+                          >
+                            Chi tiết
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {loadingDetail && (
+            <div className="py-6 text-center text-muted-foreground flex items-center justify-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Đang tải chi tiết hóa đơn từ cơ sở dữ liệu…
+            </div>
+          )}
+
+          {selectedOrder && !loadingDetail && (
             <div className="grid gap-5 md:grid-cols-2 pt-4 border-t border-border">
-              <div className="space-y-3">
-                <h2 className="text-lg font-bold">Hóa đơn #{order.id}</h2>
-                <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" onClick={() => onPrint(order)} className="gap-2">
-                    <Printer className="h-4 w-4" />
-                    In lại hóa đơn
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled={!canReturn(order.created, new Date())}
-                    onClick={() => {
-                      setFrom(order.lines[0]?.maQuanLy ?? "");
-                      setTo("");
-                    }}
-                    className="gap-2"
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-lg font-bold">Hóa đơn #{selectedOrder.orderId || selectedOrder.id}</h2>
+                  <span
+                    className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
+                      selectedOrder.status === "TRA_HANG" ? "bg-danger-subtle text-destructive" : "bg-success-subtle text-success"
+                    }`}
                   >
-                    <ArrowLeftRight className="h-4 w-4" />
-                    Tiếp nhận đổi hàng
-                  </Button>
+                    {selectedOrder.status === "TRA_HANG" ? "ĐÃ ĐỔI TRẢ / HOÀN TIỀN" : "ĐÃ THANH TOÁN"}
+                  </span>
                 </div>
 
-                {from && (
-                  <section className="space-y-3 border-t border-border pt-4">
-                    <label className="block space-y-1.5 text-sm">
-                      Sản phẩm trả
-                      <select
-                        aria-label="Sản phẩm trả"
-                        className="h-11 w-full rounded-md border border-border bg-surface px-3 text-sm"
-                        value={from}
-                        onChange={(e) => {
-                          setFrom(e.target.value);
-                          setTo("");
-                        }}
-                      >
-                        {order.lines.map((d) => (
-                          <option value={d.maQuanLy} key={d.maQuanLy}>
-                            {d.ten} · {d.size} / {d.mau}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" onClick={() => onPrint(selectedOrder)} className="gap-2 h-9 text-xs">
+                    <Printer className="h-4 w-4" />
+                    In / Tải hóa đơn (PDF)
+                  </Button>
 
-                    <label className="block space-y-1.5 text-sm">
-                      Đổi sang biến thể khác
-                      <select
-                        aria-label="Biến thể đổi"
-                        className="h-11 w-full rounded-md border border-border bg-surface px-3 text-sm"
-                        value={to}
-                        onChange={(e) => setTo(e.target.value)}
-                      >
-                        <option value="">Chọn size / màu</option>
-                        {alternatives.map((p) => (
-                          <option disabled={p.ton < 1} value={p.maQuanLy} key={p.maQuanLy}>
-                            {p.size} / {p.mau} · Còn {p.ton} chiếc
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    {target && old && <p className="font-mono text-sm">Chênh lệch: {vnd(target.donGia - old.donGia)}</p>}
-                    <p className="text-xs text-muted-foreground">Đổi 01 sản phẩm; hoàn tồn cũ và xuất tồn mới.</p>
+                  {selectedOrder.status !== "TRA_HANG" && (
                     <Button
-                      disabled={!target || !old || target.donGia !== old.donGia}
-                      onClick={() => {
-                        setMessage(onExchange(order.id, from, to));
-                        setFrom("");
-                      }}
+                      variant="outline"
+                      disabled={returning}
+                      onClick={() => handleReturnOrder(selectedOrder.orderId || selectedOrder.id)}
+                      className="gap-2 h-9 text-xs text-destructive hover:bg-danger-subtle hover:text-destructive"
                     >
-                      Xác nhận đổi hàng
+                      {returning ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                      Nhận đổi trả hàng tại quầy (Hoàn kho)
                     </Button>
-                    {target && old && target.donGia !== old.donGia && (
-                      <p className="text-warning text-xs">Đổi khác giá cần xác nhận thu / hoàn tiền.</p>
-                    )}
-                  </section>
-                )}
+                  )}
+                </div>
 
-                {message && <p role="status" className="text-success text-sm font-semibold">{message}</p>}
-                {order.exchanges.map((x, i) => (
-                  <p key={i} className="text-xs text-muted-foreground">
-                    Đã đổi {x.from} → {x.to}
-                  </p>
-                ))}
+                <div className="space-y-2 rounded-lg border border-border p-3 text-xs bg-surface-muted">
+                  <p className="font-semibold text-foreground">Sản phẩm trong hóa đơn:</p>
+                  {(selectedOrder.lines || []).map((line, idx) => (
+                    <div key={idx} className="flex justify-between items-center py-1 border-b border-border/50">
+                      <div>
+                        <p className="font-semibold">{line.ten}</p>
+                        <p className="font-mono text-muted-foreground">{line.sku} · Size: {line.size} · {line.mau}</p>
+                      </div>
+                      <div className="text-right font-mono">
+                        <p>{line.soLuong} × {vnd(line.donGia)}</p>
+                        <p className="font-bold text-accent-hover">{vnd(line.soLuong * line.donGia)}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <Receipt order={order} />
+              <Receipt order={selectedOrder} />
             </div>
           )}
         </>
       ) : (
-        <form
-          className="space-y-5"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (variance !== 0)
-              pushToast({
-                tone: "warning",
-                title: `⚠️ Tiền mặt kiểm đếm cuối ca CA000001 bị lệch ${vnd(Math.abs(variance))} so với số liệu sổ sách POS!`,
-                detail: "Đã gửi kèm giải trình cho chủ shop",
-              });
-            onCloseShift(counts, note);
-          }}
-        >
+        <form className="space-y-5" onSubmit={handleCloseShiftSubmit}>
           <div className="flex flex-wrap justify-between gap-3">
-            <h2 className="text-lg font-bold">Ca sáng · 08:00–15:30</h2>
-            <span className="font-mono text-sm text-muted-foreground">Mã ca: CA000001 · NV-02 Lan</span>
+            <div>
+              <h2 className="text-lg font-bold">Kiểm két & Bàn giao ca thu ngân</h2>
+              <p className="text-xs text-muted-foreground">Mã ca làm việc: <b className="font-mono text-foreground">{currentShiftId || "Chưa có"}</b></p>
+            </div>
+            <span className={`self-center font-mono text-xs font-bold px-3 py-1 rounded-full ${
+              shiftStatus === "DANG_MO" ? "bg-success-subtle text-success" : "bg-warning-subtle text-warning"
+            }`}>
+              {shiftStatus === "DANG_MO" ? "CA ĐANG MỞ" : "CHỜ DUYỆT BÀN GIAO"}
+            </span>
           </div>
 
           <div className="grid gap-4 border-y border-border py-4 sm:grid-cols-3">
             <div>
               <p className="text-xs uppercase text-muted-foreground">Tiền mặt đầu ca</p>
-              <p className="mt-1 font-mono font-bold text-lg">{vnd(2000000)}</p>
+              <p className="mt-1 font-mono font-bold text-lg">{vnd(shiftData?.openingCash ?? 2000000)}</p>
             </div>
             <div>
-              <p className="text-xs uppercase text-muted-foreground">Doanh thu tiền mặt ({orders.filter((o) => o.method === "CASH").length} đơn)</p>
-              <p className="mt-1 font-mono font-bold text-lg">{vnd(cashRevenue)}</p>
+              <p className="text-xs uppercase text-muted-foreground">Doanh thu tiền mặt</p>
+              <p className="mt-1 font-mono font-bold text-lg">{vnd(shiftData?.cashSales ?? 0)}</p>
             </div>
             <div>
-              <p className="text-xs uppercase text-muted-foreground">Doanh thu VietQR ({orders.filter((o) => o.method === "QR").length} đơn)</p>
-              <p className="mt-1 font-mono font-bold text-lg text-accent-hover">{vnd(qrRevenue)}</p>
+              <p className="text-xs uppercase text-muted-foreground">Tổng kỳ vọng trong két</p>
+              <p className="mt-1 font-mono font-bold text-lg text-accent-hover">{vnd(expectedCash)}</p>
             </div>
           </div>
 
-          <div className="flex flex-wrap justify-between gap-2 text-sm">
-            <span>Tiền mặt lý thuyết cần có trong két:</span>
-            <b className="font-mono text-xl">{vnd(2000000 + cashRevenue)}</b>
-          </div>
-
-          <table className="w-full text-sm">
-            <thead className="bg-surface-muted text-left">
-              <tr>
-                <th className="p-3">Mệnh giá</th>
-                <th className="p-3">Số tờ kiểm đếm</th>
-                <th className="p-3 text-right">Thành tiền</th>
-              </tr>
-            </thead>
-            <tbody>
+          <div>
+            <h3 className="text-sm font-semibold mb-3">Kiểm đếm các mệnh giá tiền mặt thực tế:</h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               {DENOMINATIONS.map((d) => (
-                <tr className="border-b border-border" key={d}>
-                  <td className="p-3 font-mono">{vnd(d)}</td>
-                  <td className="p-2">
+                <div key={d} className="rounded-lg border border-border p-2.5 bg-surface space-y-1">
+                  <span className="text-xs font-mono font-bold text-muted-foreground">{d.toLocaleString("vi-VN")} đ</span>
+                  <div className="flex items-center gap-2">
                     <Input
-                      aria-label={`Số tờ ${d / 1000}k`}
                       type="number"
                       min={0}
-                      step={1}
-                      disabled={shiftStatus !== "DANG_MO"}
-                      className="w-24 font-mono h-9"
                       value={counts[d] || ""}
-                      onChange={(e) =>
-                        setCounts((c) => ({ ...c, [d]: Math.max(0, Math.floor(Number(e.target.value))) }))
-                      }
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        setCounts({ ...counts, [d]: isNaN(val) ? 0 : val });
+                      }}
+                      placeholder="0 tờ"
+                      className="h-9 font-mono text-sm"
                     />
-                  </td>
-                  <td className="p-3 text-right font-mono font-semibold">{vnd(d * (counts[d] || 0))}</td>
-                </tr>
+                    <span className="text-xs text-muted-foreground">tờ</span>
+                  </div>
+                </div>
               ))}
-            </tbody>
-          </table>
-
-          <div className="flex flex-wrap justify-between gap-2 border-t border-border pt-3">
-            <span className="font-semibold">Tổng tiền thực đếm trong két:</span>
-            <b className="font-mono text-2xl text-accent-hover">{vnd(countCash(counts))}</b>
+            </div>
           </div>
 
-          <div
-            role="status"
-            className={`flex items-center gap-3 rounded-xl p-4 border ${
-              variance === 0
-                ? "bg-success-subtle text-success border-success/30"
-                : "bg-danger-subtle text-destructive border-destructive/30"
-            }`}
-          >
-            {variance === 0 ? <CheckCircle2 className="h-5 w-5" /> : <AlertCircle className="h-5 w-5" />}
-            <span className="font-semibold text-sm">
-              {variance === 0 ? "KHỚP HOÀN TOÀN DOANH THU" : "CHÊNH LỆCH KÉT TIỀN"} ·{" "}
-              <span className="font-mono font-bold">{vnd(variance)}</span>
-            </span>
+          <div className="rounded-lg border border-border p-4 bg-surface-muted space-y-2">
+            <div className="flex justify-between items-center text-sm">
+              <span>Tổng tiền thực tế kiểm đếm:</span>
+              <span className="font-mono text-xl font-bold">{vnd(totalCounted)}</span>
+            </div>
+            <div className="flex justify-between items-center text-sm">
+              <span>Chênh lệch két (Thực tế − Kỳ vọng):</span>
+              <span className={`font-mono text-base font-bold ${
+                variance === 0 ? "text-success" : "text-destructive"
+              }`}>
+                {variance > 0 ? `+${vnd(variance)} (Thừa)` : variance < 0 ? `-${vnd(Math.abs(variance))} (Thiếu)` : "Khớp 100% két"}
+              </span>
+            </div>
           </div>
 
-          <Input
-            aria-label="Ghi chú bàn giao"
-            placeholder="Ghi chú bàn giao / giải trình chênh lệch"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            disabled={shiftStatus !== "DANG_MO"}
-            className="h-11"
-          />
+          <label className="block space-y-1.5 text-xs font-semibold">
+            Ghi chú bàn giao / Giải trình chênh lệch {variance !== 0 && <span className="text-destructive">*</span>}
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Ghi chú về tình hình ca làm việc, tiền mặt bàn giao…"
+              rows={3}
+              className="w-full rounded-md border border-border bg-surface p-3 text-sm outline-none focus:border-primary"
+            />
+          </label>
 
           <Button
             type="submit"
-            className="h-12 w-full gap-2 font-bold"
-            disabled={shiftStatus !== "DANG_MO" || (variance !== 0 && !note.trim())}
+            disabled={shiftStatus !== "DANG_MO"}
+            className="h-12 w-full text-base font-bold"
           >
-            <Send className="h-4 w-4" />
-            {shiftStatus === "DANG_MO" ? "Xác nhận kết ca & Gửi duyệt (F12)" : "ĐÃ ĐÓNG CA — CHỜ CHỦ SHOP DUYỆT"}
+            Xác nhận nộp báo cáo kết ca (F12)
           </Button>
         </form>
       )}

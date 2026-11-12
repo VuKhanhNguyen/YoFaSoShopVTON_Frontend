@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef, useTransition, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   ArrowRightLeft,
@@ -9,6 +10,7 @@ import {
   CheckCircle2,
   KeyRound,
   Loader2,
+  LogOut,
   Mail,
   MapPin,
   Pencil,
@@ -26,6 +28,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { api, ApiError } from "@/lib/api";
 import { useAuth, ACCOUNTS } from "@/lib/auth";
 
@@ -133,7 +136,8 @@ export function ProfileModal({
   open: boolean;
   onClose: () => void;
 }) {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
+  const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Profile data & loading
@@ -147,6 +151,22 @@ export function ProfileModal({
 
   // Quản lý hiển thị Popup chỉnh sửa thông tin
   const [editOpen, setEditOpen] = useState(false);
+
+  // Quản lý đăng xuất
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const handleLogout = async () => {
+    setLoggingOut(true);
+    try {
+      await logout();
+      onClose();
+      router.push("/login");
+    } finally {
+      setLoggingOut(false);
+      setLogoutConfirmOpen(false);
+    }
+  };
 
   // Form states: Thông tin cá nhân
   const [fullName, setFullName] = useState("");
@@ -878,10 +898,43 @@ export function ProfileModal({
                   </p>
                 </div>
               )}
+
+              {/* Nút Đăng xuất tài khoản nội bộ (Dùng chung cho cả Admin và Nhân viên) */}
+              <div className="border-t border-border pt-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full justify-center gap-2 border-destructive/40 text-destructive hover:bg-danger-subtle hover:text-destructive h-10 text-xs font-bold transition-colors"
+                  onClick={() => {
+                    onClose();
+                    setLogoutConfirmOpen(true);
+                  }}
+                >
+                  <LogOut className="h-4 w-4 shrink-0" />
+                  Đăng xuất tài khoản
+                </Button>
+              </div>
             </div>
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Logout Confirmation Dialog */}
+      <ConfirmDialog
+        open={logoutConfirmOpen}
+        title="Xác nhận đăng xuất?"
+        description={
+          isAdmin
+            ? "Bạn sẽ kết thúc phiên làm việc của chủ shop trên YoFaSo Admin Portal. Mọi dữ liệu thao tác chưa lưu có thể bị gián đoạn."
+            : "Bạn sẽ kết thúc phiên làm việc của nhân sự trên YoFaSo Portal. Mọi dữ liệu thao tác chưa lưu có thể bị gián đoạn."
+        }
+        confirmLabel="Đăng xuất ngay"
+        cancelLabel="Ở lại"
+        tone="danger"
+        loading={loggingOut}
+        onConfirm={handleLogout}
+        onClose={() => setLogoutConfirmOpen(false)}
+      />
 
       {/* 2. EDIT PROFILE POPUP: Popup chuyên dụng xuất hiện khi người dùng bấm "Chỉnh sửa thông tin" */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>

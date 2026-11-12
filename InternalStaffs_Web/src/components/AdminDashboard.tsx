@@ -74,7 +74,7 @@ export function AdminDashboard() {
       {
         id: `LOG-${Date.now()}-${prev.length}`,
         time: new Date().toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" }),
-        actor: `${user?.code ?? "NV-01"} · Chủ shop`,
+        actor: `${user?.name || "Quản trị viên"} · Chủ shop`,
         action,
         reason,
       },

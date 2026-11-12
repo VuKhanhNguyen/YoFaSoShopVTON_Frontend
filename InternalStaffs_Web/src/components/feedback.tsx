@@ -221,7 +221,7 @@ export function ServerOfflineBanner({ forceOffline = false }: { forceOffline?: b
       className="sticky top-0 z-[9500] flex items-center justify-center gap-2 bg-destructive px-4 py-2 text-center text-sm font-semibold text-destructive-foreground"
     >
       <WifiOff className="h-4 w-4 shrink-0" />
-      Mất kết nối Cổng Backend Spring Boot / CSDL MySQL. Mọi giao dịch POS đang tạm thời chuyển sang chế độ lưu trữ cục bộ (Offline Cache). Vui lòng không đóng trình duyệt!
+      Mất kết nối. Mọi giao dịch POS đang tạm thời chuyển sang chế độ lưu trữ cục bộ. Vui lòng không đóng trình duyệt!
     </div>
   );
 }

@@ -52,6 +52,30 @@ export const PENDING_PARCELS: Stop[] = [
 export const maskPhone = (p: string) => `${p.slice(0, 4)}.***.${p.slice(-3)}`;
 export const mapsUrl = (addr: string) => `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}`;
 
+/** Chuyển đổi dữ liệu đơn hàng từ CSDL sang trạm dừng giao hàng (Stop). */
+export function mapOrderToStop(o: any): Stop {
+  const maDon = o.orderId || o.id;
+  const khach = o.recipientName || o.receiver || "Khách hàng";
+  const sdt = o.phone || "";
+  const diaChi = o.address || "";
+  const soTienThuHo = Number(o.collectAmount ?? o.cod ?? 0);
+  const ghiChu =
+    o.ghiChu ||
+    o.note ||
+    (o.payment === "VIETQR" || (o.paymentMethod && String(o.paymentMethod).includes("VIETQR"))
+      ? "Đã thanh toán online"
+      : "Cho xem hàng, không cho thử");
+  const soLanGiao = Number(o.soLanGiao ?? 0);
+  let status: ShipStatus = "DANG_GIAO_HANG";
+  if (o.status === "HOAN_TAT") status = "HOAN_TAT";
+  else if (o.status === "TRA_HANG") status = "HOAN_TRA";
+  else if (o.status === "DANG_GIAO_HANG") {
+    if (ghiChu.includes("Hẹn") || ghiChu.includes("HEN_LAI") || soLanGiao > 0) status = "HEN_LAI";
+    else status = "DANG_GIAO_HANG";
+  }
+  return { maDon, khach, sdt, diaChi, soTienThuHo, ghiChu, soLanGiao, status };
+}
+
 export type ScanOutcome = { kind: "added"; stop: Stop } | { kind: "duplicate" } | { kind: "unknown" };
 
 export function scanParcel(route: Stop[], pending: Stop[], code: string): ScanOutcome {

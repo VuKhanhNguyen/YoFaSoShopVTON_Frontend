@@ -164,13 +164,15 @@
 @page waybill { size: 100mm 150mm; margin: 0; }
 @media print {
   @page { size: 80mm auto; margin: 0; }
+  body { background: #ffffff !important; color: #000000 !important; }
   body > * { display: none !important; }
-  body > .print-sheet { display: block !important; width: 80mm; }
+  body > .print-sheet { display: block !important; width: 80mm; background: #ffffff !important; color: #000000 !important; margin: 0 auto; }
   body > .print-sheet.waybill-sheet { width: 100mm; page: waybill; }
-  .receipt { width: 80mm; max-width: 80mm; padding: 4mm; font-size: 10px; }
+  .receipt { width: 80mm; max-width: 80mm; padding: 4mm; font-size: 10px; background: #ffffff !important; color: #000000 !important; border: none !important; box-shadow: none !important; }
+  .receipt * { color: #000000 !important; border-color: #333333 !important; }
   .receipt tr { break-inside: avoid; }
-  .picking-slip { width: 80mm; padding: 4mm; font-family: var(--font-mono); font-size: 12px; }
-  .waybill { width: 100mm; max-width: 100mm; padding: 4mm; font-size: 11px; }
+  .picking-slip { width: 80mm; padding: 4mm; font-family: var(--font-mono); font-size: 12px; background: #ffffff !important; color: #000000 !important; }
+  .waybill { width: 100mm; max-width: 100mm; padding: 4mm; font-size: 11px; background: #ffffff !important; color: #000000 !important; }
 }
 
 .dark {

@@ -5,7 +5,8 @@ import { ClipboardList, Package, Truck, ClipboardCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StaffHeader } from "@/components/staff-header";
 import { useRequireAuth } from "@/lib/auth";
-import { WH_ORDERS, type WhOrder } from "@/lib/warehouse";
+import { useResource } from "@/hooks/use-resource";
+import { type WhOrder } from "@/lib/warehouse";
 import { PickListBoard } from "@/components/warehouse/picklist";
 import { PackingStation } from "@/components/warehouse/packing";
 import { HandoverReturn } from "@/components/warehouse/handover";
@@ -23,7 +24,8 @@ const TABS: { k: Tab; l: string; icon: typeof Package }[] = [
 export function WarehouseFulfillment() {
   const { user, ready } = useRequireAuth(["ROLE_STAFF_WAREHOUSE", "ROLE_SHOP_ADMIN"]);
   const [tab, setTab] = useState<Tab>("pick");
-  const [orders, setOrders] = useState<WhOrder[]>(WH_ORDERS);
+  const { data: remoteOrders, reload: reloadOrders, loading } = useResource<WhOrder[]>("/staff/orders?size=100");
+  const orders = remoteOrders ?? [];
 
   if (!ready || !user) {
     return (
@@ -35,17 +37,16 @@ export function WarehouseFulfillment() {
 
   const waiting = orders.filter((o) => o.status === "CHO_XAC_NHAN").length;
   const packing = orders.filter((o) => o.status === "DANG_DONG_GOI").length;
-  const readyShip = orders.filter((o) => o.status === "CHO_SHIPPER").length;
-
-  const handover = (ids: string[]) =>
-    setOrders((ds) => ds.map((o) => (ids.includes(o.id) ? { ...o, status: "DANG_GIAO_HANG" } : o)));
+  const readyShip = orders.filter(
+    (o) => o.status === "CHO_SHIPPER" || (o.status === "DANG_DONG_GOI" && (!o.shipperId || o.shipper === "Chưa phân công")),
+  ).length;
 
   return (
     <div className="flex min-h-dvh flex-col bg-canvas text-foreground">
       <StaffHeader title="KHO">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
           <span>
-            Nhân viên: <b className="font-mono text-foreground">{user.code}</b> {user.name}
+            Nhân viên: <b className="font-semibold text-foreground">{user.name}</b>
           </span>
           <span className="rounded-full bg-warning-subtle px-2 py-0.5 font-mono font-bold text-warning">
             {waiting} đơn chờ nhặt
@@ -56,6 +57,11 @@ export function WarehouseFulfillment() {
           <span className="rounded-full bg-accent-subtle px-2 py-0.5 font-mono font-bold text-accent-hover">
             {readyShip} chờ shipper nhận
           </span>
+          {loading && (
+            <span className="font-mono text-[11px] text-muted-foreground animate-pulse">
+              (Đang đồng bộ…)
+            </span>
+          )}
         </div>
       </StaffHeader>
 
@@ -63,7 +69,7 @@ export function WarehouseFulfillment() {
         <div>
           <h1 className="font-editorial text-3xl">Trung tâm điều phối kho YoFaSo</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Thủ kho chỉ thấy mã đơn, SKU, tên hàng, size, màu và tọa độ kệ — giá bán &amp; doanh thu bị ẩn theo phân quyền RBAC (dữ liệu mô phỏng).
+            Thủ kho chỉ thấy mã đơn, SKU, tên hàng, size, màu và tọa độ kệ — giá bán &amp; doanh thu bị ẩn theo phân quyền RBAC.
           </p>
         </div>
 
@@ -82,10 +88,10 @@ export function WarehouseFulfillment() {
           ))}
         </nav>
 
-        {tab === "pick" && <PickListBoard orders={orders} onPrint={() => window.print()} />}
-        {tab === "pack" && <PackingStation orders={orders} />}
-        {tab === "handover" && <HandoverReturn orders={orders} onHandover={handover} />}
-        {tab === "audit" && <AuditReport />}
+        {tab === "pick" && <PickListBoard orders={orders} onPrint={() => window.print()} onRefresh={reloadOrders} />}
+        {tab === "pack" && <PackingStation orders={orders} onRefresh={reloadOrders} />}
+        {tab === "handover" && <HandoverReturn orders={orders} onRefresh={reloadOrders} />}
+        {tab === "audit" && <AuditReport onRefresh={reloadOrders} />}
       </main>
     </div>
   );

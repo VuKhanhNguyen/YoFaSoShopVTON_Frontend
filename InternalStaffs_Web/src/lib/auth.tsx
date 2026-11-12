@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { api } from "./api";
+import { api, ApiError, noteActivity } from "./api";
 
 export type Role =
   | "ROLE_SHOP_ADMIN"
@@ -23,33 +23,33 @@ export const ACCOUNTS: Record<
   { email: string; pass: string; name: string; code: string; label: string; icon: string }
 > = {
   ROLE_SHOP_ADMIN: {
-    email: "admin@yofaso.vn",
-    pass: "admin123",
-    name: "Vũ Khanh Nguyễn",
+    email: "adminyofaso",
+    pass: "TestingPassword123",
+    name: "Nguyễn Văn Tài",
     code: "NV-01",
     label: "Chủ shop / Quản trị viên",
     icon: "👑",
   },
   ROLE_STAFF_CASHIER: {
-    email: "cashier@yofaso.vn",
-    pass: "cashier123",
-    name: "Nguyễn Thị Lan",
+    email: "cashierlanphuong",
+    pass: "TestingPassword123",
+    name: "Đặng Lan Phương",
     code: "NV-02",
     label: "Thu ngân bán lẻ POS",
     icon: "💳",
   },
   ROLE_STAFF_WAREHOUSE: {
-    email: "warehouse@yofaso.vn",
-    pass: "warehouse123",
-    name: "Trần Minh Tuấn",
+    email: "whmanhhung",
+    pass: "TestingPassword123",
+    name: "Đỗ Mạnh Hùng",
     code: "NV-03",
     label: "Nhân viên kho / điều phối",
     icon: "📦",
   },
   ROLE_STAFF_SHIPPER: {
-    email: "shipper@yofaso.vn",
-    pass: "shipper123",
-    name: "Lê Văn Hải",
+    email: "shipquocbao",
+    pass: "TestingPassword123",
+    name: "Phan Quốc Bảo",
     code: "NV-04",
     label: "Nhân viên giao vận nội bộ",
     icon: "🛵",
@@ -112,6 +112,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
   const [ready, setReady] = useState(false);
 
+  // Lắng nghe thao tác người dùng toàn cục để duy trì phiên làm việc không bị quá hạn 15 phút
+  useEffect(() => {
+    const handleActivity = (e: Event) => {
+      if (e.isTrusted) noteActivity();
+    };
+    const events = ["pointerdown", "keydown", "wheel", "touchmove"];
+    events.forEach((ev) => window.addEventListener(ev, handleActivity, { passive: true }));
+    return () => events.forEach((ev) => window.removeEventListener(ev, handleActivity));
+  }, []);
+
+  // Lắng nghe sự kiện phiên hết hạn từ tầng API
+  useEffect(() => {
+    const handleExpired = () => {
+      setUser(null);
+      window.localStorage.removeItem(STORAGE_KEY);
+    };
+    window.addEventListener("yofaso:session-expired", handleExpired);
+    return () => window.removeEventListener("yofaso:session-expired", handleExpired);
+  }, []);
+
   useEffect(() => {
     // Thử đồng bộ với backend nếu có cookie đăng nhập thực tế
     api<{ id?: string; fullName?: string; email?: string; roles?: string[] }>("/me")
@@ -122,7 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const staffUser: StaffUser = {
             role: mappedRole,
             name: me.fullName || "Nhân viên YoFaSo",
-            code: "NV-REAL",
+            code: me.id || "",
             email: me.email || "",
             roles: me.roles,
           };
@@ -130,8 +150,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           window.localStorage.setItem(STORAGE_KEY, JSON.stringify(staffUser));
         }
       })
-      .catch(() => {
-        // Backend chưa sẵn sàng hoặc chưa đăng nhập cookie -> giữ session demo nếu có
+      .catch((err) => {
+        // Nếu backend trả về 401 Unauthorized (chưa có cookie hoặc hết hạn), xóa session local giả lập
+        if (err instanceof ApiError && err.status === 401) {
+          setUser(null);
+          window.localStorage.removeItem(STORAGE_KEY);
+        }
       })
       .finally(() => {
         setReady(true);
@@ -156,7 +180,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const u: StaffUser = {
         role: mappedRole,
         name: bUser?.fullName || "Nhân viên YoFaSo",
-        code: "NV-REAL",
+        code: (bUser as any)?.userId || "",
         email: bUser?.email || cleanEmail,
         roles: bUser?.roles || [mappedRole],
       };
@@ -209,6 +233,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
     setUser(u);
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(u));
+    // Đăng nhập thật vào backend để thiết lập cookie phiên HttpOnly cho vai trò mới
+    void login(acc.email, acc.pass, true).catch(() => {
+      // nếu backend offline thì giữ session local
+    });
   };
 
   return (

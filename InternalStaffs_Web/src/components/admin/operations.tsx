@@ -733,7 +733,7 @@ export function AdminOperations({
             >
               <option value="ALL">Tất cả kênh</option>
               <option value="ONLINE_APP">Online (App)</option>
-              <option value="TAI_QUAY_POS">Tại quầy (POS)</option>
+              <option value="TAI_QUAY_POS">Tại quầy thu ngân</option>
             </select>
             <select
               aria-label="Trạng thái đơn hàng"

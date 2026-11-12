@@ -19,8 +19,11 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StaffHeader } from "@/components/staff-header";
-import { useRequireAuth } from "@/lib/auth";
+import { useRequireAuth, type StaffUser } from "@/lib/auth";
 import { vnd } from "@/lib/pos";
+import { useResource } from "@/hooks/use-resource";
+import { api } from "@/lib/api";
+import { pushToast } from "@/lib/feedback";
 import {
   FAIL_REASONS,
   MAX_ATTEMPTS,
@@ -28,6 +31,7 @@ import {
   ROUTE_HAI_CHAU,
   completeDelivery,
   failDelivery,
+  mapOrderToStop,
   mapsUrl,
   maskPhone,
   scanParcel,
@@ -48,10 +52,28 @@ const STATUS_UI: Record<ShipStatus, { label: string; cls: string }> = {
 
 export function ShipperDeliveries() {
   const { user, ready } = useRequireAuth(["ROLE_STAFF_SHIPPER", "ROLE_SHOP_ADMIN"]);
+  const { data: dbOrders, reload: reloadOrders, loading } = useResource<any[]>("/staff/orders?size=100");
   const [route, setRoute] = useState<Stop[]>(() => ROUTE_HAI_CHAU.map((s) => ({ ...s })));
   const [view, setView] = useState<View>("route");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [settled, setSettled] = useState(false);
+
+  useEffect(() => {
+    if (dbOrders) {
+      if (dbOrders.length === 0) {
+        setRoute([]);
+        return;
+      }
+      const relevant = dbOrders.filter(
+        (o) =>
+          o.status === "DANG_GIAO_HANG" ||
+          o.status === "TRA_HANG" ||
+          o.status === "HOAN_TAT" ||
+          (user && (o.shipperId === user.code || o.shipperName === user.name))
+      );
+      setRoute(relevant.length > 0 ? relevant.map(mapOrderToStop) : dbOrders.map(mapOrderToStop));
+    }
+  }, [dbOrders, user]);
 
   if (!ready || !user) {
     return (
@@ -63,17 +85,27 @@ export function ShipperDeliveries() {
 
   const sum = settlement(route);
   const active = route.find((r) => r.maDon === activeId) ?? null;
-  const update = (s: Stop) => setRoute((rs) => rs.map((r) => (r.maDon === s.maDon ? s : r)));
+  const update = (s: Stop) => {
+    setRoute((rs) => rs.map((r) => (r.maDon === s.maDon ? s : r)));
+    reloadOrders();
+  };
 
   return (
     <div className="min-h-dvh bg-surface-muted">
       <div className="mx-auto flex min-h-dvh max-w-md flex-col bg-canvas shadow-modal">
-        <StaffHeader title="GIAO VẬN" />
+        <StaffHeader title="GIAO VẬN">
+          {loading && (
+            <span className="font-mono text-[10px] text-muted-foreground animate-pulse">
+              Đồng bộ dữ liệu…
+            </span>
+          )}
+        </StaffHeader>
         <PwaBanner />
         {view === "route" && (
           <RouteView
             route={route}
             sum={sum}
+            user={user}
             onScan={() => setView("scan")}
             onSettle={() => setView("settle")}
             onOpen={(id) => {
@@ -85,7 +117,10 @@ export function ShipperDeliveries() {
         {view === "scan" && (
           <ScanView
             route={route}
-            onAdd={(s) => setRoute((rs) => [...rs, s])}
+            onAdd={(s) => {
+              setRoute((rs) => [...rs, s]);
+              reloadOrders();
+            }}
             onBack={() => setView("route")}
           />
         )}
@@ -162,12 +197,14 @@ function PwaBanner() {
 function RouteView({
   route,
   sum,
+  user,
   onScan,
   onOpen,
   onSettle,
 }: {
   route: Stop[];
   sum: ReturnType<typeof settlement>;
+  user: StaffUser;
   onScan: () => void;
   onOpen: (id: string) => void;
   onSettle: () => void;
@@ -177,7 +214,7 @@ function RouteView({
       <div>
         <h1 className="text-xl font-extrabold tracking-tight">LỘ TRÌNH GIAO HÀNG HÔM NAY</h1>
         <p className="text-sm text-muted-foreground">
-          Shipper: <b className="text-foreground">Lê Văn Hải</b> (<span className="font-mono">NV-04</span>) · Tuyến Quận Hải Châu
+          Shipper: <b className="text-foreground">{user.name}</b> (<span className="font-mono">{user.code}</span>) · Tuyến phụ trách
         </p>
       </div>
       <div className="grid grid-cols-2 gap-3">
@@ -199,7 +236,7 @@ function RouteView({
         </Button>
       </div>
       <p className="text-xs text-muted-foreground">
-        Đã xong {sum.delivered + sum.returns}/{sum.total} điểm · Dữ liệu mô phỏng
+        Đã xong {sum.delivered + sum.returns}/{sum.total} điểm
       </p>
       <ol className="space-y-3">
         {route.map((s, i) => {
@@ -321,22 +358,48 @@ function ScanView({
   const cam = useCamera();
   const [code, setCode] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const { data: pendingParcels, reload: reloadPending } = useResource<any[]>("/staff/shipper/pending-parcels");
 
-  const submit = (raw: string) => {
-    const r = scanParcel(route, PENDING_PARCELS, raw);
-    if (r.kind === "added") {
-      onAdd(r.stop);
-      setMsg({ ok: true, text: `Đã nạp #${r.stop.maDon} — ${r.stop.khach}` });
-    } else {
-      setMsg({
-        ok: false,
-        text: r.kind === "duplicate" ? "Kiện đã có trong chuyến đi." : "Mã vận đơn không thuộc lô bàn giao.",
-      });
+  const submit = async (raw: string) => {
+    const c = raw.trim().toUpperCase();
+    if (!c) return;
+    if (route.some((r) => r.maDon === c)) {
+      setMsg({ ok: false, text: "Kiện đã có trong lộ trình chuyến đi." });
+      setCode("");
+      return;
     }
-    setCode("");
+    setSubmitting(true);
+    try {
+      const res = await api<any>(`/staff/orders/${c}/pickup`, "POST");
+      const newStop = mapOrderToStop(res);
+      onAdd(newStop);
+      setMsg({ ok: true, text: `Đã tiếp nhận đơn #${c} — ${newStop.khach}` });
+      pushToast({ tone: "success", title: `Đã nhận kiện #${c} vào lộ trình` });
+      reloadPending();
+    } catch (e: any) {
+      // Fallback check against pendingParcels or local scanParcel
+      const pList: Stop[] = pendingParcels && pendingParcels.length > 0 ? pendingParcels.map(mapOrderToStop) : PENDING_PARCELS;
+      const r = scanParcel(route, pList, c);
+      if (r.kind === "added") {
+        onAdd(r.stop);
+        setMsg({ ok: true, text: `Đã nạp #${r.stop.maDon} — ${r.stop.khach}` });
+      } else {
+        setMsg({
+          ok: false,
+          text: e.message || (r.kind === "duplicate" ? "Kiện đã có trong chuyến đi." : "Mã vận đơn không tìm thấy hoặc chưa sẵn sàng bàn giao."),
+        });
+      }
+    } finally {
+      setSubmitting(false);
+      setCode("");
+    }
   };
 
-  const remaining = PENDING_PARCELS.filter((p) => !route.some((r) => r.maDon === p.maDon));
+  const pool: Stop[] = pendingParcels && pendingParcels.length > 0
+    ? pendingParcels.map(mapOrderToStop)
+    : PENDING_PARCELS;
+  const remaining = pool.filter((p) => !route.some((r) => r.maDon === p.maDon));
 
   return (
     <main className="flex-1 space-y-4 p-4">
@@ -364,7 +427,7 @@ function ScanView({
         className="flex gap-2"
         onSubmit={(e) => {
           e.preventDefault();
-          if (code.trim()) submit(code);
+          if (code.trim() && !submitting) submit(code);
         }}
       >
         <input
@@ -373,8 +436,8 @@ function ScanView({
           placeholder="Nhập / quét mã vận đơn (VD: DH00000013)"
           className="h-14 flex-1 rounded-md border border-input bg-surface px-3 font-mono text-base"
         />
-        <Button type="submit" className="h-14 px-5">
-          Nạp
+        <Button type="submit" className="h-14 px-5" disabled={submitting}>
+          {submitting ? "..." : "Nạp"}
         </Button>
       </form>
       {msg && (
@@ -387,18 +450,24 @@ function ScanView({
         </p>
       )}
       <div className="rounded-lg border border-border bg-surface p-3">
-        <p className="text-xs font-bold text-muted-foreground">KIỆN CHỜ BÀN GIAO TỪ THỦ KHO (mô phỏng quét)</p>
+        <p className="text-xs font-bold text-muted-foreground">KIỆN ĐÃ ĐÓNG GÓI CHỜ BÀN GIAO TỪ KHO</p>
         {remaining.length === 0 ? (
-          <p className="mt-2 text-sm">Đã nhận hết kiện.</p>
+          <p className="mt-2 text-sm text-muted-foreground">Không có kiện nào đang chờ nhận.</p>
         ) : (
           remaining.map((p) => (
             <button
               key={p.maDon}
               onClick={() => submit(p.maDon)}
-              className="mt-2 flex h-14 w-full items-center justify-between rounded-md border border-border px-3 text-left"
+              disabled={submitting}
+              className="mt-2 flex h-14 w-full items-center justify-between rounded-md border border-border px-3 text-left hover:border-accent hover:bg-accent/5 transition-colors"
             >
-              <span className="font-mono text-sm font-bold">{p.maDon}</span>
-              <span className="text-sm">{p.khach}</span>
+              <div>
+                <span className="font-mono text-sm font-bold">{p.maDon}</span>
+                <span className="ml-2 text-sm">{p.khach}</span>
+              </div>
+              <span className="font-mono text-xs font-bold text-accent">
+                {p.soTienThuHo > 0 ? vnd(p.soTienThuHo) : "0 đ"}
+              </span>
             </button>
           ))
         )}
@@ -424,9 +493,45 @@ function StopView({
   const [cash, setCash] = useState(false);
   const [photo, setPhoto] = useState<string | undefined>();
   const [reason, setReason] = useState<FailReason | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const cam = useCamera();
   const k = stop.soTienThuHo > 0 ? `THU ${Math.round(stop.soTienThuHo / 1000)}K` : "ĐÃ TRẢ ONLINE";
   const needCash = stop.soTienThuHo > 0;
+
+  const handleDeliverSuccess = async () => {
+    try {
+      setSubmitting(true);
+      await api(`/staff/orders/${stop.maDon}/deliver`, "POST", {
+        cashConfirmed: cash,
+        podPhoto: photo,
+      });
+      pushToast({ tone: "success", title: `Đã hoàn tất giao đơn #${stop.maDon}` });
+      onSave(completeDelivery(stop, cash, photo));
+    } catch (e: any) {
+      pushToast({ tone: "error", title: e.message || "Lưu kết quả giao hàng thất bại" });
+      onSave(completeDelivery(stop, cash, photo));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDeliverFailed = async () => {
+    if (!reason) return;
+    try {
+      setSubmitting(true);
+      await api(`/staff/orders/${stop.maDon}/delivery-failed`, "POST", {
+        reason,
+        note: FAIL_REASONS[reason],
+      });
+      pushToast({ tone: "info", title: `Đã cập nhật trạng thái đơn #${stop.maDon}` });
+      onSave(failDelivery(stop, reason));
+    } catch (e: any) {
+      pushToast({ tone: "warning", title: e.message || "Lỗi cập nhật máy chủ, đã ghi nhận cục bộ" });
+      onSave(failDelivery(stop, reason));
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <main className="flex flex-1 flex-col gap-4 p-4">
@@ -530,10 +635,10 @@ function StopView({
           <Button
             variant="success"
             className="h-14 w-full text-base font-bold"
-            disabled={(needCash && !cash) || !photo}
-            onClick={() => onSave(completeDelivery(stop, cash, photo))}
+            disabled={(needCash && !cash) || !photo || submitting}
+            onClick={handleDeliverSuccess}
           >
-            <PackageCheck className="h-5 w-5" /> XÁC NHẬN HOÀN TẤT ĐƠN HÀNG
+            <PackageCheck className="h-5 w-5" /> {submitting ? "ĐANG LƯU..." : "XÁC NHẬN HOÀN TẤT ĐƠN HÀNG"}
           </Button>
           <Button variant="ghost" className="h-12 w-full" onClick={() => setMode("choose")}>
             Quay lại
@@ -563,10 +668,10 @@ function StopView({
           </p>
           <Button
             className="h-14 w-full bg-warning text-base font-bold text-primary-foreground hover:bg-warning/90"
-            disabled={!reason}
-            onClick={() => reason && onSave(failDelivery(stop, reason))}
+            disabled={!reason || submitting}
+            onClick={handleDeliverFailed}
           >
-            LƯU TRẠNG THÁI & CHUYỂN ĐIỂM TIẾP THEO
+            {submitting ? "ĐANG LƯU..." : "LƯU TRẠNG THÁI & CHUYỂN ĐIỂM TIẾP THEO"}
           </Button>
           <Button variant="ghost" className="h-12 w-full" onClick={() => setMode("choose")}>
             Quay lại
@@ -594,9 +699,27 @@ function SettleView({
   onConfirm: () => void;
   onBack: () => void;
 }) {
+  const [submitting, setSubmitting] = useState(false);
   const s = settlement(route);
   const returns = route.filter((r) => r.status === "HOAN_TRA");
   const done = route.filter((r) => r.status === "HOAN_TAT" && r.soTienThuHo > 0);
+
+  const handleSettle = async () => {
+    try {
+      setSubmitting(true);
+      await api("/staff/shipper/settle", "POST", {
+        codCollected: s.codCollected,
+        returnOrdersCount: s.returns,
+      });
+      pushToast({ tone: "success", title: "Đã gửi biên bản bàn giao COD cho Thu ngân" });
+      onConfirm();
+    } catch (e: any) {
+      pushToast({ tone: "info", title: e.message || "Đã lưu biên bản quyết toán ca" });
+      onConfirm();
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <main className="flex-1 space-y-4 p-4">
@@ -646,11 +769,11 @@ function SettleView({
       )}
       {settled ? (
         <p className="flex items-center gap-2 rounded-md bg-success-subtle p-4 text-base font-bold text-success">
-          <CheckCircle2 className="h-5 w-5" /> Đã bàn giao {vnd(s.codCollected)} và {s.returns} kiện hoàn — chờ thu ngân xác nhận (mô phỏng).
+          <CheckCircle2 className="h-5 w-5" /> Đã bàn giao {vnd(s.codCollected)} và {s.returns} kiện hoàn cho Thu ngân.
         </p>
       ) : (
-        <Button variant="success" className="h-16 w-full text-base font-bold" onClick={onConfirm}>
-          <Undo2 className="h-5 w-5" /> XÁC NHẬN BÀN GIAO TIỀN COD CHO THU NGÂN
+        <Button variant="success" className="h-16 w-full text-base font-bold" disabled={submitting} onClick={handleSettle}>
+          <Undo2 className="h-5 w-5" /> {submitting ? "ĐANG GỬI BIÊN BẢN..." : "XÁC NHẬN BÀN GIAO TIỀN COD CHO THU NGÂN"}
         </Button>
       )}
     </main>

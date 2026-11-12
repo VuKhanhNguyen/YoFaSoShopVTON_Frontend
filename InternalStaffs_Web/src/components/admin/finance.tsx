@@ -424,8 +424,8 @@ export function Finance() {
         ))}
         <span className="ml-auto text-xs text-muted-foreground">
           {dailyList.length > 0
-            ? "Đồng bộ trực tiếp từ bảng DonHang (MySQL)"
-            : "Đang tải dữ liệu từ CSDL..."}
+            ? "Đồng bộ trực tiếp từ bảng DonHang"
+            : "Đang tải dữ liệu ..."}
         </span>
       </div>
 
@@ -609,7 +609,7 @@ export function Finance() {
               <div>
                 <h3 className="text-base font-semibold">Cơ cấu phương thức thanh toán</h3>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  Phân bổ doanh thu theo cổng thanh toán từ CSDL DonHang
+                  Phân bổ doanh thu theo cổng thanh toán từ hệ thống
                 </p>
               </div>
               <Badge tone="neutral">Đa kênh</Badge>

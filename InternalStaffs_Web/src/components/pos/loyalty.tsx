@@ -1,34 +1,72 @@
 "use client";
 
 import { useState } from "react";
-import { Cake, Crown, Search, UserRound } from "lucide-react";
+import { Cake, Crown, Search, UserRound, Loader2, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { api, ApiError } from "@/lib/api";
 import { birthdayEligible, isBirthday, redeemedPoints, type Customer } from "@/lib/pos-workflows";
 import { vnd } from "@/lib/pos";
 
 export function Loyalty({
-  customers,
   payable,
   onAssign,
 }: {
-  customers: Customer[];
+  customers?: Customer[];
   payable: number;
   onAssign: (c: Customer, birthday: boolean, points: number) => void;
 }) {
   const [phone, setPhone] = useState("");
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [searched, setSearched] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [birthday, setBirthday] = useState(false);
   const [points, setPoints] = useState(false);
+  const [authError, setAuthError] = useState(false);
+  const [inputError, setInputError] = useState("");
   const date = new Date();
 
-  const lookup = (value = phone) => {
-    setCustomer(customers.find((c) => c.phone === value.replace(/\D/g, "")) ?? null);
+  const lookup = async (value = phone) => {
+    const clean = value.replace(/\D/g, "");
+    if (!clean || clean.length < 9) {
+      if (clean) setInputError("Vui lòng nhập số điện thoại hợp lệ (tối thiểu 9 chữ số).");
+      return;
+    }
+    setInputError("");
+    setLoading(true);
     setSearched(true);
     setBirthday(false);
     setPoints(false);
+    setAuthError(false);
+    try {
+      const res = await api<{
+        userId: string;
+        fullName: string;
+        points: number;
+        membership: string;
+      }>(`/pos/customers?phone=${encodeURIComponent(clean)}`);
+      if (res && res.userId) {
+        setCustomer({
+          id: res.userId,
+          name: res.fullName,
+          phone: clean,
+          tier: (res.membership as Customer["tier"]) || "DONG",
+          points: Number(res.points) || 0,
+          birthday: "1998-10-15",
+        });
+      } else {
+        setCustomer(null);
+      }
+    } catch (err: unknown) {
+      setCustomer(null);
+      if (err instanceof ApiError && err.status === 401) {
+        setAuthError(true);
+        window.dispatchEvent(new Event("yofaso:session-expired"));
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   const available = customer ? redeemedPoints(customer.points, 500, payable * (birthday ? 0.85 : 1)) : 0;
@@ -47,36 +85,51 @@ export function Loyalty({
           aria-label="Số điện thoại khách hàng"
           type="tel"
           autoFocus
-          placeholder="Số điện thoại khách hàng (10 số)"
-          maxLength={10}
+          placeholder="Nhập số điện thoại khách hàng (VD: 0912345678)"
+          maxLength={12}
           value={phone}
           onChange={(e) => {
             const value = e.target.value.replace(/\D/g, "");
             setPhone(value);
             setCustomer(null);
             setSearched(false);
-            if (value.length === 10) lookup(value);
+            if (value.length >= 10) lookup(value);
           }}
           className="h-12 font-mono text-base"
         />
-        <Button type="button" className="h-12 px-5 gap-2" onClick={() => lookup()}>
-          <Search className="h-4 w-4" />
-          Tìm kiếm
+        <Button type="button" disabled={loading} className="h-12 px-5 gap-2" onClick={() => lookup()}>
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+          Tra cứu
         </Button>
       </div>
+
+      {inputError && (
+        <p role="alert" className="text-amber-500 text-xs font-medium flex items-center gap-1.5">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          {inputError}
+        </p>
+      )}
+
+      {authError && (
+        <div role="alert" className="p-3 rounded-lg border border-destructive/30 bg-danger-subtle text-destructive text-xs font-medium flex items-center gap-2">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>Phiên làm việc đã hết hạn hoặc chưa đăng nhập. Vui lòng đăng nhập lại tài khoản thu ngân.</span>
+        </div>
+      )}
 
       {!searched && (
         <div className="flex items-center gap-3 border-b border-border pb-6 text-muted-foreground text-sm">
           <UserRound className="h-6 w-6 text-accent" />
           <span>
-            Khách hàng mẫu: <span className="font-mono text-foreground font-semibold">0912345789</span> (Trần Thu Hà)
+            {/* <span className="font-mono text-foreground text-md font-semibold">" Khách hàng có thể quên những gì bạn nói, quên những gì bạn làm, nhưng họ sẽ không bao giờ quên cảm giác mà bạn mang lại cho họ."</span> */}
+          Khách hàng có thể quên những gì bạn nói, quên những gì bạn làm, nhưng họ sẽ <span className="font-mono text-foreground font-semibold"> không bao giờ quên cảm giác mà bạn mang lại cho họ.</span>
           </span>
         </div>
       )}
 
-      {searched && !customer && (
+      {searched && !customer && !loading && (
         <p role="alert" className="text-destructive text-sm font-medium">
-          Không tìm thấy khách hàng với số điện thoại này trong hệ thống CRM.
+          Không tìm thấy khách hàng với số điện thoại này trong hệ thống.
         </p>
       )}
 
@@ -87,12 +140,12 @@ export function Loyalty({
               <div>
                 <h2 className="text-2xl font-bold">{customer.name}</h2>
                 <p className="mt-1 font-mono text-sm text-muted-foreground">
-                  {customer.phone.slice(0, 4)}.***.{customer.phone.slice(-3)}
+                  {customer.phone.slice(0, 4)}.***.{customer.phone.slice(-3)} · Mã: {customer.id}
                 </p>
               </div>
               <span className="flex items-center gap-2 rounded-full border border-accent bg-accent-subtle px-3 py-1.5 text-xs font-bold text-accent-hover">
                 <Crown className="h-4 w-4" />
-                {({ DONG: "HẠNG ĐỒNG", BAC: "HẠNG BẠC", VANG: "HẠNG VÀNG", KIM_CUONG: "KIM CƯƠNG" })[customer.tier]}
+                {({ DONG: "HẠNG ĐỒNG", BAC: "HẠNG BẠC", VANG: "HẠNG VÀNG", KIM_CUONG: "KIM CƯƠNG" })[customer.tier] || customer.tier}
               </span>
             </div>
 

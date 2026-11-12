@@ -433,11 +433,19 @@
   },
   {
     "method": "GET",
+    "path": "/staff/inventory/audit-zones"
+  },
+  {
+    "method": "GET",
     "path": "/staff/inventory/low-stock"
   },
   {
     "method": "GET",
     "path": "/staff/inventory/movements"
+  },
+  {
+    "method": "GET",
+    "path": "/staff/inventory/summary"
   },
   {
     "method": "GET",
@@ -464,6 +472,10 @@
     "path": "/staff/orders/{id}/pack"
   },
   {
+    "method": "POST",
+    "path": "/staff/orders/{id}/pickup"
+  },
+  {
     "method": "GET",
     "path": "/staff/orders/{id}/pick-list"
   },
@@ -482,6 +494,18 @@
   {
     "method": "GET",
     "path": "/staff/products/{id}"
+  },
+  {
+    "method": "GET",
+    "path": "/staff/shippers"
+  },
+  {
+    "method": "GET",
+    "path": "/staff/shipper/pending-parcels"
+  },
+  {
+    "method": "POST",
+    "path": "/staff/shipper/settle"
   },
   {
     "method": "GET",

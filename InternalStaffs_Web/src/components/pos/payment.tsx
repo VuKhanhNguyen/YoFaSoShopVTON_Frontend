@@ -1,31 +1,57 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Banknote, CreditCard, QrCode, CheckCircle2, Printer } from "lucide-react";
+import { Banknote, CreditCard, QrCode, CheckCircle2, Printer, Loader2, Download, FileText } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Receipt } from "./receipt";
 import { cashChange, orderDue, type Method, type Order } from "@/lib/pos-workflows";
 import { vnd } from "@/lib/pos";
+import { exportReceiptPdf } from "@/lib/receipt-pdf";
 
 export function Payment({
   draft,
   onComplete,
   onPrint,
+  onClose,
 }: {
   draft: Order;
-  onComplete: (method: Method, tendered: number) => Order;
+  onComplete: (method: Method, tendered: number) => Promise<Order | null> | Order;
   onPrint: (order: Order) => void;
+  onClose?: () => void;
 }) {
   const [method, setMethod] = useState<Method>("CASH");
   const [tendered, setTendered] = useState("");
   const [received, setReceived] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [completed, setCompleted] = useState<Order | null>(null);
+  const [downloading, setDownloading] = useState(false);
   const due = orderDue(draft);
+
+  const handleAutoPrint = async (orderToPrint: Order) => {
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      await exportReceiptPdf(orderToPrint);
+      onClose?.();
+    } catch (err) {
+      console.error("Lỗi xuất PDF hóa đơn:", err);
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (completed) {
+        if ((e.ctrlKey && (e.key === "p" || e.key === "P")) || e.key === "Enter") {
+          e.preventDefault();
+          handleAutoPrint(completed);
+        }
+        return;
+      }
+      if (submitting) return;
       const modes: Record<string, Method> = { F1: "CASH", F2: "QR", F3: "CARD" };
       const selected = modes[e.key];
       if (selected) {
@@ -36,21 +62,59 @@ export function Payment({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [submitting, completed, downloading, onClose]);
 
   const cash = Number(tendered) || 0;
+
+  const handleConfirm = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      const res = await onComplete(method, method === "CASH" ? cash : due);
+      if (res) setCompleted(res);
+    } catch {
+      // Handled by caller toast
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   if (completed)
     return (
       <div className="space-y-4">
         <div role="status" className="flex items-center gap-2 rounded-md bg-success-subtle p-4 font-semibold text-success">
-          <CheckCircle2 className="h-5 w-5" />
-          Đã thanh toán thành công · {vnd(orderDue(completed))}
+          <CheckCircle2 className="h-5 w-5 shrink-0" />
+          <span>
+            Đã lưu & thanh toán thành công ({completed.method === "CASH" ? "Tiền mặt" : completed.method === "QR" ? "VietQR chuyển khoản" : "Thẻ POS"}) · {vnd(orderDue(completed))}
+          </span>
         </div>
         <Receipt order={completed} />
-        <Button className="w-full gap-2 h-12" onClick={() => onPrint(completed)}>
-          <Printer className="h-4 w-4" />
-          In hóa đơn K80
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <Button
+            className="w-full gap-2 h-12 text-sm font-bold bg-primary hover:bg-primary/90 shadow-sm"
+            onClick={() => handleAutoPrint(completed)}
+            disabled={downloading}
+          >
+            {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+            In hóa đơn (Ctrl + P)
+          </Button>
+          <Button
+            variant="outline"
+            className="w-full gap-2 h-12 text-sm font-semibold"
+            onClick={() => onPrint(completed)}
+          >
+            <Download className="h-4 w-4" />
+            Tải hóa đơn (Tự chọn chỗ lưu)
+          </Button>
+        </div>
+
+        <Button
+          variant="ghost"
+          className="w-full text-xs text-muted-foreground hover:text-foreground"
+          onClick={() => onClose?.()}
+        >
+          Đóng cửa sổ
         </Button>
       </div>
     );
@@ -70,6 +134,7 @@ export function Payment({
             variant={method === key ? "default" : "outline"}
             aria-pressed={method === key}
             className="h-12 justify-start gap-2"
+            disabled={submitting}
             onClick={() => {
               setMethod(key);
               setReceived(false);
@@ -97,6 +162,7 @@ export function Payment({
                 aria-label="Tiền khách đưa"
                 inputMode="numeric"
                 value={tendered}
+                disabled={submitting}
                 onChange={(e) => setTendered(e.target.value.replace(/\D/g, ""))}
                 className="h-14 font-mono text-2xl"
                 placeholder="0"
@@ -104,15 +170,15 @@ export function Payment({
             </label>
             <div className="flex flex-wrap gap-2">
               {[100000, 200000, 500000].map((n) => (
-                <Button variant="outline" key={n} onClick={() => setTendered(String(n))}>
+                <Button variant="outline" key={n} disabled={submitting} onClick={() => setTendered(String(n))}>
                   {n / 1000}k
                 </Button>
               ))}
-              <Button variant="accent" onClick={() => setTendered(String(due))}>
+              <Button variant="accent" disabled={submitting} onClick={() => setTendered(String(due))}>
                 Vừa đủ
               </Button>
               {[1000000, 2000000].map((n) => (
-                <Button variant="outline" key={n} onClick={() => setTendered(String(n))}>
+                <Button variant="outline" key={n} disabled={submitting} onClick={() => setTendered(String(n))}>
                   {n / 1000}k
                 </Button>
               ))}
@@ -142,7 +208,7 @@ export function Payment({
             <p className={received ? "text-success font-semibold" : "text-warning font-medium animate-pulse"}>
               {received ? "Đã nhận xác nhận thanh toán Webhook Napas247" : "Đang chờ khách quét mã VietQR..."}
             </p>
-            <Button variant="outline" disabled={received} onClick={() => setReceived(true)} className="w-full">
+            <Button variant="outline" disabled={received || submitting} onClick={() => setReceived(true)} className="w-full">
               Mô phỏng nhận tiền thành công (Webhook)
             </Button>
           </div>
@@ -154,6 +220,7 @@ export function Payment({
               <input
                 type="checkbox"
                 checked={received}
+                disabled={submitting}
                 onChange={(e) => setReceived(e.target.checked)}
                 className="h-4 w-4 accent-[var(--color-primary)]"
               />
@@ -163,11 +230,18 @@ export function Payment({
         )}
 
         <Button
-          className="h-14 w-full text-base font-bold"
-          disabled={method === "CASH" ? cash < due : !received}
-          onClick={() => setCompleted(onComplete(method, method === "CASH" ? cash : due))}
+          className="h-14 w-full text-base font-bold gap-2"
+          disabled={submitting || (method === "CASH" ? cash < due : !received)}
+          onClick={handleConfirm}
         >
-          Xác nhận hoàn tất thanh toán
+          {submitting ? (
+            <>
+              <Loader2 className="h-5 w-5 animate-spin" />
+              Đang ghi vào cơ sở dữ liệu…
+            </>
+          ) : (
+            "Xác nhận thanh toán"
+          )}
         </Button>
       </section>
     </div>

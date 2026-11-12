@@ -2,12 +2,26 @@ import type { BienThe } from "@/lib/pos";
 
 /** Phân hệ kho YoFaSo — dữ liệu mô phỏng đồng bộ DonHang / ChiTietDonHang / BienDongKho. */
 
-export type WhStatus = "CHO_XAC_NHAN" | "DANG_DONG_GOI" | "CHO_SHIPPER" | "DANG_GIAO_HANG" | "DA_HUY";
+export type WhStatus = "CHO_XAC_NHAN" | "DANG_DONG_GOI" | "CHO_SHIPPER" | "DANG_GIAO_HANG" | "DA_HUY" | "TRA_HANG" | "HOAN_TAT";
 
 export interface Shelf {
-  day: "A" | "B" | "C" | "D";
+  day: string;
   ke: string;
   tang: number;
+}
+
+export function parseShelf(raw: unknown): Shelf {
+  if (raw && typeof raw === "object" && "day" in raw && "ke" in raw) {
+    return raw as Shelf;
+  }
+  if (typeof raw === "string" && raw.trim()) {
+    const clean = raw.trim().toUpperCase();
+    const m = clean.match(/(?:KE-)?([A-Z])[-_]?(\d+)?/);
+    const day = m && m[1] ? m[1] : clean.charAt(0) || "A";
+    const tang = m && m[2] ? (parseInt(m[2], 10) % 4) + 1 : 1;
+    return { day, ke: clean, tang };
+  }
+  return { day: "A", ke: "KHO-01", tang: 1 };
 }
 
 export interface WhLine {
@@ -18,12 +32,16 @@ export interface WhLine {
   mau: string;
   shelf: Shelf;
   qty: number;
+  variantId?: string;
+  unitPrice?: number;
 }
 
 export interface WhOrder {
   id: string;
+  orderId?: string;
   placedAt: string;
   shipper: string;
+  shipperId?: string;
   payment: "VIETQR" | "COD";
   cod: number;
   receiver: string;
@@ -153,10 +171,11 @@ export function buildPickList(orders: WhOrder[]): PickGroup[] {
   for (const order of orders) {
     if (order.status === "DA_HUY") continue;
     for (const line of order.lines) {
-      const key = `${line.shelf.day}-${line.shelf.ke}-${line.shelf.tang}`;
+      const sh = parseShelf(line.shelf);
+      const key = `${sh.day}-${sh.ke}-${sh.tang}`;
       let group = byShelf.get(key);
       if (!group) {
-        group = { shelf: line.shelf, items: [] };
+        group = { shelf: sh, items: [] };
         byShelf.set(key, group);
       }
       let item = group.items.find((i) => i.barcode === line.barcode);
@@ -188,15 +207,15 @@ export type ScanResult =
   | { kind: "wrong-variant"; scanned: string; expected: WhLine }
   | { kind: "unknown"; scanned: string };
 
-/** Đối soát 1 lần quét barcode với danh sách món cần đóng gói. */
+/** Đối soát 1 lần quét barcode hoặc nhập mã SKU với danh sách món cần đóng gói. */
 export function verifyScan(lines: WhLine[], scanned: Record<string, number>, barcode: string): ScanResult {
   const code = barcode.trim().toUpperCase();
-  const line = lines.find((l) => l.barcode.toUpperCase() === code);
+  const line = lines.find((l) => l.barcode.toUpperCase() === code || l.sku.toUpperCase() === code);
   if (!line) {
     // Quét nhầm biến thể khác của cùng mẫu (sai size/màu)
     const expected = lines.find((l) => {
       const prefix = l.barcode.split("-").slice(0, 2).join("-");
-      return code.startsWith(prefix);
+      return code.startsWith(prefix) || code.includes(prefix);
     });
     if (expected) return { kind: "wrong-variant", scanned: code, expected };
     return { kind: "unknown", scanned: code };
@@ -239,6 +258,7 @@ export function returnDecision(restock: boolean): { movement: "NHAP_KHO_HANG_HOA
 export interface AuditItem {
   ke: string;
   sku: string;
+  variantId?: string;
   ten: string;
   size: string;
   mau: string;

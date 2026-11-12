@@ -29,7 +29,7 @@ export function redeemedPoints(balance: number, requested: number, payable: numb
 
 export const birthdayDiscount = (total: number) => Math.round(total * 0.15);
 export const cashChange = (due: number, tendered: number) => Math.max(0, tendered - due);
-export const DENOMINATIONS = [500000, 200000, 100000, 50000, 20000, 10000] as const;
+export const DENOMINATIONS = [500000, 200000, 100000, 50000, 20000, 10000, 5000, 2000, 1000] as const;
 export const countCash = (counts: Record<number, number>) =>
   DENOMINATIONS.reduce((sum, d) => sum + d * Math.max(0, Math.floor(counts[d] || 0)), 0);
 export const shiftVariance = (counts: Record<number, number>, opening: number, cashRevenue: number) =>
@@ -40,16 +40,22 @@ export const canReturn = (created: string, now: Date) =>
 export type Method = "CASH" | "QR" | "CARD";
 
 export type Order = {
-  id: number;
+  id: number | string;
+  orderId?: string;
   created: string;
   lines: Dong[];
   discount: number;
   pointsUsed: number;
   customerId?: string | undefined;
+  customerName?: string | undefined;
+  customerPhone?: string | undefined;
+  cashierId?: string | undefined;
   method: Method;
   tendered: number;
-  channel: "TAI_QUAY_POS";
-  exchanges: { from: string; to: string; quantity: number; priceDifference: number; created: string }[];
+  total?: number;
+  status?: string;
+  channel: "TAI_QUAY_POS" | string;
+  exchanges?: { from: string; to: string; quantity: number; priceDifference: number; created: string }[];
 };
 
 export const orderDue = (order: Order) => tongThanhToan(order.lines, order.discount);
@@ -82,7 +88,7 @@ export function exchangeOrder(order: Order, catalog: BienThe[], fromCode: string
       ...order,
       lines,
       exchanges: [
-        ...order.exchanges,
+        ...(order.exchanges || []),
         { from: fromCode, to: toCode, quantity: 1, priceDifference: difference, created: now.toISOString() },
       ],
     },

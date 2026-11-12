@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { applyScan, scanProgress, verifyScan, type WhOrder } from "@/lib/warehouse";
 import { vnd } from "@/lib/pos";
+import { api } from "@/lib/api";
 
 /** Mã vạch 1D mô phỏng (Code128 giả lập) vẽ bằng CSS từ chuỗi mã. */
 function CssBarcode({ code, className = "" }: { code: string; className?: string }) {
@@ -28,7 +29,13 @@ function CssBarcode({ code, className = "" }: { code: string; className?: string
 }
 
 /** UC_WH_02 — Trạm đóng gói: đối soát barcode 100% & in tem vận đơn A6. */
-export function PackingStation({ orders }: { orders: WhOrder[] }) {
+export function PackingStation({
+  orders,
+  onRefresh,
+}: {
+  orders: WhOrder[];
+  onRefresh?: () => void;
+}) {
   const packable = orders.filter((o) => o.status === "CHO_XAC_NHAN" || o.status === "DANG_DONG_GOI");
   const [orderId, setOrderId] = useState("");
   const [order, setOrder] = useState<WhOrder | null>(null);
@@ -48,10 +55,27 @@ export function PackingStation({ orders }: { orders: WhOrder[] }) {
   }, [flash]);
 
   const openOrder = () => {
-    const id = orderId.trim().toUpperCase().replace(/^#/, "");
-    const found = packable.find((o) => o.id === id || o.id.endsWith(id));
+    const raw = orderId.trim();
+    if (!raw) return;
+    const id = raw.toUpperCase().replace(/^#/, "").replace(/^YFS/, "");
+    const numericId = id.match(/^\d+$/) ? `DH${id.padStart(8, "0")}` : "";
+
+    const found = packable.find((o) => {
+      const matchId =
+        o.id.toUpperCase() === id ||
+        o.id.toUpperCase().endsWith(id) ||
+        (numericId && o.id.toUpperCase() === numericId);
+      const matchSku = o.lines?.some(
+        (l) =>
+          l.sku?.toUpperCase() === id ||
+          l.barcode?.toUpperCase() === id ||
+          l.sku?.toUpperCase().includes(id)
+      );
+      return matchId || matchSku;
+    });
+
     if (!found) {
-      setError(`Không tìm thấy đơn ${orderId} cần đóng gói`);
+      setError(`Không tìm thấy đơn hàng hoặc mã SKU "${orderId}" cần đóng gói`);
       return;
     }
     setError("");
@@ -83,8 +107,17 @@ export function PackingStation({ orders }: { orders: WhOrder[] }) {
     scanRef.current?.focus();
   };
 
-  const finish = () => {
-    if (!progress.complete) return;
+  const finish = async () => {
+    if (!progress.complete || !order) return;
+    if (order.status === "CHO_XAC_NHAN") {
+      try {
+        await api(`/staff/orders/${order.id}/pack`, "POST");
+        pushToast({ tone: "success", title: `Đã đóng gói đơn #${order.id} thành công!` });
+        onRefresh?.();
+      } catch (e: any) {
+        console.error(e);
+      }
+    }
     setShowWaybill(true);
   };
 
@@ -98,20 +131,37 @@ export function PackingStation({ orders }: { orders: WhOrder[] }) {
 
       {/* Mở đơn hàng */}
       <div className="rounded-xl border border-border bg-surface p-4">
-        <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Bước 1 — Quét / nhập mã đơn hàng</p>
+        <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Bước 1 — Quét mã vạch / nhập mã đơn hàng hoặc mã SKU</p>
         <div className="mt-2 flex gap-2">
           <input
             value={orderId}
             onChange={(e) => setOrderId(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && openOrder()}
-            placeholder="VD: DH00000001"
+            placeholder="Nhập hoặc quét mã đơn (VD: DH00000001, 1) hoặc mã SKU/Barcode…"
             className="h-12 flex-1 rounded-md border-2 border-primary bg-background px-4 font-mono text-sm outline-none"
           />
           <Button className="h-12 px-6 font-bold" onClick={openOrder}>Mở đơn</Button>
         </div>
-        <p className="mt-2 font-mono text-[11px] text-muted-foreground">
-          Đơn đang chờ: {packable.map((o) => `#${o.id}`).join(" · ")}
-        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
+          <span>Đơn đang chờ:</span>
+          {packable.length === 0 && <span>Không có đơn cần đóng gói</span>}
+          {packable.map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              onClick={() => {
+                setOrderId(o.id);
+                setOrder(o);
+                setScanned({});
+                setDone(false);
+                setError("");
+              }}
+              className="rounded bg-muted px-1.5 py-0.5 text-primary hover:bg-accent-subtle hover:underline font-bold"
+            >
+              #{o.id}
+            </button>
+          ))}
+        </div>
       </div>
 
       {order && (
@@ -190,7 +240,7 @@ export function PackingStation({ orders }: { orders: WhOrder[] }) {
       <Dialog open={showWaybill} onOpenChange={setShowWaybill}>
         <DialogContent className="max-w-md">
           <DialogTitle>Tem vận đơn A6 (100×150mm)</DialogTitle>
-          <DialogDescription>Xem trước tem dán nhiệt — mô phỏng, chưa gửi lệnh in thật.</DialogDescription>
+          <DialogDescription>Xem trước tem vận đơn theo dữ liệu đơn hàng.</DialogDescription>
           {order && <Waybill order={order} />}
           <div className="flex justify-end gap-2 border-t border-border pt-3">
             <Button variant="outline" onClick={() => setShowWaybill(false)}>Đóng</Button>
@@ -203,7 +253,7 @@ export function PackingStation({ orders }: { orders: WhOrder[] }) {
               <Printer className="h-4 w-4" /> In tem A6
             </Button>
           </div>
-          {done && <p className="text-sm font-semibold text-success">Đã gửi lệnh in mô phỏng — kiện hàng sẵn sàng bàn giao shipper.</p>}
+          {done && <p className="text-sm font-semibold text-success">Đã gửi lệnh in tem A6 — kiện hàng sẵn sàng bàn giao shipper.</p>}
         </DialogContent>
       </Dialog>
 

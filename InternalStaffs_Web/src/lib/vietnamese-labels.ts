@@ -20,7 +20,10 @@ export const VIETNAMESE_LABELS: Record<string, string> = {
 
   // Kênh bán hàng
   ONLINE_APP: "Online (App)",
-  TAI_QUAY_POS: "Tại quầy (POS)",
+  online_app: "Online (App)",
+  TAI_QUAY_POS: "tại quầy thu ngân",
+  tai_quay_pos: "tại quầy thu ngân",
+  "Tại quầy (POS)": "tại quầy thu ngân",
 
   // Trạng thái & Phương thức thanh toán
   CHUA_THANH_TOAN: "Chưa thanh toán",

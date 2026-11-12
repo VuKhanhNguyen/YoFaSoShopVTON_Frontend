@@ -72,9 +72,7 @@ export async function api<T>(
     if (
       response.status === 401 &&
       typeof window !== "undefined" &&
-      !path.startsWith("/auth/") &&
-      document.visibilityState === "visible" &&
-      Date.now() - lastActivity < 60000
+      !path.startsWith("/auth/")
     )
       window.dispatchEvent(new Event("yofaso:session-expired"));
     throw new ApiError(

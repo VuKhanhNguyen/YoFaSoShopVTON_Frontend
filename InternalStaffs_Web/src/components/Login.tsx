@@ -333,14 +333,14 @@ export function Login() {
               >
                 <label className="block">
                   <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Email hoặc Mã nhân viên
+                    Email hoặc Tên đăng nhập
                   </span>
                   <span className="relative mt-1.5 block">
                     <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <input
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      placeholder="admin@yofaso.vn"
+                      placeholder="cashierlanphuong hoặc adminyofaso"
                       autoComplete="username"
                       className="h-11 w-full rounded-md border border-border bg-canvas pl-9 pr-3 text-sm outline-none focus:border-primary"
                     />
@@ -406,6 +406,77 @@ export function Login() {
                 >
                   {loading ? "ĐANG XÁC THỰC…" : "ĐĂNG NHẬP HỆ THỐNG"} <ArrowRight className="h-4 w-4" />
                 </Button>
+
+                <div className="mt-5 border-t border-border pt-4">
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2.5">
+                    Tài khoản mẫu từ Database:
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEmail("cashierlanphuong");
+                        setPass("TestingPassword123");
+                        setError("");
+                      }}
+                      className="flex items-center gap-2 p-2 rounded-lg border border-border bg-canvas hover:border-primary/50 text-left transition-colors"
+                    >
+                      <span className="text-base">💳</span>
+                      <div className="min-w-0">
+                        <p className="font-semibold text-foreground truncate">Thu ngân POS</p>
+                        <p className="font-mono text-[10px] text-muted-foreground truncate">cashierlanphuong</p>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEmail("adminyofaso");
+                        setPass("TestingPassword123");
+                        setError("");
+                      }}
+                      className="flex items-center gap-2 p-2 rounded-lg border border-border bg-canvas hover:border-primary/50 text-left transition-colors"
+                    >
+                      <span className="text-base">👑</span>
+                      <div className="min-w-0">
+                        <p className="font-semibold text-foreground truncate">Quản trị viên</p>
+                        <p className="font-mono text-[10px] text-muted-foreground truncate">adminyofaso</p>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEmail("whmanhhung");
+                        setPass("TestingPassword123");
+                        setError("");
+                      }}
+                      className="flex items-center gap-2 p-2 rounded-lg border border-border bg-canvas hover:border-primary/50 text-left transition-colors"
+                    >
+                      <span className="text-base">📦</span>
+                      <div className="min-w-0">
+                        <p className="font-semibold text-foreground truncate">Nhân viên kho</p>
+                        <p className="font-mono text-[10px] text-muted-foreground truncate">whmanhhung</p>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEmail("shipquocbao");
+                        setPass("TestingPassword123");
+                        setError("");
+                      }}
+                      className="flex items-center gap-2 p-2 rounded-lg border border-border bg-canvas hover:border-primary/50 text-left transition-colors"
+                    >
+                      <span className="text-base">🛵</span>
+                      <div className="min-w-0">
+                        <p className="font-semibold text-foreground truncate">Giao vận Shipper</p>
+                        <p className="font-mono text-[10px] text-muted-foreground truncate">shipquocbao</p>
+                      </div>
+                    </button>
+                  </div>
+                  <p className="mt-2 text-[11px] text-muted-foreground text-center">
+                    Mật khẩu mẫu chung: <code className="bg-canvas px-1 py-0.5 rounded font-mono font-bold text-foreground">TestingPassword123</code>
+                  </p>
+                </div>
               </form>
             </>
           )}
