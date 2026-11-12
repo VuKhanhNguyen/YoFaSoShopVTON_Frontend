@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import {
   FlatList,
   Image,
@@ -8,7 +8,7 @@ import {
   Text,
   View,
 } from "react-native";
-import { router, Stack } from "expo-router";
+import { router, Stack, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors, Fonts, Radii, Shadows, Spacing } from "@/constants/theme";
 import { formatVND } from "@/lib/catalog-data";
@@ -21,6 +21,7 @@ import {
 import { useResource } from "@/hooks/use-resource";
 import { useSession } from "@/lib/session";
 import type { Row } from "@/lib/models";
+import { publicUrl } from "@/lib/api";
 import { EmptyState } from "@/components/shop/ui";
 
 const TABS: { id: "all" | TrangThaiDonHang; label: string }[] = [
@@ -38,6 +39,12 @@ export default function OrdersScreen() {
 
   const apiResource = useResource<Row[]>(user ? "/orders?page=0&size=50" : null);
 
+  useFocusEffect(
+    useCallback(() => {
+      if (user) apiResource.reload();
+    }, [user, apiResource.reload])
+  );
+
   const orders: DonHang[] =
     apiResource.data
       ? apiResource.data.map((r, i) => ({
@@ -47,7 +54,7 @@ export default function OrdersScreen() {
             id: String(l.orderLineId || l.orderItemId || `item-${j}`),
             maSanPham: String(l.variantId || l.productId || l.maSanPham || "SP00000001"),
             tenSanPham: String(l.productName || l.tenSanPham || "Sản phẩm YoFaSo"),
-            hinhAnh: l.coverUrl || l.imageUrl || l.hinhAnh,
+            hinhAnh: l.coverUrl ? publicUrl(String(l.coverUrl)) : (l.imageUrl || l.hinhAnh),
             donGia: Number(l.unitPrice || l.price || l.donGia || 0),
             tenMau: String(l.colorName || l.tenMau || "Màu chuẩn"),
             maMauHex: String(l.colorHex || l.maMauHex || "#1E293B"),
@@ -91,6 +98,7 @@ export default function OrdersScreen() {
       year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
+      timeZone: "Asia/Ho_Chi_Minh",
     });
 
     return (
@@ -237,7 +245,8 @@ export default function OrdersScreen() {
             onRefresh={() => {
               if (user) apiResource.reload();
             }}
-            tintColor={Colors.champagne}
+            tintColor={Colors.champagneDeep}
+            colors={[Colors.champagneDeep]}
           />
         }
         ListEmptyComponent={

@@ -501,22 +501,120 @@ export type UserWalletVoucherItem = Voucher & {
   walletStatus: "CHUA_DUNG" | "DA_DUNG" | "HET_HAN";
   ngayThuThap: string;
   maDonHangDaDung: string | null | undefined;
+  isOrderProcessing?: boolean;
 };
 
-export function getUserVouchers(userId?: string): UserWalletVoucherItem[] {
+export function isVoucherInUseOrUsed(
+  code: string,
+  orders?: any[]
+): { inUse: boolean; isCompleted: boolean; orderId?: string } {
+  if (!code || !orders || orders.length === 0) {
+    return { inUse: false, isCompleted: false };
+  }
+  const clean = code.trim().toUpperCase();
+  const matchingOrder = orders.find(
+    (o) =>
+      (o.voucherCode && String(o.voucherCode).toUpperCase() === clean) ||
+      (o.promotionId && String(o.promotionId).toUpperCase() === clean) ||
+      (o.maKhuyenMai && String(o.maKhuyenMai).toUpperCase() === clean)
+  );
+
+  if (!matchingOrder) return { inUse: false, isCompleted: false };
+
+  const st = String(matchingOrder.status || matchingOrder.trangThai || "");
+  const oid = String(matchingOrder.orderId || matchingOrder.maDonHang || "");
+
+  if (st === "HOAN_TAT") {
+    return { inUse: true, isCompleted: true, orderId: oid };
+  }
+  if (st === "DA_HUY" || st === "TRA_HANG") {
+    return { inUse: false, isCompleted: false };
+  }
+  // Order placed & currently processing (CHO_XAC_NHAN, DANG_DONG_GOI, DANG_GIAO_HANG, etc.)
+  return { inUse: true, isCompleted: false, orderId: oid };
+}
+
+export function getUserVouchers(userId?: string, orders?: any[]): UserWalletVoucherItem[] {
   const currentUserId = userId || "ND00000002";
   const records = USER_VOUCHER_WALLET_MOCK[currentUserId] || USER_VOUCHER_WALLET_MOCK["ND00000002"];
   const list: UserWalletVoucherItem[] = [];
+  const processedCodes = new Set<string>();
+
   for (const rec of records) {
     const v = VOUCHERS_MOCK.find((item) => item.maKhuyenMai === rec.maKhuyenMai);
-    if (v) {
+    if (!v) continue;
+    processedCodes.add(v.maPhieuGiamGia.toUpperCase());
+
+    let walletStatus: "CHUA_DUNG" | "DA_DUNG" | "HET_HAN" = rec.trangThai;
+    let maDonHangDaDung: string | null | undefined = rec.maDonHangDaDung ?? null;
+    let isOrderProcessing = false;
+
+    if (orders && orders.length > 0) {
+      const usage = isVoucherInUseOrUsed(v.maPhieuGiamGia, orders);
+      if (usage.inUse) {
+        maDonHangDaDung = usage.orderId;
+        if (usage.isCompleted) {
+          walletStatus = "DA_DUNG";
+        } else {
+          walletStatus = "CHUA_DUNG";
+          isOrderProcessing = true;
+        }
+      } else if (rec.trangThai === "DA_DUNG" && rec.maDonHangDaDung) {
+        // If mock says DA_DUNG, check if that order was cancelled
+        const ord = orders.find(
+          (o) => String(o.orderId || o.maDonHang) === rec.maDonHangDaDung
+        );
+        if (ord) {
+          const ost = String(ord.status || ord.trangThai || "");
+          if (ost === "HOAN_TAT") {
+            walletStatus = "DA_DUNG";
+          } else if (ost === "DA_HUY" || ost === "TRA_HANG") {
+            walletStatus = "CHUA_DUNG";
+            maDonHangDaDung = null;
+          } else {
+            walletStatus = "CHUA_DUNG";
+            isOrderProcessing = true;
+          }
+        }
+      }
+    }
+
+    list.push({
+      ...v,
+      walletStatus,
+      ngayThuThap: rec.ngayThuThap,
+      maDonHangDaDung,
+      isOrderProcessing,
+    });
+  }
+
+  // Also include any voucher from orders that the user used but was not in wallet mock
+  if (orders && orders.length > 0) {
+    for (const ord of orders) {
+      const code = ord.voucherCode || ord.maKhuyenMai;
+      if (!code) continue;
+      const upper = String(code).toUpperCase();
+      if (processedCodes.has(upper)) continue;
+
+      const v = VOUCHERS_MOCK.find(
+        (item) => item.maPhieuGiamGia.toUpperCase() === upper || item.maKhuyenMai === upper
+      );
+      if (!v) continue;
+      processedCodes.add(upper);
+
+      const st = String(ord.status || ord.trangThai || "");
+      const oid = String(ord.orderId || ord.maDonHang || "");
+      if (st === "DA_HUY" || st === "TRA_HANG") continue;
+
       list.push({
         ...v,
-        walletStatus: rec.trangThai,
-        ngayThuThap: rec.ngayThuThap,
-        maDonHangDaDung: rec.maDonHangDaDung ?? null,
+        walletStatus: st === "HOAN_TAT" ? "DA_DUNG" : "CHUA_DUNG",
+        ngayThuThap: String(ord.createdAt || "2026-10-28 09:00:00"),
+        maDonHangDaDung: oid,
+        isOrderProcessing: st !== "HOAN_TAT",
       });
     }
   }
+
   return list;
 }

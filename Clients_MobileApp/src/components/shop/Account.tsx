@@ -33,13 +33,22 @@ export const Account = memo(function Account() {
   const [voucherSheetOpen, setVoucherSheetOpen] = useState(false);
   const [voucherTab, setVoucherTab] = useState<"ALL" | "READY" | "USED">("ALL");
 
+  const orders = ordersState.data || [];
+
   const userVouchers = useMemo(
-    () => getUserVouchers(user?.userId || "ND00000002"),
-    [user?.userId]
+    () => getUserVouchers(user?.userId || "ND00000002", orders),
+    [user?.userId, orders]
   );
 
   const readyVouchers = useMemo(
-    () => userVouchers.filter((v) => v.walletStatus === "CHUA_DUNG" && v.trangThai === "DANG_DIEN_RA"),
+    () =>
+      userVouchers.filter(
+        (v) =>
+          v.walletStatus === "CHUA_DUNG" &&
+          !v.isOrderProcessing &&
+          !v.maDonHangDaDung &&
+          v.trangThai === "DANG_DIEN_RA"
+      ),
     [userVouchers]
   );
 
@@ -601,6 +610,7 @@ export const Account = memo(function Account() {
         >
           {displayedVouchers.map((v) => {
             const isUsed = v.walletStatus === "DA_DUNG";
+            const isProcessing = !!v.isOrderProcessing || (v.walletStatus === "CHUA_DUNG" && !!v.maDonHangDaDung);
             const isPaused = v.trangThai === "TAM_DUNG";
             const isPercent = v.loaiGiamGia === "PHAN_TRAM";
             const isShipping = v.loaiGiamGia === "MIEN_PHI_VAN_CHUYEN";
@@ -610,13 +620,14 @@ export const Account = memo(function Account() {
                 ? Math.min(100, Math.round((v.soLuongDaDung / v.soLuongPhatHanh) * 100))
                 : 0;
             const isSoldOut = percentUsed >= 100;
+            const isDisabled = isPaused || isUsed || isProcessing || isSoldOut;
 
             return (
               <View
                 key={v.maKhuyenMai}
                 style={[
                   st.voucherWalletCard,
-                  (isPaused || isUsed) && st.voucherWalletCardPaused,
+                  (isPaused || isUsed || isProcessing) && st.voucherWalletCardPaused,
                 ]}
               >
                 {/* Left Coupon Badge */}
@@ -624,14 +635,14 @@ export const Account = memo(function Account() {
                   style={[
                     st.voucherWalletLeft,
                     isShipping && { backgroundColor: "#ECFDF5" },
-                    isUsed && { backgroundColor: "#F1F5F9" },
+                    (isUsed || isProcessing) && { backgroundColor: "#F1F5F9" },
                   ]}
                 >
                   <Ionicons
                     name={isShipping ? "car-outline" : isPercent ? "pricetag-outline" : "cash-outline"}
                     size={20}
                     color={
-                      isUsed
+                      isUsed || isProcessing
                         ? Colors.textMuted
                         : isShipping
                         ? Colors.statusSuccess
@@ -642,7 +653,7 @@ export const Account = memo(function Account() {
                     style={[
                       st.voucherWalletType,
                       isShipping && { color: Colors.statusSuccess },
-                      isUsed && { color: Colors.textMuted },
+                      (isUsed || isProcessing) && { color: Colors.textMuted },
                     ]}
                   >
                     {isShipping ? "FREESHIP" : isPercent ? "GIẢM %" : "TIỀN MẶT"}
@@ -692,6 +703,11 @@ export const Account = memo(function Account() {
                       ✓ Đã dùng cho đơn {v.maDonHangDaDung || "DH00000001"}
                     </Text>
                   )}
+                  {isProcessing && (
+                    <Text style={[st.voucherUsedOrderText, { color: Colors.champagneDeep }]}>
+                      ⏳ Đang áp dụng cho đơn {v.maDonHangDaDung}
+                    </Text>
+                  )}
                 </View>
 
                 {/* Right Action */}
@@ -700,26 +716,35 @@ export const Account = memo(function Account() {
                     <Text style={st.voucherCodeText}>{v.maPhieuGiamGia}</Text>
                   </View>
                   <Pressable
-                    disabled={isPaused || isUsed}
+                    disabled={isDisabled}
                     onPress={() => {
                       setVoucherSheetOpen(false);
                       setToast(`Đã chọn mã ${v.maPhieuGiamGia}`);
                       setTimeout(() => setToast(""), 2000);
-                      router.push("/cart");
+                      router.push({
+                        pathname: "/cart",
+                        params: { voucher: v.maPhieuGiamGia },
+                      });
                     }}
                     style={[
                       st.voucherUseBtn,
-                      (isPaused || isUsed) && st.voucherUseBtnDisabled,
+                      isDisabled && st.voucherUseBtnDisabled,
                     ]}
                   >
                     <Text
                       numberOfLines={1}
                       style={[
                         st.voucherUseBtnText,
-                        (isPaused || isUsed) && { color: Colors.textMuted },
+                        isDisabled && { color: Colors.textMuted },
                       ]}
                     >
-                      {isUsed ? "Đã dùng" : isPaused ? "Tạm dừng" : "Dùng ngay"}
+                      {isUsed
+                        ? "Đã dùng"
+                        : isProcessing
+                        ? "Đang xử lý"
+                        : isPaused
+                        ? "Tạm dừng"
+                        : "Dùng ngay"}
                     </Text>
                   </Pressable>
                 </View>

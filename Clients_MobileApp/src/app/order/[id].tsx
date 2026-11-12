@@ -1,17 +1,22 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   Image,
+  Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
-import { router, Stack, useLocalSearchParams } from "expo-router";
+import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { api } from "@/lib/api";
+import * as FileSystem from "expo-file-system/legacy";
+import * as Sharing from "expo-sharing";
+import * as MediaLibrary from "expo-media-library/legacy";
+import { api, publicUrl } from "@/lib/api";
 import { useResource } from "@/hooks/use-resource";
 import type { Row } from "@/lib/models";
 import { Colors, Fonts, Radii, Shadows } from "@/constants/theme";
@@ -37,6 +42,80 @@ export default function OrderDetailScreen() {
   const [fitChoice, setFitChoice] = useState("Vừa vặn");
   const [fabricChoice, setFabricChoice] = useState("Đúng mô tả");
   const [toast, setToast] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [downloadingQr, setDownloadingQr] = useState(false);
+  const [downloadNotice, setDownloadNotice] = useState("");
+
+  const handleDownloadQr = async () => {
+    if (!id) return;
+    const amount = Number(o?.total || o?.totalAmount || 0);
+    const qrUrl = `https://img.vietqr.io/image/TCB-19038917693011-compact2.png?amount=${amount}&addInfo=${encodeURIComponent(
+      id
+    )}&accountName=${encodeURIComponent("NGUYEN VU KHANH")}`;
+
+    setDownloadingQr(true);
+    setDownloadNotice("");
+    try {
+      if (Platform.OS === "web") {
+        const response = await fetch(qrUrl);
+        if (!response.ok) throw new Error("Không tải được ảnh mã QR.");
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `vietqr-${id}.png`;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        setDownloadNotice("Đã tải mã QR về máy thành công!");
+      } else {
+        if (!FileSystem.cacheDirectory) {
+          throw new Error("Không có thư mục lưu tạm.");
+        }
+        const local = `${FileSystem.cacheDirectory}vietqr-${id}.png`;
+        const response = await FileSystem.downloadAsync(qrUrl, local);
+        if (response.status !== 200) {
+          throw new Error("Không tải được ảnh mã QR.");
+        }
+        const { granted } = await MediaLibrary.requestPermissionsAsync(true);
+        if (granted) {
+          await MediaLibrary.createAssetAsync(local);
+          setDownloadNotice("Đã lưu mã QR vào thư viện ảnh!");
+          Alert.alert("Thành công", "Đã lưu mã QR thanh toán vào thư viện ảnh của bạn!");
+        } else if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(local, {
+            mimeType: "image/png",
+            dialogTitle: "Lưu hoặc chia sẻ mã QR thanh toán",
+          });
+          setDownloadNotice("Đã mở chia sẻ mã QR.");
+        } else {
+          throw new Error("Chưa cấp quyền lưu ảnh vào thư viện.");
+        }
+      }
+    } catch (e: any) {
+      setDownloadNotice(e?.message || "Không thể tải mã QR.");
+    } finally {
+      setDownloadingQr(false);
+      setTimeout(() => setDownloadNotice(""), 3000);
+    }
+  };
+
+  // Auto-reload order details when screen regains focus (e.g. after returning from bank app)
+  useFocusEffect(
+    useCallback(() => {
+      state.reload();
+    }, [state.reload])
+  );
+
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    state.reload();
+  }, [state.reload]);
+
+  useEffect(() => {
+    if (!state.loading) {
+      setRefreshing(false);
+    }
+  }, [state.loading]);
 
   const o = state.data;
   const isCancelled = o?.status === "DA_HUY";
@@ -104,7 +183,18 @@ export default function OrderDetailScreen() {
         }}
       />
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={st.scrollContent}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={st.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={Colors.champagneDeep}
+            colors={[Colors.champagneDeep]}
+          />
+        }
+      >
         {/* Status Stepper Timeline */}
         <View style={st.card}>
           <Text style={st.cardTitle}>Hành trình đơn hàng</Text>
@@ -220,7 +310,7 @@ export default function OrderDetailScreen() {
             >
               {item.coverUrl ? (
                 <Image
-                  source={{ uri: String(item.coverUrl) }}
+                  source={{ uri: publicUrl(String(item.coverUrl)) }}
                   style={st.itemThumb}
                   resizeMode="cover"
                 />
@@ -475,6 +565,54 @@ export default function OrderDetailScreen() {
               resizeMode="contain"
             />
           </View>
+
+          <Pressable
+            onPress={handleDownloadQr}
+            disabled={downloadingQr}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              paddingVertical: 10,
+              paddingHorizontal: 16,
+              borderRadius: Radii.md,
+              backgroundColor: Colors.canvas,
+              borderWidth: 1,
+              borderColor: Colors.borderHairline,
+              width: "100%",
+            }}
+          >
+            <Ionicons
+              name={downloadingQr ? "hourglass-outline" : "download-outline"}
+              size={18}
+              color={Colors.primary}
+            />
+            <Text
+              style={{
+                fontSize: 13,
+                fontFamily: "JakartaSemiBold",
+                color: Colors.primary,
+              }}
+            >
+              {downloadingQr ? "Đang tải ảnh mã QR..." : "Tải mã QR thanh toán về máy"}
+            </Text>
+          </Pressable>
+
+          {!!downloadNotice && (
+            <Text
+              style={{
+                textAlign: "center",
+                color: downloadNotice.includes("lưu") || downloadNotice.includes("tải")
+                  ? Colors.statusSuccess
+                  : "#DC2626",
+                fontSize: 12,
+                fontFamily: "JakartaSemiBold",
+              }}
+            >
+              {downloadNotice}
+            </Text>
+          )}
 
           <View
             style={{

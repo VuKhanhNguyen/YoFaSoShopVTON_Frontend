@@ -1,21 +1,29 @@
 import { cache, cached } from "@/lib/public-cache";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
+
 export function useResource<T>(path: string | null) {
   const [data, setData] = useState<T>();
   const [loading, setLoading] = useState(Boolean(path));
   const [error, setError] = useState("");
   const [version, setVersion] = useState(0);
+  const prevPathRef = useRef<string | null>(path);
+
   useEffect(() => {
     let active = true;
     if (!path) {
       setData(undefined);
       setLoading(false);
+      prevPathRef.current = null;
       return;
     }
     setLoading(true);
     setError("");
-    setData(undefined);
+    // Only wipe data if endpoint path changes; retain stale data during refresh to prevent UI flicker
+    if (prevPathRef.current !== path) {
+      setData(undefined);
+      prevPathRef.current = path;
+    }
     api<T>(path)
       .then((value) => {
         if (active) setData(value);

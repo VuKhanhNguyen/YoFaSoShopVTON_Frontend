@@ -10,6 +10,11 @@
     "ios": {
       "icon": "./assets/brand/app-icon.png"
     },
+    "androidStatusBar": {
+      "translucent": true,
+      "backgroundColor": "#00000000",
+      "barStyle": "dark-content"
+    },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#FAFAF9",

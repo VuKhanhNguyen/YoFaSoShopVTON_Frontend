@@ -1,22 +1,23 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Image,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
-import { router, Stack, useFocusEffect } from "expo-router";
+import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api, publicUrl } from "@/lib/api";
 import { useResource } from "@/hooks/use-resource";
 import { useSession } from "@/lib/session";
 import type { Row } from "@/lib/models";
 import { Colors, Fonts, Radii, Shadows } from "@/constants/theme";
-import { EditorialImages, formatVND } from "@/lib/catalog-data";
+import { EditorialImages, formatVND, isVoucherInUseOrUsed } from "@/lib/catalog-data";
 import { Button, EmptyState, Notice, Sheet, colors } from "@/components/shop/ui";
 
 interface LocalCartItem {
@@ -53,6 +54,9 @@ const MOCK_CART_ITEMS: LocalCartItem[] = [
 export default function CartScreen() {
   const { user } = useSession();
   const state = useResource<Row[]>(user ? "/cart" : null);
+  const ordersState = useResource<Row[]>(user ? "/orders" : null);
+  const userOrders = ordersState.data || [];
+  const params = useLocalSearchParams<{ voucher?: string }>();
 
   const [localCart, setLocalCart] = useState<LocalCartItem[]>([]);
   const [voucherCode, setVoucherCode] = useState("VTON5");
@@ -61,12 +65,54 @@ export default function CartScreen() {
   const [paymentMethod, setPaymentMethod] = useState<"COD" | "VIETQR">("COD");
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Sync voucher from router params if provided
+  useEffect(() => {
+    if (params.voucher !== undefined) {
+      if (params.voucher) {
+        setVoucherCode(params.voucher);
+        setVoucherApplied(true);
+      } else {
+        setVoucherApplied(false);
+        setVoucherCode("");
+      }
+    }
+  }, [params.voucher]);
+
+  // If initial voucher is already used/in-use in user orders, disable it
+  useEffect(() => {
+    if (userOrders.length > 0 && voucherApplied && voucherCode) {
+      const usage = isVoucherInUseOrUsed(voucherCode, userOrders);
+      if (usage.inUse) {
+        setVoucherApplied(false);
+        setVoucherCode("");
+      }
+    }
+  }, [userOrders]);
 
   useFocusEffect(
     useCallback(() => {
       state.reload();
-    }, [state.reload])
+      ordersState.reload();
+    }, [state.reload, ordersState.reload])
   );
+
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    if (user) {
+      state.reload();
+      ordersState.reload();
+    } else {
+      setTimeout(() => setRefreshing(false), 500);
+    }
+  }, [user, state.reload, ordersState.reload]);
+
+  useEffect(() => {
+    if (!state.loading) {
+      setRefreshing(false);
+    }
+  }, [state.loading]);
 
   // Khi người dùng đăng nhập, sử dụng trực tiếp giỏ hàng từ cơ sở dữ liệu
   const rawCart = user ? (state.data || []) : localCart;
@@ -146,15 +192,39 @@ export default function CartScreen() {
       />
 
       {cartItems.length === 0 ? (
-        <EmptyState
-          title="Túi đồ của bạn đang trống"
-          body="Khám phá các thiết kế thời trang chuẩn phom VTON và ướm thử trên cơ thể bạn ngay hôm nay."
-          cta="Khám phá bộ sưu tập"
-          onCta={() => router.replace("/(shop)")}
-          icon={<Ionicons name="bag-handle-outline" size={38} color={Colors.champagneDeep} />}
-        />
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ flexGrow: 1 }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={Colors.champagneDeep}
+              colors={[Colors.champagneDeep]}
+            />
+          }
+        >
+          <EmptyState
+            title="Túi đồ của bạn đang trống"
+            body="Khám phá các thiết kế thời trang chuẩn phom VTON và ướm thử trên cơ thể bạn ngay hôm nay."
+            cta="Khám phá bộ sưu tập"
+            onCta={() => router.replace("/(shop)")}
+            icon={<Ionicons name="bag-handle-outline" size={38} color={Colors.champagneDeep} />}
+          />
+        </ScrollView>
       ) : (
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={st.scrollContent}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={st.scrollContent}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={Colors.champagneDeep}
+              colors={[Colors.champagneDeep]}
+            />
+          }
+        >
           <Text style={st.tipText}>Trượt hoặc chạm vào nút − để điều chỉnh số lượng.</Text>
 
           {/* Cart Items List */}
@@ -225,13 +295,31 @@ export default function CartScreen() {
                     : voucherCode === "FREESHIP"
                     ? "Miễn phí vận chuyển cho đơn từ 1.000.000đ"
                     : "Ưu đãi Combo VTON giảm 5%"
-                  : "Nhập voucher sinh nhật hoặc sự kiện"}
+                  : "Nhấn để chọn mã giảm giá hoặc freeship"}
               </Text>
             </View>
             {voucherApplied ? (
-              <Text style={st.voucherDiscountText}>−{formatVND(discount)}</Text>
-            ) : null}
-            <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Text style={st.voucherDiscountText}>−{formatVND(discount)}</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Hủy chọn voucher"
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    setVoucherApplied(false);
+                    setVoucherCode("");
+                    setToast("Đã hủy chọn voucher");
+                    setTimeout(() => setToast(""), 1800);
+                  }}
+                  hitSlop={8}
+                  style={st.unselectVoucherBtn}
+                >
+                  <Ionicons name="close-circle" size={20} color={Colors.textMuted} />
+                </Pressable>
+              </View>
+            ) : (
+              <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+            )}
           </Pressable>
 
           {/* Price Calculation Summary */}
@@ -351,9 +439,28 @@ export default function CartScreen() {
               title="Áp dụng"
               accent
               onPress={() => {
+                const trimmed = voucherCode.trim().toUpperCase();
+                if (!trimmed) {
+                  setVoucherApplied(false);
+                  setVoucherCode("");
+                  setVoucherSheetOpen(false);
+                  setToast("Đã hủy chọn voucher");
+                  setTimeout(() => setToast(""), 1800);
+                  return;
+                }
+                const usage = isVoucherInUseOrUsed(trimmed, userOrders);
+                if (usage.inUse) {
+                  const msg = usage.isCompleted
+                    ? `Mã ${trimmed} đã dùng trong đơn #${usage.orderId}`
+                    : `Mã ${trimmed} đang áp dụng trong đơn #${usage.orderId}`;
+                  setToast(msg);
+                  setTimeout(() => setToast(""), 2500);
+                  return;
+                }
+                setVoucherCode(trimmed);
                 setVoucherApplied(true);
                 setVoucherSheetOpen(false);
-                setToast(`Đã áp dụng mã ${voucherCode}`);
+                setToast(`Đã áp dụng mã ${trimmed}`);
                 setTimeout(() => setToast(""), 2000);
               }}
               style={{ minHeight: 46, paddingHorizontal: 16 }}
@@ -368,28 +475,83 @@ export default function CartScreen() {
             { code: "VTON5", desc: "Giảm 5% cho trọn bộ combo thử đồ VTON", tag: "AI Combo" },
             { code: "FREESHIP", desc: "Miễn phí vận chuyển toàn quốc cho đơn từ 1.000.000đ", tag: "Vận chuyển" },
             { code: "BIRTHDAY15", desc: "Voucher mừng sinh nhật giảm 15% độc quyền", tag: "All Member" },
-          ].map((v) => (
-            <Pressable
-              key={v.code}
-              onPress={() => {
-                setVoucherCode(v.code);
-                setVoucherApplied(true);
-                setVoucherSheetOpen(false);
-              }}
-              style={st.availableVoucherItem}
-            >
-              <View style={{ flex: 1 }}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                  <Text style={st.availCodeText}>{v.code}</Text>
-                  <View style={st.availTagPill}>
-                    <Text style={st.availTagText}>{v.tag}</Text>
+          ].map((v) => {
+            const isSelected = voucherApplied && voucherCode.toUpperCase() === v.code.toUpperCase();
+            const usage = isVoucherInUseOrUsed(v.code, userOrders);
+            const isBlocked = usage.inUse;
+
+            return (
+              <Pressable
+                key={v.code}
+                onPress={() => {
+                  if (isBlocked) {
+                    setToast(
+                      usage.isCompleted
+                        ? `Mã ${v.code} đã dùng trong đơn #${usage.orderId}`
+                        : `Mã ${v.code} đang áp dụng trong đơn #${usage.orderId}`
+                    );
+                    setTimeout(() => setToast(""), 2200);
+                    return;
+                  }
+                  if (isSelected) {
+                    // Tap again to unselect!
+                    setVoucherApplied(false);
+                    setVoucherCode("");
+                    setVoucherSheetOpen(false);
+                    setToast("Đã hủy chọn mã voucher");
+                    setTimeout(() => setToast(""), 1800);
+                  } else {
+                    setVoucherCode(v.code);
+                    setVoucherApplied(true);
+                    setVoucherSheetOpen(false);
+                    setToast(`Đã áp dụng mã ${v.code}`);
+                    setTimeout(() => setToast(""), 2000);
+                  }
+                }}
+                style={[
+                  st.availableVoucherItem,
+                  isSelected && st.availableVoucherItemActive,
+                  isBlocked && st.availableVoucherItemBlocked,
+                ]}
+              >
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Text style={[st.availCodeText, isBlocked && { color: Colors.textMuted }]}>
+                      {v.code}
+                    </Text>
+                    <View style={st.availTagPill}>
+                      <Text style={st.availTagText}>{v.tag}</Text>
+                    </View>
                   </View>
+                  <Text style={[st.availDescText, isBlocked && { color: Colors.textMuted }]}>
+                    {v.desc}
+                  </Text>
                 </View>
-                <Text style={st.availDescText}>{v.desc}</Text>
-              </View>
-              <Text style={st.useVoucherBtnText}>Dùng ngay</Text>
-            </Pressable>
-          ))}
+
+                {isBlocked ? (
+                  <View style={{ alignItems: "flex-end", gap: 2 }}>
+                    <Text style={[st.useVoucherBtnText, { color: Colors.textMuted }]}>
+                      {usage.isCompleted ? "Đã dùng" : "Đang xử lý"}
+                    </Text>
+                    <Text style={{ fontSize: 10, color: Colors.textMuted, fontFamily: "Jakarta" }}>
+                      Đơn #{usage.orderId}
+                    </Text>
+                  </View>
+                ) : isSelected ? (
+                  <View style={{ alignItems: "flex-end", gap: 2 }}>
+                    <Text style={[st.useVoucherBtnText, { color: Colors.champagneDeep, fontWeight: "700" }]}>
+                      Đang chọn ✓
+                    </Text>
+                    <Text style={{ fontSize: 10, color: Colors.textMuted, fontFamily: "Jakarta" }}>
+                      Chạm để hủy
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={st.useVoucherBtnText}>Dùng ngay</Text>
+                )}
+              </Pressable>
+            );
+          })}
         </View>
       </Sheet>
 
@@ -687,6 +849,19 @@ const st = StyleSheet.create({
     borderColor: Colors.borderHairline,
     borderRadius: Radii.md,
     backgroundColor: Colors.surfaceMuted,
+  },
+  availableVoucherItemActive: {
+    borderColor: Colors.champagneDeep,
+    backgroundColor: "#FDF8F3",
+  },
+  availableVoucherItemBlocked: {
+    opacity: 0.6,
+    backgroundColor: "#F1F5F9",
+  },
+  unselectVoucherBtn: {
+    padding: 4,
+    justifyContent: "center",
+    alignItems: "center",
   },
   availCodeText: {
     fontSize: 13,

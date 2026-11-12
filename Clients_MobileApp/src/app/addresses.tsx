@@ -4,6 +4,7 @@ import {
   Alert,
   Modal,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Switch,
@@ -105,6 +106,18 @@ function AddressesContent() {
   const [formVisible, setFormVisible] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    state.reload();
+  }, [state.reload]);
+
+  useEffect(() => {
+    if (!state.loading) {
+      setRefreshing(false);
+    }
+  }, [state.loading]);
 
   // Chế độ chọn địa chỉ: "new" (sau sáp nhập 1/7/2025) hoặc "legacy" (cũ -> tự chuyển đổi)
   const [mode, setMode] = useState<AddressMode>("new");
@@ -359,6 +372,14 @@ function AddressesContent() {
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={st.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={Colors.champagneDeep}
+            colors={[Colors.champagneDeep]}
+          />
+        }
       >
         {/* Header Intro */}
         <View style={st.introBox}>
@@ -722,7 +743,7 @@ function AddressesContent() {
                     {conversionResult.candidates && conversionResult.candidates.length > 0 ? (
                       <View style={{ gap: 8 }}>
                         <Text style={st.conversionNotice}>
-                          Địa chỉ lưu vào database sau chuyển đổi:
+                          Địa chỉ sau chuyển đổi:
                         </Text>
                         {conversionResult.candidates.map((cand, idx) => {
                           const isPicked = selectedCandidate?.ward.code === cand.ward.code;

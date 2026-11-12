@@ -1,6 +1,6 @@
 import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
-import { StatusBar } from "expo-status-bar";
+import { StatusBar } from "react-native";
 import { SessionProvider } from "@/lib/session";
 import { colors } from "@/components/shop/ui";
 export default function RootLayout() {
@@ -13,7 +13,7 @@ export default function RootLayout() {
   if (!loaded && !fontError) return null;
   return (
     <SessionProvider>
-      <StatusBar style="dark" />
+      <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
       <Stack
         screenOptions={{
           headerTintColor: colors.primary,

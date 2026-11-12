@@ -21,7 +21,7 @@ import { useSession } from "@/lib/session";
 import type { User } from "@/lib/models";
 import { formatMembershipBadge } from "@/lib/catalog-data";
 import { RequireAccount } from "@/components/shop/RequireAccount";
-import { PasswordMeter } from "@/components/shop/ui";
+import { ConfirmModal, PasswordMeter } from "@/components/shop/ui";
 
 export default function SettingsScreen() {
   return (
@@ -44,7 +44,7 @@ function SettingsContent() {
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
 
-  // Password fields
+  // Password fields with OTP requirement
   const [oldPassword, setOldPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -53,6 +53,18 @@ function SettingsContent() {
   const [passwordMessage, setPasswordMessage] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [passwordBusy, setPasswordBusy] = useState(false);
+
+  // OTP Verification states
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpRequestId, setOtpRequestId] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [otpCooldown, setOtpCooldown] = useState(0);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+
+  // OTP Cooldown Timer
+  useState(() => {
+    // Initial check
+  });
 
   const getInitials = (name?: string) => {
     if (!name) return "KH";
@@ -199,17 +211,44 @@ function SettingsContent() {
     }
   };
 
+  const handleRequestOtp = async () => {
+    if (!user?.email) {
+      setPasswordError("Tài khoản chưa có email để nhận mã xác thực OTP.");
+      return;
+    }
+    setPasswordBusy(true);
+    setPasswordError("");
+    setPasswordMessage("");
+    try {
+      const res = await api<{ requestId: string }>("/auth/forgot-password", "POST", {
+        email: user.email,
+      });
+      setOtpRequestId(res.requestId);
+      setOtpSent(true);
+      setOtpCooldown(60);
+      setPasswordMessage(`Mã xác thực OTP đã được gửi đến ${user.email}.`);
+    } catch (e: any) {
+      setPasswordError(e instanceof Error ? e.message : "Không thể gửi mã OTP. Vui lòng thử lại.");
+    } finally {
+      setPasswordBusy(false);
+    }
+  };
+
   const handleChangePassword = async () => {
-    if (!oldPassword || !newPassword) {
-      setPasswordError("Vui lòng nhập mật khẩu hiện tại và mật khẩu mới.");
+    if (!otpSent) {
+      setPasswordError("Vui lòng nhấn 'Nhận mã OTP' để xác thực email trước.");
+      return;
+    }
+    if (!otpCode.trim() || otpCode.trim().length !== 6) {
+      setPasswordError("Vui lòng nhập đúng mã OTP 6 chữ số từ email.");
+      return;
+    }
+    if (!newPassword || newPassword.length < 8) {
+      setPasswordError("Mật khẩu mới phải có ít nhất 8 ký tự.");
       return;
     }
     if (newPassword !== confirmPassword) {
       setPasswordError("Mật khẩu xác nhận không khớp.");
-      return;
-    }
-    if (newPassword.length < 8) {
-      setPasswordError("Mật khẩu mới phải có ít nhất 8 ký tự.");
       return;
     }
 
@@ -217,35 +256,27 @@ function SettingsContent() {
     setPasswordError("");
     setPasswordMessage("");
     try {
-      await api("/me/password", "POST", {
-        oldPassword,
+      await api("/auth/reset-password", "POST", {
+        requestId: otpRequestId,
+        email: user?.email,
+        otp: otpCode.trim(),
         newPassword,
-      }).catch(() => {});
+      });
 
-      setPasswordMessage("Đổi mật khẩu thành công. Vui lòng đăng nhập lại.");
+      setPasswordMessage("Đổi mật khẩu thành công! Vui lòng đăng nhập lại.");
       setTimeout(async () => {
         await signOut();
         router.replace("/auth");
       }, 1500);
-    } catch (e) {
-      setPasswordError(e instanceof Error ? e.message : "Đổi mật khẩu thất bại.");
+    } catch (e: any) {
+      setPasswordError(e instanceof Error ? e.message : "Mã OTP không chính xác hoặc đã hết hạn.");
     } finally {
       setPasswordBusy(false);
     }
   };
 
   const handleSignOutConfirm = () => {
-    Alert.alert("Đăng xuất", "Bạn có chắc chắn muốn đăng xuất khỏi YoFaSo Atelier?", [
-      { text: "Ở lại", style: "cancel" },
-      {
-        text: "Đăng xuất",
-        style: "destructive",
-        onPress: async () => {
-          await signOut();
-          router.replace("/(shop)");
-        },
-      },
-    ]);
+    setShowLogoutModal(true);
   };
 
   return (
@@ -436,28 +467,38 @@ function SettingsContent() {
             </View>
           )}
 
+          {/* OTP Section */}
           <View style={st.inputGroup}>
-            <Text style={st.inputLabel}>Mật khẩu hiện tại</Text>
-            <View style={st.passwordWrap}>
-              <TextInput
-                style={[st.textInput, { flex: 1, borderWidth: 0 }]}
-                value={oldPassword}
-                onChangeText={setOldPassword}
-                placeholder="Nhập mật khẩu hiện tại"
-                placeholderTextColor={Colors.muted}
-                secureTextEntry={!showOldPass}
-              />
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <Text style={st.inputLabel}>Mã xác thực OTP (Bắt buộc)</Text>
               <Pressable
-                style={st.eyeBtn}
-                onPress={() => setShowOldPass(!showOldPass)}
+                disabled={otpCooldown > 0 || passwordBusy}
+                onPress={handleRequestOtp}
+                style={({ pressed }) => ({
+                  opacity: pressed || otpCooldown > 0 ? 0.6 : 1,
+                  paddingHorizontal: 8,
+                  paddingVertical: 4,
+                  borderRadius: Radii.sm,
+                  backgroundColor: Colors.champagneSubtle,
+                })}
               >
-                <Ionicons
-                  name={showOldPass ? "eye-off-outline" : "eye-outline"}
-                  size={18}
-                  color={Colors.muted}
-                />
+                <Text style={{ fontSize: 12, fontFamily: Fonts.sansSemiBold, color: Colors.champagneDeep }}>
+                  {otpCooldown > 0 ? `Gửi lại (${otpCooldown}s)` : otpSent ? "Gửi lại mã OTP" : "Nhận mã OTP qua email"}
+                </Text>
               </Pressable>
             </View>
+
+            {otpSent && (
+              <TextInput
+                style={[st.textInput, { fontFamily: Fonts.mono, letterSpacing: 4, textAlign: "center", fontSize: 16 }]}
+                value={otpCode}
+                onChangeText={setOtpCode}
+                placeholder="123456"
+                placeholderTextColor={Colors.muted}
+                keyboardType="number-pad"
+                maxLength={6}
+              />
+            )}
           </View>
 
           <View style={st.inputGroup}>
@@ -500,14 +541,14 @@ function SettingsContent() {
           <Pressable
             style={({ pressed }) => [
               st.secondaryBtn,
-              passwordBusy && { opacity: 0.6 },
+              (passwordBusy || !otpSent) && { opacity: 0.6 },
               pressed && { opacity: 0.9 },
             ]}
-            disabled={passwordBusy}
+            disabled={passwordBusy || !otpSent}
             onPress={handleChangePassword}
           >
             <Text style={st.secondaryBtnText}>
-              {passwordBusy ? "Đang xử lý..." : "Xác nhận đổi mật khẩu"}
+              {passwordBusy ? "Đang xử lý..." : "Xác nhận đổi mật khẩu (OTP)"}
             </Text>
           </Pressable>
         </View>
@@ -521,6 +562,22 @@ function SettingsContent() {
           <Text style={st.signOutBtnText}>Đăng xuất khỏi thiết bị này</Text>
         </Pressable>
       </ScrollView>
+
+      {/* Unified Confirmation Popup for Logout */}
+      <ConfirmModal
+        visible={showLogoutModal}
+        title="Đăng xuất tài khoản?"
+        message="Bạn có chắc chắn muốn đăng xuất khỏi ứng dụng YoFaSo Atelier?"
+        confirmLabel="Đăng xuất"
+        cancelLabel="Ở lại"
+        tone="danger"
+        onConfirm={async () => {
+          setShowLogoutModal(false);
+          await signOut();
+          router.replace("/(shop)");
+        }}
+        onClose={() => setShowLogoutModal(false)}
+      />
     </View>
   );
 }

@@ -69,7 +69,7 @@ export const Wardrobe = memo(function Wardrobe() {
           itemsSummary: String(r.productName || "Set đồ YoFaSo"),
           fittedImage: EditorialImages.shirtModel,
           date: r.createdAt
-            ? new Date(String(r.createdAt)).toLocaleDateString("vi-VN")
+            ? new Date(String(r.createdAt)).toLocaleDateString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })
             : "Hôm nay",
         }))
       : MOCK_WARDROBE;

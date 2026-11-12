@@ -883,3 +883,193 @@ export const s = StyleSheet.create({
     maxWidth: 280,
   },
 });
+
+/**
+ * Unified Confirmation Popup Template cho Native App (Đồng bộ với Web Admin Portal).
+ * Hiển thị chính giữa màn hình với backdrop mờ, icon nhận diện theo tone và 2 nút hành động chuẩn.
+ */
+export function ConfirmModal({
+  visible,
+  title,
+  message,
+  confirmLabel = "Xác nhận",
+  cancelLabel = "Hủy bỏ",
+  tone = "danger",
+  loading = false,
+  onConfirm,
+  onClose,
+}: {
+  visible: boolean;
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  tone?: "danger" | "warning" | "info" | "success";
+  loading?: boolean;
+  onConfirm: () => void | Promise<void>;
+  onClose: () => void;
+}) {
+  if (!visible) return null;
+
+  const toneIcons: Record<string, keyof typeof Ionicons.glyphMap> = {
+    danger: "alert-circle-outline",
+    warning: "warning-outline",
+    info: "information-circle-outline",
+    success: "checkmark-circle-outline",
+  };
+
+  const toneColors: Record<string, { fg: string; bg: string; border: string }> = {
+    danger: {
+      fg: Colors.statusDanger,
+      bg: Colors.statusDangerSubtle,
+      border: "rgba(220, 38, 38, 0.25)",
+    },
+    warning: {
+      fg: Colors.statusWarning,
+      bg: Colors.statusWarningSubtle,
+      border: "rgba(217, 119, 6, 0.25)",
+    },
+    info: {
+      fg: Colors.statusInfo,
+      bg: Colors.statusInfoSubtle,
+      border: "rgba(2, 132, 199, 0.25)",
+    },
+    success: {
+      fg: Colors.statusSuccess,
+      bg: Colors.statusSuccessSubtle,
+      border: "rgba(5, 150, 105, 0.25)",
+    },
+  };
+
+  const currentTone = toneColors[tone] ?? toneColors.danger;
+  const iconName = toneIcons[tone] ?? toneIcons.danger;
+
+  return (
+    <Modal
+      transparent
+      visible={visible}
+      animationType="fade"
+      onRequestClose={() => {
+        if (!loading) onClose();
+      }}
+    >
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: "rgba(15, 23, 42, 0.65)",
+          justifyContent: "center",
+          alignItems: "center",
+          padding: 20,
+        }}
+      >
+        <View
+          style={{
+            width: "100%",
+            maxWidth: 340,
+            borderRadius: Radii.xl,
+            backgroundColor: Colors.surface,
+            padding: 24,
+            borderWidth: 1,
+            borderColor: Colors.borderHairline,
+            alignItems: "center",
+            ...Shadows.lg,
+          }}
+        >
+          {/* Tone Icon Badge */}
+          <View
+            style={{
+              width: 54,
+              height: 54,
+              borderRadius: 27,
+              backgroundColor: currentTone.bg,
+              borderWidth: 1,
+              borderColor: currentTone.border,
+              alignItems: "center",
+              justifyContent: "center",
+              marginBottom: 14,
+            }}
+          >
+            <Ionicons name={iconName} size={28} color={currentTone.fg} />
+          </View>
+
+          {/* Title & Message */}
+          <Text
+            style={{
+              fontSize: 17,
+              fontFamily: Fonts.sansSemiBold,
+              color: Colors.primary,
+              textAlign: "center",
+            }}
+          >
+            {title}
+          </Text>
+
+          <Text
+            style={{
+              fontSize: 13,
+              fontFamily: Fonts.sans,
+              color: Colors.textSecondary,
+              textAlign: "center",
+              lineHeight: 19,
+              marginTop: 8,
+              marginBottom: 22,
+            }}
+          >
+            {message}
+          </Text>
+
+          {/* Buttons */}
+          <View style={{ flexDirection: "row", gap: 10, width: "100%" }}>
+            <Pressable
+              disabled={loading}
+              onPress={onClose}
+              style={({ pressed }) => ({
+                flex: 1,
+                paddingVertical: 12,
+                borderRadius: Radii.md,
+                backgroundColor: Colors.surfaceMuted,
+                alignItems: "center",
+                justifyContent: "center",
+                opacity: pressed ? 0.8 : 1,
+              })}
+            >
+              <Text
+                style={{
+                  fontSize: 14,
+                  fontFamily: Fonts.sansSemiBold,
+                  color: Colors.textSecondary,
+                }}
+              >
+                {cancelLabel}
+              </Text>
+            </Pressable>
+
+            <Pressable
+              disabled={loading}
+              onPress={() => void onConfirm()}
+              style={({ pressed }) => ({
+                flex: 1,
+                paddingVertical: 12,
+                borderRadius: Radii.md,
+                backgroundColor: tone === "danger" ? Colors.statusDanger : Colors.primary,
+                alignItems: "center",
+                justifyContent: "center",
+                opacity: pressed || loading ? 0.8 : 1,
+              })}
+            >
+              <Text
+                style={{
+                  fontSize: 14,
+                  fontFamily: Fonts.sansSemiBold,
+                  color: "#FFFFFF",
+                }}
+              >
+                {confirmLabel}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}

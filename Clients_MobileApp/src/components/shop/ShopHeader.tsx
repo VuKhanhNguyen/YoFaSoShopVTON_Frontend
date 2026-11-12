@@ -3,6 +3,7 @@ import {
   Image,
   Platform,
   Pressable,
+  StatusBar as RNStatusBar,
   StyleProp,
   StyleSheet,
   Text,
@@ -93,7 +94,14 @@ export const ShopHeader = memo(function ShopHeader({
       ? externalUnreadNotif
       : (user && notifState.data ? notifState.data.some((n) => !n.readStatus) : false);
 
-  const topPadding = Math.max(insets.top, Platform.OS === "ios" ? 44 : 35);
+  const actualStatusHeight =
+    insets.top > 0
+      ? insets.top
+      : Platform.OS === "android"
+      ? RNStatusBar.currentHeight ?? 24
+      : 20;
+
+  const topPadding = actualStatusHeight + 4;
 
   return (
     <View

@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
   Clipboard,
   Image,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,7 +14,10 @@ import {
 import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import QRCode from "react-native-qrcode-svg";
-import { api, requestKey } from "@/lib/api";
+import * as FileSystem from "expo-file-system/legacy";
+import * as Sharing from "expo-sharing";
+import * as MediaLibrary from "expo-media-library/legacy";
+import { api, publicUrl, requestKey } from "@/lib/api";
 import { useResource } from "@/hooks/use-resource";
 import { money, type Row } from "@/lib/models";
 import { Colors, Fonts, Radii, Shadows } from "@/constants/theme";
@@ -34,6 +38,36 @@ export default function CheckoutScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [downloadingQr, setDownloadingQr] = useState(false);
+  const [downloadNotice, setDownloadNotice] = useState("");
+
+  const isFirstMountRef = useRef(true);
+  const prevListRef = useRef<Row[]>([]);
+
+  // Auto-reload addresses & cart whenever returning to Checkout (e.g. from /addresses)
+  useFocusEffect(
+    useCallback(() => {
+      if (isFirstMountRef.current) {
+        isFirstMountRef.current = false;
+        return;
+      }
+      addresses.reload();
+      cart.reload();
+    }, [addresses.reload, cart.reload])
+  );
+
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    addresses.reload();
+    cart.reload();
+  }, [addresses.reload, cart.reload]);
+
+  useEffect(() => {
+    if (!addresses.loading && !cart.loading) {
+      setRefreshing(false);
+    }
+  }, [addresses.loading, cart.loading]);
 
   useEffect(() => {
     if (params.paymentMethod === "VIETQR" || params.paymentMethod === "COD") {
@@ -45,13 +79,25 @@ export default function CheckoutScreen() {
 
   useEffect(() => {
     if (addressList.length > 0) {
+      const prevList = prevListRef.current;
+      const isNewAdded = prevList.length > 0 && addressList.length > prevList.length;
+
       if (!selectedAddressId || !addressList.some((a) => String(a.addressId) === selectedAddressId)) {
         const def = addressList.find((a) => a.defaultAddress) || addressList[0];
         setSelectedAddressId(String(def.addressId));
+      } else if (isNewAdded) {
+        // Auto-select newly added address if user just returned from address management
+        const newlyAdded = addressList.find(
+          (a) => !prevList.some((p) => String(p.addressId) === String(a.addressId))
+        );
+        if (newlyAdded) {
+          setSelectedAddressId(String(newlyAdded.addressId));
+        }
       }
     } else {
       setSelectedAddressId("");
     }
+    prevListRef.current = addressList;
   }, [addressList]);
 
   const cartItems = cart.data || [];
@@ -163,6 +209,58 @@ export default function CheckoutScreen() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleDownloadQr = async () => {
+    if (!createdOrderId) return;
+    const qrUrl = `https://img.vietqr.io/image/TCB-19038917693011-compact2.png?amount=${total}&addInfo=${encodeURIComponent(
+      createdOrderId
+    )}&accountName=${encodeURIComponent("NGUYEN VU KHANH")}`;
+
+    setDownloadingQr(true);
+    setDownloadNotice("");
+    try {
+      if (Platform.OS === "web") {
+        const response = await fetch(qrUrl);
+        if (!response.ok) throw new Error("Không tải được ảnh mã QR.");
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `vietqr-${createdOrderId}.png`;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        setDownloadNotice("Đã tải mã QR về máy thành công!");
+      } else {
+        if (!FileSystem.cacheDirectory) {
+          throw new Error("Không có thư mục lưu tạm.");
+        }
+        const local = `${FileSystem.cacheDirectory}vietqr-${createdOrderId}.png`;
+        const response = await FileSystem.downloadAsync(qrUrl, local);
+        if (response.status !== 200) {
+          throw new Error("Không tải được ảnh mã QR.");
+        }
+        const { granted } = await MediaLibrary.requestPermissionsAsync(true);
+        if (granted) {
+          await MediaLibrary.createAssetAsync(local);
+          setDownloadNotice("Đã lưu mã QR vào thư viện ảnh!");
+          Alert.alert("Thành công", "Đã lưu mã QR thanh toán vào thư viện ảnh của bạn!");
+        } else if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(local, {
+            mimeType: "image/png",
+            dialogTitle: "Lưu hoặc chia sẻ mã QR thanh toán",
+          });
+          setDownloadNotice("Đã mở chia sẻ mã QR.");
+        } else {
+          throw new Error("Chưa cấp quyền lưu ảnh vào thư viện.");
+        }
+      }
+    } catch (e: any) {
+      setDownloadNotice(e?.message || "Không thể tải mã QR.");
+    } finally {
+      setDownloadingQr(false);
+      setTimeout(() => setDownloadNotice(""), 3000);
+    }
+  };
+
   return (
     <View style={st.container}>
       <Stack.Screen
@@ -174,7 +272,18 @@ export default function CheckoutScreen() {
         }}
       />
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={st.scrollContent}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={st.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={Colors.champagneDeep}
+            colors={[Colors.champagneDeep]}
+          />
+        }
+      >
         {/* Address Selection */}
         <View style={st.sectionBlock}>
           <View style={st.sectionHeaderRow}>
@@ -273,7 +382,7 @@ export default function CheckoutScreen() {
                 >
                   {item.coverUrl ? (
                     <Image
-                      source={{ uri: String(item.coverUrl) }}
+                      source={{ uri: publicUrl(String(item.coverUrl)) }}
                       style={st.previewThumb}
                       resizeMode="cover"
                     />
@@ -341,9 +450,11 @@ export default function CheckoutScreen() {
             <Text style={st.breakdownVal}>{formatVND(subtotal)}</Text>
           </View>
           <View style={st.breakdownRow}>
-            <Text style={st.breakdownLabel}>Ưu đãi Voucher ({voucherCode || "VTON5"})</Text>
-            <Text style={[st.breakdownVal, { color: Colors.statusSuccess }]}>
-              −{formatVND(discount)}
+            <Text style={st.breakdownLabel}>
+              Ưu đãi Voucher {voucherCode ? `(${voucherCode})` : ""}
+            </Text>
+            <Text style={[st.breakdownVal, discount > 0 && { color: Colors.statusSuccess }]}>
+              {discount > 0 ? `−${formatVND(discount)}` : "Không áp dụng"}
             </Text>
           </View>
           <View style={st.breakdownRow}>
@@ -412,6 +523,36 @@ export default function CheckoutScreen() {
               />
             )}
           </View>
+
+          <Pressable
+            onPress={handleDownloadQr}
+            disabled={downloadingQr}
+            style={st.downloadQrBtn}
+          >
+            <Ionicons
+              name={downloadingQr ? "hourglass-outline" : "download-outline"}
+              size={18}
+              color={Colors.primary}
+            />
+            <Text style={st.downloadQrBtnText}>
+              {downloadingQr ? "Đang tải ảnh mã QR..." : "Tải mã QR thanh toán về máy"}
+            </Text>
+          </Pressable>
+
+          {!!downloadNotice && (
+            <Text
+              style={{
+                textAlign: "center",
+                color: downloadNotice.includes("lưu") || downloadNotice.includes("tải")
+                  ? Colors.statusSuccess
+                  : "#DC2626",
+                fontSize: 12,
+                fontFamily: "JakartaSemiBold",
+              }}
+            >
+              {downloadNotice}
+            </Text>
+          )}
 
           <View style={st.bankInfoCard}>
             <View style={st.bankInfoRow}>
@@ -658,6 +799,25 @@ const st = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.borderHairline,
     ...Shadows.dock,
+  },
+  downloadQrBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: Radii.md,
+    backgroundColor: Colors.canvas,
+    borderWidth: 1,
+    borderColor: Colors.borderHairline,
+    marginTop: -2,
+    width: "100%",
+  },
+  downloadQrBtnText: {
+    fontSize: 13,
+    fontFamily: "JakartaSemiBold",
+    color: Colors.primary,
   },
   bankInfoCard: {
     backgroundColor: Colors.surfaceMuted,

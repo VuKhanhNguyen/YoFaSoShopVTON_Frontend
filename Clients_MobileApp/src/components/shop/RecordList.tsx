@@ -23,7 +23,7 @@ const Record = memo(function Record({
       <Notice>{String(row.status || row.content || row.message || "")}</Notice>
       <Notice>
         {row.createdAt
-          ? new Date(String(row.createdAt)).toLocaleString("vi-VN")
+          ? new Date(String(row.createdAt)).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })
           : ""}
       </Notice>
       {kind === "orders" ? (
