@@ -96,6 +96,19 @@ export async function api<T>(
 }
 export const assetUrl = (assetId: string) =>
   `/api/backend/assets/${encodeURIComponent(assetId)}/content`;
-export const catalogImage = (url: string) =>
-  url.replace(/^\/api\/v1\//, "/api/backend/");
+export const catalogImage = (url?: string | null) => {
+  if (!url) return "";
+  if (
+    url.startsWith("http://") ||
+    url.startsWith("https://") ||
+    url.startsWith("blob:") ||
+    url.startsWith("data:")
+  )
+    return url;
+  if (url.startsWith("/api/backend/")) return url;
+  if (url.startsWith("/api/v1/")) return url.replace(/^\/api\/v1\//, "/api/backend/");
+  if (url.startsWith("/assets/") && !url.startsWith("/assets/samples/"))
+    return `/api/backend${url}`;
+  return url;
+};
 export const requestKey = () => crypto.randomUUID();

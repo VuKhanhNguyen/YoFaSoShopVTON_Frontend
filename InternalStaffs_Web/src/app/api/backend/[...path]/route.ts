@@ -144,12 +144,15 @@ async function handle(
       cache: "no-store",
       redirect: "error",
       signal: AbortSignal.timeout(
-      path === "/assets" ||
+        path === "/assets" ||
+        path.startsWith("/admin/ai/") ||
         path.startsWith("/catalog/images/") ||
+        path.includes("/images/") ||
+        path.endsWith("/mask/content") ||
         path === "/me/avatar"
-        ? 60000
-        : 20000,
-    ),
+          ? 180000
+          : 20000,
+      ),
     });
   try {
     let tokens: TokenPair | null | undefined,

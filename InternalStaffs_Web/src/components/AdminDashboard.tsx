@@ -24,7 +24,7 @@ import {
 } from "@/lib/admin";
 import { Finance } from "@/components/admin/finance";
 import { Analytics } from "@/components/admin/analytics";
-import { Studio, type CatalogProduct } from "@/components/admin/studio";
+import { ProductCrudStudio } from "@/components/admin/product-crud-studio";
 import { AdminOperations } from "@/components/admin/operations";
 import { Governance } from "@/components/admin/governance";
 import { ProfileModal } from "@/components/admin/profile-modal";
@@ -36,7 +36,7 @@ type Tab = "finance" | "analytics" | "studio" | "operations" | "governance";
 const TABS = [
   { key: "finance", label: "Tổng quan & Tài chính", icon: BarChart3 },
   { key: "analytics", label: "Phân tích VTON & AI", icon: ChartNoAxesCombined },
-  { key: "studio", label: "Sản phẩm & AI Studio", icon: ScanLine },
+  { key: "studio", label: "Quản lý sản phẩm + AI Studio", icon: ScanLine },
   { key: "operations", label: "Vận hành & Khách hàng", icon: ShoppingBag },
   { key: "governance", label: "Phê duyệt & Phân quyền", icon: ShieldCheck },
 ] as const;
@@ -51,7 +51,6 @@ export function AdminDashboard() {
   const [vouchers, setVouchers] = useState(ADMIN_VOUCHERS);
   const [reviews, setReviews] = useState(ADMIN_REVIEWS);
   const [logs, setLogs] = useState<AuditEntry[]>(AUDIT_LOGS);
-  const [catalog, setCatalog] = useState<CatalogProduct[]>([]);
 
   // Modals for sidebar bottom
   const [profileOpen, setProfileOpen] = useState(false);
@@ -160,20 +159,7 @@ export function AdminDashboard() {
               <Analytics />
             </div>
             <div hidden={tab !== "studio"}>
-              <Studio
-                published={catalog}
-                onSave={(product) => {
-                  setCatalog((prev) =>
-                    prev.some((p) => p.id === product.id)
-                      ? prev.map((p) => (p.id === product.id ? product : p))
-                      : [...prev, product]
-                  );
-                  log(
-                    `${product.state === "BAN_NHAP" ? "Lưu nháp" : "Công bố"} sản phẩm ${product.name}`,
-                    `${product.variants.length} SKU · ${product.state}`
-                  );
-                }}
-              />
+              <ProductCrudStudio isActive={tab === "studio"} onAuditLog={log} />
             </div>
             <div hidden={tab !== "operations"}>
               <AdminOperations

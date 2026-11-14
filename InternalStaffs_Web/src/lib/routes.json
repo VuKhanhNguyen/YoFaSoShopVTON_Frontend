@@ -1,5 +1,9 @@
 [
   {
+    "method": "POST",
+    "path": "/admin/ai/segment-garment"
+  },
+  {
     "method": "GET",
     "path": "/admin/analyses/{id}"
   },
@@ -49,7 +53,23 @@
   },
   {
     "method": "POST",
+    "path": "/admin/products/{id}/images"
+  },
+  {
+    "method": "GET",
+    "path": "/admin/products/{id}/images/{imageId}/content"
+  },
+  {
+    "method": "GET",
+    "path": "/admin/products/{id}/mask/content"
+  },
+  {
+    "method": "POST",
     "path": "/admin/products/{id}/publish"
+  },
+  {
+    "method": "PATCH",
+    "path": "/admin/products/{id}/vton"
   },
   {
     "method": "POST",
@@ -57,6 +77,10 @@
   },
   {
     "method": "PUT",
+    "path": "/admin/products/{id}/variants/{variantId}"
+  },
+  {
+    "method": "DELETE",
     "path": "/admin/products/{id}/variants/{variantId}"
   },
   {
@@ -70,6 +94,10 @@
   {
     "method": "DELETE",
     "path": "/admin/promotions/{id}"
+  },
+  {
+    "method": "GET",
+    "path": "/admin/audit-logs"
   },
   {
     "method": "GET",
@@ -146,6 +174,10 @@
   {
     "method": "POST",
     "path": "/assets"
+  },
+  {
+    "method": "POST",
+    "path": "/assets/{id}/detect-color"
   },
   {
     "method": "DELETE",
