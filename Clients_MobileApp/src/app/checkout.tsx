@@ -171,6 +171,7 @@ export default function CheckoutScreen() {
         });
       }
     } catch (e: any) {
+      if (e?.code === "STOCK_INSUFFICIENT") cart.reload();
       setError(
         e?.message ||
           "Không thể tạo đơn hàng. Vui lòng kiểm tra lại kết nối và thử lại."
@@ -182,21 +183,8 @@ export default function CheckoutScreen() {
 
   const handleConfirmVietQrPaid = async () => {
     if (!createdOrderId) return;
-    setBusy(true);
-    try {
-      await api(
-        `/orders/${encodeURIComponent(createdOrderId)}/confirm-payment`,
-        "POST",
-        { transactionRef: `VQR-${Date.now()}` }
-      ).catch(() => {});
-    } finally {
-      setBusy(false);
-      setVietQrModalVisible(false);
-      router.replace({
-        pathname: "/order/[id]",
-        params: { id: createdOrderId },
-      });
-    }
+    setVietQrModalVisible(false);
+    router.replace({ pathname: "/order/[id]", params: { id: createdOrderId } });
   };
 
   const copyToClipboard = (text: string) => {
@@ -500,7 +488,7 @@ export default function CheckoutScreen() {
       >
         <View style={st.vietQrContainer}>
           <Text style={st.qrInstruction}>
-            Mở ứng dụng Ngân hàng của bạn và quét mã QR bên dưới để thanh toán đơn hàng #{createdOrderId}
+            Quét mã và thanh toán đơn #{createdOrderId} trong 15 phút. Shop sẽ xác nhận sau khi đối soát tiền về.
           </Text>
 
           <View style={st.qrBox}>
@@ -592,7 +580,7 @@ export default function CheckoutScreen() {
           )}
 
           <Button
-            title="TÔI ĐÃ CHUYỂN KHOẢN THÀNH CÔNG"
+            title="XEM ĐƠN VÀ TRẠNG THÁI ĐỐI SOÁT"
             accent
             disabled={busy}
             onPress={handleConfirmVietQrPaid}

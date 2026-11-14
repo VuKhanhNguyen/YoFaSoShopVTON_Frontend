@@ -154,17 +154,9 @@ export default function OrderDetailScreen() {
     }
   };
 
-  const handleConfirmPaid = async () => {
-    try {
-      await api(`/orders/${encodeURIComponent(id)}/confirm-payment`, "POST", {
-        transactionRef: `VQR-${Date.now()}`,
-      });
-      setVietQrSheetVisible(false);
-      state.reload();
-      showToast("Ghi nhận thanh toán VietQR thành công!");
-    } catch (e: any) {
-      showToast(e?.message || "Không thể xác nhận thanh toán");
-    }
+  const handleConfirmPaid = () => {
+    setVietQrSheetVisible(false);
+    state.reload();
   };
 
   const handleSubmitReview = async () => {
@@ -263,7 +255,7 @@ export default function OrderDetailScreen() {
         {/* VietQR Pending Payment Action if applicable */}
         {String(o?.paymentMethod || "").includes("VIETQR") &&
           o?.paymentStatus === "CHUA_THANH_TOAN" &&
-          !isCancelled && (
+          !isCancelled && !o?.paymentExpired && (
             <View
               style={[
                 st.card,
@@ -282,7 +274,7 @@ export default function OrderDetailScreen() {
                 </Text>
               </View>
               <Text style={{ fontFamily: "Jakarta", fontSize: 13, color: Colors.textSecondary, lineHeight: 18 }}>
-                Vui lòng quét mã QR Napas247 để hoàn tất thanh toán cho đơn hàng này.
+                Đơn giữ hàng trong 15 phút kể từ lúc đặt. Nếu bạn đã chuyển tiền, hãy chờ shop đối soát và kiểm tra lại trạng thái.
               </Text>
               <Button
                 title="QUÉT MÃ VIETQR THANH TOÁN"
@@ -677,7 +669,7 @@ export default function OrderDetailScreen() {
           </View>
 
           <Button
-            title=" Xác nhận đã chuyển khoản thành công"
+            title="Kiểm tra trạng thái thanh toán"
             accent
             onPress={handleConfirmPaid}
             style={{ width: "100%", marginTop: 4 }}
