@@ -6,6 +6,7 @@ import { vnd } from "@/lib/pos";
 import { api } from "@/lib/api";
 import { useResource } from "@/hooks/use-resource";
 import { pushToast } from "@/lib/feedback";
+import { PrintStockSlip } from "./print-slip";
 
 interface ShipperItem {
   id: string;
@@ -150,18 +151,21 @@ function Handover({
   const confirm = async () => {
     if (scanned.length === 0) return;
     setSaving(true);
+    const failed: string[] = [];
     let successCount = 0;
     for (const id of scanned) {
       try {
         await api(`/staff/orders/${id}/assign`, "POST", { shipperId: shipper });
         successCount++;
       } catch (e: any) {
-        console.error(e);
+        failed.push(id);
+        pushToast({ tone: "error", title: e.message || "Không thể bàn giao " + id });
       }
     }
     setSaving(false);
-    setConfirmed(true);
-    pushToast({
+    setConfirmed(failed.length === 0);
+    if (failed.length) setScanned(failed);
+    if (successCount > 0) pushToast({
       tone: "success",
       title: `Đã bàn giao ${successCount} kiện cho ${shipperInfo.name}!`,
     });
@@ -284,7 +288,7 @@ function ReturnIntake({
   const scanRef = useRef<HTMLInputElement>(null);
 
   const returnableOrders = orders.filter(
-    (o) => o.status === "TRA_HANG" || o.status === "DANG_GIAO_HANG" || o.status === "CHO_SHIPPER"
+    (o) => Boolean(o.returnPending) || o.status === "HOAN_TAT"
   );
 
   const scan = async (explicitCode?: string) => {
@@ -318,6 +322,12 @@ function ReturnIntake({
 
     try {
       const ord = await api<WhOrder>(`/staff/orders/${lookupTarget}`);
+      if (!ord.returnPending && ord.status !== "HOAN_TAT") {
+        setFound(null);
+        setOrderDetail(null);
+        setError("Đơn này chưa đủ điều kiện nhận hoàn hoặc đã được xử lý.");
+        return;
+      }
       const resolvedId = ord.id || ord.orderId || lookupTarget;
       setFound(resolvedId);
       setOrderDetail({
@@ -460,6 +470,11 @@ function ReturnIntake({
               <CheckCircle2 className="h-4 w-4 shrink-0" /> {decision}
             </p>
           )}
+          {decision && <PrintStockSlip title="Phiếu nhận hàng hoàn" lines={[
+            "Đơn " + orderDetail.id,
+            ...orderDetail.lines.map((line) => `${line.sku} · ${line.ten} · ${line.size} × ${line.qty}`),
+            decision,
+          ]} />}
         </div>
       )}
     </div>

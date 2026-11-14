@@ -316,6 +316,8 @@ export function ProductColorAreaCard({
                         min={0}
                         step={1}
                         aria-label={`Số lượng tồn size ${row.size}`}
+                        readOnly={Boolean(row.variantId)}
+                        title={row.variantId ? "Cập nhật số lượng của SKU hiện có ở màn hình kho" : undefined}
                         value={row.stock}
                         onChange={(e) => updateVariant(rowIdx, { stock: e.target.value })}
                         className={`${inputClass} w-24 font-mono`}

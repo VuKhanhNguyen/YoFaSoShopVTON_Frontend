@@ -3,8 +3,6 @@ import { AlertTriangle, FileText, Package, Printer, XCircle } from "lucide-react
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { buildPickList, countItems, type WhOrder, type WhStatus } from "@/lib/warehouse";
-import { api } from "@/lib/api";
-import { pushToast } from "@/lib/feedback";
 
 const STATUS_LABEL: Record<WhStatus, { label: string; cls: string }> = {
   CHO_XAC_NHAN: { label: "Chờ nhặt hàng", cls: "bg-warning-subtle text-warning" },
@@ -29,47 +27,21 @@ const DAY_LABEL: Record<string, string> = {
 export function PickListBoard({
   orders,
   onPrint,
-  onRefresh,
 }: {
   orders: WhOrder[];
   onPrint?: () => void;
-  onRefresh?: () => void;
 }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [showPick, setShowPick] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
-  const [packing, setPacking] = useState(false);
 
-  const active = orders.filter((o) => o.status !== "DA_HUY" && o.status !== "TRA_HANG");
+  const active = orders.filter((o) => o.status === "CHO_XAC_NHAN" && (o.payment !== "VIETQR" || o.paymentStatus === "DA_THANH_TOAN"));
   const cancelled = orders.filter((o) => o.status === "DA_HUY" || o.status === "TRA_HANG");
   const chosen = active.filter((o) => selected.includes(o.id));
   const groups = useMemo(() => buildPickList(chosen), [chosen]);
 
   const toggle = (id: string) => setSelected((ds) => (ds.includes(id) ? ds.filter((x) => x !== id) : [...ds, id]));
   const togglePick = (key: string) => setPicked((ds) => (ds.includes(key) ? ds.filter((x) => x !== key) : [...ds, key]));
-
-  const startPacking = async () => {
-    if (selected.length === 0) return;
-    setPacking(true);
-    let count = 0;
-    for (const orderId of selected) {
-      const ord = orders.find((o) => o.id === orderId);
-      if (ord && ord.status === "CHO_XAC_NHAN") {
-        try {
-          await api(`/staff/orders/${orderId}/pack`, "POST");
-          count++;
-        } catch (e: any) {
-          console.error(e);
-        }
-      }
-    }
-    setPacking(false);
-    if (count > 0) {
-      pushToast({ tone: "success", title: `Đã chuyển ${count} đơn sang trạng thái ĐANG ĐÓNG GÓI!` });
-      onRefresh?.();
-      setSelected([]);
-    }
-  };
 
   return (
     <div className="space-y-4">
@@ -140,15 +112,6 @@ export function PickListBoard({
             <span className="font-mono font-bold">{countItems(chosen)}</span> món đồ)
           </span>
           <div className="ml-auto flex items-center gap-2">
-            <Button
-              variant="outline"
-              disabled={packing}
-              className="h-12 gap-2 px-5 text-sm font-bold"
-              onClick={startPacking}
-            >
-              <Package className="h-4 w-4" />
-              {packing ? "Đang xử lý…" : "CHUYỂN SANG ĐÓNG GÓI"}
-            </Button>
             <Button className="h-12 gap-2 px-6 text-sm font-bold" onClick={() => { setPicked([]); setShowPick(true); }}>
               <FileText className="h-5 w-5" />
               SINH PHIẾU NHẶT HÀNG TỔNG HỢP (PICK LIST)

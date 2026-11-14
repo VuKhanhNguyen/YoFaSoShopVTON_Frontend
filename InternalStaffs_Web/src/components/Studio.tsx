@@ -310,8 +310,7 @@ export function Studio() {
             </div>
           )}
           <p className="hint">
-            Duyệt ảnh đưa sản phẩm về bản nháp. Công bố sau khi kiểm tra thông
-            tin và biến thể ở màn hình Sản phẩm.
+            Sau khi duyệt ảnh, kiểm tra thông tin và biến thể ở màn hình Sản phẩm rồi công bố.
           </p>
         </section>
       </div>

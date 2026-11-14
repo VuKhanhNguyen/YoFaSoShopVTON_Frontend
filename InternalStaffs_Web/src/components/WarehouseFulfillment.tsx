@@ -25,7 +25,7 @@ export function WarehouseFulfillment() {
   const { user, ready } = useRequireAuth(["ROLE_STAFF_WAREHOUSE", "ROLE_SHOP_ADMIN"]);
   const [tab, setTab] = useState<Tab>("pick");
   const { data: remoteOrders, reload: reloadOrders, loading } = useResource<WhOrder[]>("/staff/orders?size=100");
-  const orders = remoteOrders ?? [];
+  const orders = (remoteOrders ?? []).filter((order) => order.channel !== "TAI_QUAY_POS");
 
   if (!ready || !user) {
     return (
@@ -88,7 +88,7 @@ export function WarehouseFulfillment() {
           ))}
         </nav>
 
-        {tab === "pick" && <PickListBoard orders={orders} onPrint={() => window.print()} onRefresh={reloadOrders} />}
+        {tab === "pick" && <PickListBoard orders={orders} onPrint={() => window.print()} />}
         {tab === "pack" && <PackingStation orders={orders} onRefresh={reloadOrders} />}
         {tab === "handover" && <HandoverReturn orders={orders} onRefresh={reloadOrders} />}
         {tab === "audit" && <AuditReport onRefresh={reloadOrders} />}

@@ -3,7 +3,7 @@ import { AlertTriangle, CheckCircle2, ClipboardCheck, Send } from "lucide-react"
 import { Button } from "@/components/ui/button";
 import { AUDIT_ZONES, XNT, auditSummary, variance, LOW_STOCK_THRESHOLD, type AuditItem } from "@/lib/warehouse";
 import { useResource } from "@/hooks/use-resource";
-import { api, requestKey } from "@/lib/api";
+import { api } from "@/lib/api";
 import { pushToast } from "@/lib/feedback";
 
 /** UC_WH_AUDIT + UC_WH_REPORT + UC_LOW_STOCK — Kiểm kê theo dãy kệ, báo cáo XNT, cảnh báo tồn tối thiểu. */
@@ -41,30 +41,17 @@ export function AuditReport({ onRefresh }: { onRefresh?: () => void }) {
   const submit = async () => {
     if (summary.checked === 0 || (summary.mismatched > 0 && !reason.trim())) return;
     setSubmitting(true);
-    let adjusted = 0;
     try {
-      for (const item of zoneData.items) {
-        const c = counts[item.sku];
-        if (c !== undefined && !Number.isNaN(c)) {
-          const diff = variance(item.book, c);
-          if (diff !== 0 && item.variantId) {
-            await api(
-              "/staff/inventory/adjustments",
-              "POST",
-              { variantId: item.variantId, delta: diff, reason: reason.trim() },
-              requestKey(),
-            );
-            adjusted++;
-          }
-        }
-      }
-      setSent(true);
-      pushToast({
-        tone: "success",
-        title: adjusted > 0
-          ? `Đã cập nhật ${adjusted} SKU chênh lệch và ghi sổ biến động kho thành công!`
-          : "Kiểm kê trùng khớp hoàn toàn!",
+      const lines = zoneData.items.flatMap((item) => {
+        const counted = counts[item.sku];
+        return item.variantId && item.revision != null && Number.isInteger(counted) && counted !== item.book
+          ? [{ variantId: item.variantId, book: item.book, counted, revision: item.revision }]
+          : [];
       });
+      const draft = await api<{ id: string }>("/staff/inventory/audits", "POST", { reason: reason.trim(), lines });
+      setSent(true);
+      setCounts({});
+      pushToast({ tone: "success", title: "Đã gửi phiếu " + draft.id + " cho chủ shop duyệt." });
       reloadZones();
       reloadSummary();
       reloadLows();
@@ -78,7 +65,7 @@ export function AuditReport({ onRefresh }: { onRefresh?: () => void }) {
 
   return (
     <div className="space-y-6">
-      {/* Kiểm kê theo dãy kệ */}
+      <p className="text-sm text-muted-foreground">Chỉ đếm hàng còn bán được. Để riêng hàng đã giữ cho đơn online và hàng lỗi trước khi đếm.</p>
       <section className="rounded-xl border border-border bg-surface">
         <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3">
           <ClipboardCheck className="h-4 w-4 text-accent" />
@@ -161,16 +148,16 @@ export function AuditReport({ onRefresh }: { onRefresh?: () => void }) {
           />
           {sent ? (
             <p className="flex items-center gap-2 rounded-md bg-success-subtle px-3 py-2.5 text-sm font-semibold text-success">
-              <CheckCircle2 className="h-4 w-4" /> Đã cập nhật số liệu kiểm kê và ghi sổ biến động kho thành công!
+              <CheckCircle2 className="h-4 w-4" /> Đã gửi phiếu kiểm kê chờ duyệt.
             </p>
           ) : (
             <Button
-              disabled={summary.checked === 0 || (summary.mismatched > 0 && !reason.trim()) || submitting}
+              disabled={!remoteZones || summary.mismatched === 0 || !reason.trim() || submitting}
               onClick={submit}
               className="h-12 w-full gap-2 text-sm font-bold sm:w-auto sm:px-8"
             >
               <Send className="h-4 w-4" />
-              {submitting ? "Đang lưu…" : "GHI NHẬN KIỂM KÊ VÀO HỆ THỐNG"}
+              {submitting ? "Đang lưu…" : "GỬI PHIẾU KIỂM KÊ"}
             </Button>
           )}
           {summary.mismatched > 0 && !reason.trim() && !sent && (

@@ -70,7 +70,6 @@ import {
   SAMPLE_INSPECTOR_ITEMS,
   VTON_CATEGORY_OPTIONS,
   WAIST_OPTIONS,
-  buildProductStorageSlug,
   buildSku,
   buildYoFaSoDescriptionTemplate,
   detectCategoryGender,
@@ -107,6 +106,7 @@ interface AdminProductRow {
   minPrice?: number | null;
   originalPrice?: number | null;
   coverUrl?: string | null;
+  adminCoverUrl?: string | null;
   sku?: string;
   colorSwatches?: { hex: string; name: string }[];
   totalStock?: number;
@@ -146,6 +146,14 @@ interface AdminProductDetail extends AdminProductRow {
   }[];
 }
 
+interface ProductAnalysis {
+  operationId: string;
+  status: string;
+  simulated: boolean;
+  error?: string;
+  result?: { variants?: { sourceAssetId: string; originalKey?: string }[] };
+}
+
 interface EditorFormState {
   productId: string | null;
   status: ProductStatus;
@@ -172,30 +180,6 @@ interface EditorFormState {
   }[];
   removedVariantIds: string[];
 }
-
-const OFFLINE_SAMPLE_PRODUCTS: AdminProductRow[] = [
-  {
-    productId: "SP00000003",
-    categoryId: "DM000019",
-    name: "ÁO XUÂN HÈ DÁNG CROPTOP",
-    material: "Vải Tuytxi Cotton lạnh: 70% Polyester, 25% Cotton, 5% Spandex",
-    fit: "SUONG_VUA",
-    waist: "KHONG_AP_DUNG",
-    length: "AO_CROPTOP",
-    pattern: "VAI_TRON",
-    vtonCategory: "upper_body",
-    subtype: "short_sleeved_shirt",
-    status: "DANG_KINH_DOANH",
-    minPrice: 310000,
-    originalPrice: 390000,
-    coverUrl: "/assets/samples/croptop-img01-original.png",
-    sku: "SKU-WAOXUAN-KEM-S-003",
-    colorSwatches: [
-      { hex: "#CAD8D4", name: "kem" },
-      { hex: "#CABEB2", name: "be" },
-    ],
-  },
-];
 
 function emptyEditorForm(defaultCategoryId: string): EditorFormState {
   return {
@@ -481,7 +465,7 @@ function buildAreasFromDetail(detail: AdminProductDetail): ProductColorArea[] {
       colorName: firstVariant?.colorName || dominant.name || `Màu ${idx + 1}`,
       dominantHex: dominant.hex,
       palette,
-      cover: false, // Ảnh trang phục không làm ảnh bìa khi đã có ảnh người mẫu
+      cover: Boolean(img.cover),
       variants: matchedVariants.map<AreaVariantRow>((v) => ({
         variantId: v.variantId,
         size: v.size,
@@ -502,7 +486,7 @@ function buildAreasFromDetail(detail: AdminProductDetail): ProductColorArea[] {
     const hex = (colorCsv.split(",")[0] || "#1F2937").trim();
     areas.push({
       areaId: `orphan-${extraIdx++}`,
-      assetId: "/assets/samples/croptop-img01-original.png",
+      assetId: "",
       originalUrl: "/assets/samples/croptop-img01-original.png",
       colorName: first.colorName,
       dominantHex: hex,
@@ -569,9 +553,12 @@ export function ProductCrudStudio({
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [detailProduct, setDetailProduct] = useState<AdminProductDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [detailAnalysis, setDetailAnalysis] = useState<Partial<ProductAnalysis> | null>(null);
+  const [approvingAnalysis, setApprovingAnalysis] = useState(false);
   const [activeDetailImageIndex, setActiveDetailImageIndex] = useState(0);
   const [saving, setSaving] = useState(false);
   const [autoTriggerAi, setAutoTriggerAi] = useState(true);
+  const [changingStatus, setChangingStatus] = useState(false);
   const [archiveTarget, setArchiveTarget] = useState<AdminProductRow | null>(null);
   const [categoryModalOpen, setCategoryModalOpen] = useState(false);
   const [newCatName, setNewCatName] = useState("");
@@ -592,6 +579,16 @@ export function ProductCrudStudio({
   const garmentInputRef = useRef<HTMLInputElement>(null);
   const referenceInputRef = useRef<HTMLInputElement>(null);
   const createdUrlsRef = useRef<string[]>([]);
+  const createRequests = useRef(new Map<string, { key: string; payload: string }>());
+
+  const createKey = (name: string, body: unknown) => {
+    const payload = JSON.stringify(body);
+    const previous = createRequests.current.get(name);
+    if (previous?.payload === payload) return previous.key;
+    const key = requestKey();
+    createRequests.current.set(name, { key, payload });
+    return key;
+  };
 
   useEffect(() => {
     const urls = createdUrlsRef.current;
@@ -635,7 +632,7 @@ export function ProductCrudStudio({
     } catch (err) {
       if (err instanceof ApiError && (err.status === 0 || err.status === 502 || err.status === 401)) {
         setBackendOffline(true);
-        setProducts((prev) => (prev.length ? prev : OFFLINE_SAMPLE_PRODUCTS));
+        toast.warning({ title: "Chưa tải lại được danh sách sản phẩm" });
       } else {
         toast.error({
           title: "Không tải được danh sách sản phẩm",
@@ -661,7 +658,6 @@ export function ProductCrudStudio({
         if (cancelled) return;
         if (err instanceof ApiError && (err.status === 0 || err.status === 502 || err.status === 401)) {
           setBackendOffline(true);
-          setProducts((prev) => (prev.length ? prev : OFFLINE_SAMPLE_PRODUCTS));
         } else {
           toast.error({
             title: "Không tải được danh sách sản phẩm",
@@ -928,32 +924,60 @@ export function ProductCrudStudio({
 
   const openProductDetail = async (row: AdminProductRow) => {
     setLoadingDetail(true);
+    setDetailProduct(null);
+    setDetailAnalysis(null);
     setDetailModalOpen(true);
     try {
-      const data = await api<AdminProductDetail>(`/admin/products/${encodeURIComponent(row.productId)}`);
+      const path = `/admin/products/${encodeURIComponent(row.productId)}`;
+      const [data, analysis] = await Promise.all([
+        api<AdminProductDetail>(path),
+        api<Partial<ProductAnalysis>>(`${path}/analysis`).catch(() => {
+          toast.warning({ title: "Chưa tải được tiến độ phân tích AI" });
+          return null;
+        }),
+      ]);
       setDetailProduct(data);
+      setDetailAnalysis(analysis);
+      setProducts((prev) => prev.map((p) => p.productId === data.productId ? { ...p, status: data.status } : p));
       setActiveDetailImageIndex(0);
-    } catch {
-      setDetailProduct({
-        ...row,
-        gender: detectCategoryGender(row.categoryId),
-        description: "",
-        material: row.material ?? "",
-        fit: row.fit,
-        waist: row.waist,
-        length: row.length,
-        pattern: row.pattern,
-        vtonCategory: row.vtonCategory,
-        subtype: row.subtype,
-        images: [],
-        variants: [],
-      });
+    } catch (err) {
+      toast.error({ title: "Chưa tải được chi tiết sản phẩm", detail: err instanceof Error ? err.message : undefined });
     } finally {
       setLoadingDetail(false);
     }
   };
 
+  const approveDetailAnalysis = async () => {
+    if (!detailProduct || !detailAnalysis?.operationId || !detailAnalysis.result?.variants) return;
+    const bindings = detailProduct.variants.filter((v) => v.status !== "NGUNG_BAN").flatMap((v) => {
+      const source = detailAnalysis.result?.variants?.find((result) => detailProduct.images.some((image) =>
+        image.colors === v.colors && (
+          image.originalAssetId === result.sourceAssetId ||
+          image.originalAssetId === result.originalKey ||
+          image.originalAssetId.startsWith(`catalog/products/${detailProduct.productId.toLowerCase()}-${result.sourceAssetId}/`)
+        )
+      ));
+      return source ? [{ variantId: v.variantId, sourceAssetId: source.sourceAssetId }] : [];
+    });
+    if (bindings.length === 0) {
+      toast.warning({ title: "Kết quả AI không khớp ảnh và biến thể hiện tại" });
+      return;
+    }
+    setApprovingAnalysis(true);
+    try {
+      await api(`/admin/analyses/${encodeURIComponent(detailAnalysis.operationId)}/approve`, "POST", { bindings });
+      toast.success({ title: "Đã duyệt kết quả AI" });
+      await openProductDetail(detailProduct);
+      await loadCatalogData();
+    } catch (err) {
+      toast.error({ title: "Chưa duyệt được kết quả AI", detail: err instanceof Error ? err.message : undefined });
+    } finally {
+      setApprovingAnalysis(false);
+    }
+  };
+
   const startCreate = () => {
+    createRequests.current.clear();
     const parentId = parentCategories[0]?.value || "DM000001";
     setEditorParentCategory(parentId);
     const firstLeaf = categories.find(
@@ -967,6 +991,7 @@ export function ProductCrudStudio({
   const startEdit = async (row: AdminProductRow) => {
     try {
       const detail = await api<AdminProductDetail>(`/admin/products/${encodeURIComponent(row.productId)}`);
+      createRequests.current.clear();
       const rootCat = getRootCategoryId(detail.categoryId || row.categoryId);
       setEditorParentCategory(rootCat);
 
@@ -1017,38 +1042,10 @@ export function ProductCrudStudio({
       setInspectorSubtype(resolvedSubtype);
       setView("editor");
     } catch (err) {
-      console.warn("Could not load product detail, falling back to row info:", err);
-      const rootCat = getRootCategoryId(row.categoryId);
-      setEditorParentCategory(rootCat);
-      const subOption = DEEPFASHION2_SUBTYPES.find((s) => s.value === row.subtype);
-      const rawVton = String(row.vtonCategory || subOption?.vtonCategory || "upper_body").toLowerCase().trim();
-      const resolvedVton: VtonCategory =
-        rawVton === "lower_body" || rawVton === "dress" ? rawVton : "upper_body";
-      const resolvedSubtype = String(
-        row.subtype || DEEPFASHION2_SUBTYPES.find((s) => s.vtonCategory === resolvedVton)?.value || "short_sleeved_shirt"
-      ).trim();
-
-      setForm({
-        ...emptyEditorForm(row.categoryId),
-        productId: row.productId,
-        status: row.status,
-        name: row.name,
-        categoryId: row.categoryId,
-        gender: detectCategoryGender(row.categoryId),
-        material: row.material ?? "",
-        fit: row.fit || "OM_SAT",
-        waist: row.waist || "KHONG_AP_DUNG",
-        length: row.length || "AO_TIEU_CHUAN",
-        pattern: row.pattern || "VAI_TRON",
-        vtonCategory: resolvedVton,
-        subtype: resolvedSubtype,
-        areas: [],
-        referenceImages: [],
-        removedVariantIds: [],
+      toast.error({
+        title: "Không mở được sản phẩm để sửa",
+        detail: err instanceof Error ? err.message : "Vui lòng thử lại.",
       });
-      setInspectorVton(resolvedVton);
-      setInspectorSubtype(resolvedSubtype);
-      setView("editor");
     }
   };
 
@@ -1149,10 +1146,11 @@ export function ProductCrudStudio({
     }));
 
     const colorSummary = createdAreas.map((a) => a.colorName).join(", ");
-    toast.success({
-      title: `AI đã nhận diện màu: ${colorSummary}`,
-      detail: `Đang chạy ngầm bóc tách nền YOLOv8s-seg + SAM 2 trên GPU...`,
-    });
+    if (createdAreas.some((area) => !isValidServerAssetId(area.assetId))) {
+      toast.warning({ title: "Có ảnh chỉ xem được trên máy này", detail: "Tải lại các ảnh chưa lên máy chủ trước khi lưu." });
+    } else {
+      toast.success({ title: `Đã tải ảnh lên: ${colorSummary}` });
+    }
 
     // Kích hoạt ngầm phân tích & bóc tách nền realtime từ GPU
     const coverRefAssetId = form.referenceImages[0]?.assetId;
@@ -1215,7 +1213,7 @@ export function ProductCrudStudio({
     for (const file of Array.from(files)) {
       const url = URL.createObjectURL(file);
       createdUrlsRef.current.push(url);
-      let assetId = `ref-${Date.now()}`;
+      let assetId = `local-ref-${Date.now()}`;
       try {
         const fd = new FormData();
         fd.append("file", file);
@@ -1223,8 +1221,8 @@ export function ProductCrudStudio({
         fd.append("consent", "true");
         const uploaded = await api<{ assetId: string }>("/assets", "POST", fd);
         assetId = uploaded.assetId;
-      } catch {
-        // Fallback giữ thumbnail cục bộ nếu Backend/session chưa kết nối
+      } catch (err) {
+        toast.warning({ title: `Chưa tải lên được ${file.name}`, detail: err instanceof Error ? err.message : undefined });
       }
       const isRef01 = file.name.toLowerCase().includes("--ref01");
       picked.push({ assetId, url, name: file.name, isCover: isRef01 });
@@ -1247,16 +1245,23 @@ export function ProductCrudStudio({
   const validateEditorForm = (publish: boolean): string | null => {
     if (!form.name.trim()) return "Vui lòng nhập tên sản phẩm.";
     if (!form.categoryId) return "Vui lòng chọn danh mục sản phẩm.";
-    if (form.areas.length === 0) return "Cần tải ít nhất 1 ảnh sản phẩm (tương ứng 1 nhóm màu).";
-    const totalVariants = form.areas.reduce((s, a) => s + a.variants.length, 0);
-    if (publish && totalVariants === 0) {
+    if (form.areas.filter((a) => a.assetId).length + form.referenceImages.length > 16) return "Mỗi sản phẩm hỗ trợ tối đa 16 ảnh.";
+    if (publish && !form.areas.some((a) => a.assetId)) return "Cần tải ít nhất một ảnh sản phẩm.";
+    if ([...form.areas, ...form.referenceImages].some((item) => item.assetId.startsWith("local-"))) {
+      return "Có ảnh chưa tải lên máy chủ. Hãy tải lại hoặc gỡ ảnh đó trước khi lưu.";
+    }
+    if (publish && !form.areas.some((area) => area.variants.some((v) => v.status !== "NGUNG_BAN"))) {
       return "Cần chọn ít nhất 1 size biến thể trước khi công bố sản phẩm.";
     }
     const seenSkus = new Set<string>();
+    const seenVariants = new Set<string>();
     for (const area of form.areas) {
       if (!area.colorName.trim()) return "Mỗi area ảnh cần có tên màu sắc.";
       for (const v of area.variants) {
         if (!v.sku.trim()) return `Size ${v.size} (${area.colorName}) đang thiếu mã SKU.`;
+        const combination = JSON.stringify([area.colorName.trim().toLocaleLowerCase("vi"), v.size]);
+        if (seenVariants.has(combination)) return `Màu ${area.colorName} đã có size ${v.size}.`;
+        seenVariants.add(combination);
         const skuUpper = v.sku.trim().toUpperCase();
         if (seenSkus.has(skuUpper)) return `Mã SKU "${v.sku}" bị trùng lặp.`;
         seenSkus.add(skuUpper);
@@ -1296,6 +1301,8 @@ export function ProductCrudStudio({
     }
 
     setSaving(true);
+    let savedId = form.productId;
+    let step = "thông tin sản phẩm";
     try {
       const extractedPaletteJson = JSON.stringify(form.areas.map((a) => a.palette));
       const materialCombined = form.material.trim();
@@ -1319,7 +1326,6 @@ export function ProductCrudStudio({
         vtonCategory: form.vtonCategory,
         subtype: form.subtype,
         extractedPalette: extractedPaletteJson,
-        status: publishNow ? "DANG_KINH_DOANH" : "BAN_NHAP",
       };
 
       // 1. Tạo hoặc cập nhật SanPham
@@ -1329,18 +1335,23 @@ export function ProductCrudStudio({
             "PUT",
             productPayload
           )
-        : await api<AdminProductDetail>("/admin/products", "POST", productPayload);
+        : await api<AdminProductDetail>("/admin/products", "POST", productPayload, createKey("product", productPayload));
 
       const pid = savedProduct.productId;
+      savedId = pid;
+      setForm((prev) => ({ ...prev, productId: pid, status: savedProduct.status }));
+      step = "biến thể";
       const prodNum = parseInt(pid.replace(/\D/g, ""), 10) || 1;
       const prodNumStr = prodNum >= 100 ? String(prodNum) : String(prodNum).padStart(3, "0");
 
       // 2. Xóa các biến thể đã gỡ (nếu sửa sản phẩm cũ)
       for (const removedId of form.removedVariantIds) {
-        await api(
+        const removed = await api<{ discontinued: boolean }>(
           `/admin/products/${encodeURIComponent(pid)}/variants/${encodeURIComponent(removedId)}`,
           "DELETE"
-        ).catch(() => null);
+        );
+        setForm((prev) => ({ ...prev, removedVariantIds: prev.removedVariantIds.filter((id) => id !== removedId) }));
+        if (removed.discontinued) toast.info({ title: "Đã ngừng bán biến thể có lịch sử giao dịch" });
       }
 
       // 3. Tạo / cập nhật từng biến thể màu x size với SKU đuôi theo mã sản phẩm
@@ -1348,7 +1359,7 @@ export function ProductCrudStudio({
         const colorsCsv = area.palette.map((c) => c.hex).join(",") || area.dominantHex;
         for (const v of area.variants) {
           const baseSku = v.sku.trim();
-          const cleanSku = baseSku.replace(/(-\d+)?$/, `-${prodNumStr}`);
+          const cleanSku = v.variantId ? baseSku : baseSku.replace(/(-\d+)?$/, `-${prodNumStr}`);
           const vPayload = {
             sku: cleanSku,
             size: v.size,
@@ -1358,7 +1369,7 @@ export function ProductCrudStudio({
             salePrice: v.salePrice.trim() ? Number(v.salePrice) : null,
             shelf: v.shelf.trim() || null,
             status: v.status,
-            stock: Number(v.stock),
+            stock: v.variantId ? undefined : Number(v.stock),
           };
           if (v.variantId) {
             await api(
@@ -1367,7 +1378,17 @@ export function ProductCrudStudio({
               vPayload
             );
           } else {
-            await api(`/admin/products/${encodeURIComponent(pid)}/variants`, "POST", vPayload);
+            const { variantId } = await api<{ variantId: string }>(
+              `/admin/products/${encodeURIComponent(pid)}/variants`, "POST", vPayload,
+              createKey(`variant:${pid}:${cleanSku}`, vPayload)
+            );
+            setForm((prev) => ({
+              ...prev,
+              areas: prev.areas.map((a) => a.areaId === area.areaId ? {
+                ...a,
+                variants: a.variants.map((item) => item.size === v.size ? { ...item, variantId } : item),
+              } : a),
+            }));
           }
         }
       }
@@ -1377,7 +1398,6 @@ export function ProductCrudStudio({
       // Các ảnh người mẫu tiếp theo có ThuTuHienThi = 2, 3...
       // Các ảnh trang phục có ThuTuHienThi = refCount + idx + 1 (cover: false)
       const refItems = form.referenceImages
-        .filter((r) => !r.assetId.startsWith("local-"))
         .map((r, idx) => {
           const isRef01 = r.name.toLowerCase().includes("--ref01");
           const isCover = r.isCover ?? (isRef01 || idx === 0);
@@ -1395,24 +1415,26 @@ export function ProductCrudStudio({
 
       refItems.sort((a, b) => (b.cover ? 1 : 0) - (a.cover ? 1 : 0));
       refItems.forEach((r, idx) => {
+        r.cover = idx === 0;
         r.position = idx + 1;
       });
 
       const garmentItems = form.areas
-        .filter((a) => !a.assetId.startsWith("local-"))
+        .filter((a) => a.assetId)
         .map((a, idx) => ({
           imageId: a.imageId || null,
           assetId: a.assetId,
           cutoutAssetId: a.cutoutAssetId ?? null,
-          maskAssetId: form.maskPath ?? null,
+          maskAssetId: null,
           colors: a.palette.map((c) => c.hex).join(",") || a.dominantHex,
-          cover: refItems.length === 0 && idx === 0,
+          cover: refItems.length === 0 && (form.areas.some((area) => area.assetId && area.cover) ? a.cover : idx === 0),
           position: refItems.length + idx + 1,
           role: "garment",
         }));
 
       const imageItems = [...refItems, ...garmentItems];
-      if (imageItems.length > 0) {
+      step = "ảnh sản phẩm";
+      if (imageItems.length || savedProduct.images.length) {
         await api(`/admin/products/${encodeURIComponent(pid)}/images`, "POST", {
           images: imageItems,
           extractedPalette: extractedPaletteJson,
@@ -1420,118 +1442,74 @@ export function ProductCrudStudio({
         });
       }
 
-      // 5. Gửi AI bóc tách ngầm nếu có ảnh mới tải lên
-      if (autoTriggerAi) {
-        await triggerAiAnalysis(
-          pid,
-          form.areas.map((a) => a.assetId),
-          form.referenceImages.map((r) => r.assetId)
-        ).catch(() => null);
-      }
-
-      // 6. Thông báo trạng thái đã lưu & đồng bộ Cloudflare R2
-      const finalStatus: ProductStatus = publishNow ? "DANG_KINH_DOANH" : "BAN_NHAP";
+      let action = savedProduct.status === "BAN_NHAP" ? "Đã lưu bản nháp" : "Đã lưu sản phẩm";
       if (publishNow) {
-        toast.success({
-          title: "Đã lưu và công bố sản phẩm",
-          detail: `${form.name} đã ở trạng thái Đang kinh doanh và đồng bộ ảnh lên Cloudflare R2.`,
-        });
-      } else {
-        toast.success({
-          title: "Đã lưu bản nháp",
-          detail: `Sản phẩm ${pid} đã được lưu ở trạng thái Bản nháp và đồng bộ ảnh lên Cloudflare R2.`,
-        });
+        step = "công bố";
+        await api(`/admin/products/${encodeURIComponent(pid)}/publish`, "POST", {});
+        action = savedProduct.status === "TAM_NGUNG" ? "Đã mở bán lại" : "Đã công bố sản phẩm";
+      } else if (autoTriggerAi && savedProduct.status === "BAN_NHAP") {
+        step = "gửi AI";
+        const op = await triggerAiAnalysis(
+          pid,
+          form.areas.filter((a) => !a.cutoutAssetId).map((a) => a.assetId),
+          form.referenceImages.map((r) => r.assetId)
+        );
+        if (op) action = "Đã lưu và gửi phân tích AI";
       }
 
-      onAuditLog(
-        `${finalStatus === "DANG_KINH_DOANH" ? "Công bố" : "Lưu nháp"} sản phẩm ${form.name}`,
-        `${pid} · ${form.areas.length} ảnh màu`
-      );
+      toast.success({ title: action, detail: `${form.name} · ${pid}` });
+      onAuditLog(action, pid);
       await loadCatalogData();
       setView("list");
     } catch (err) {
-      if (err instanceof ApiError && (err.status === 0 || err.status === 502 || err.status === 401)) {
-        // Hỗ trợ lưu cục bộ để demo UI khi chưa bật Backend
-        const localId = form.productId ?? `SP-LOCAL-${Date.now()}`;
-        const localRow: AdminProductRow = {
-          productId: localId,
-          categoryId: form.categoryId,
-          name: form.name.trim(),
-          material: form.material.trim(),
-          fit: form.fit,
-          waist: form.waist,
-          length: form.length,
-          pattern: form.pattern,
-          vtonCategory: form.vtonCategory,
-          subtype: form.subtype,
-          status: publishNow ? "DANG_KINH_DOANH" : "BAN_NHAP",
-          minPrice: Number(form.areas[0]?.variants[0]?.price || 350000),
-          originalPrice: Number(form.areas[0]?.variants[0]?.price || 350000),
-          coverUrl: form.areas[0]?.originalUrl,
-          sku: form.areas[0]?.variants[0]?.sku,
-          colorSwatches: form.areas.map((a) => ({ hex: a.dominantHex, name: a.colorName })),
-        };
-        setProducts((prev) =>
-          prev.some((p) => p.productId === localId)
-            ? prev.map((p) => (p.productId === localId ? localRow : p))
-            : [localRow, ...prev]
-        );
-        onAuditLog("Lưu sản phẩm (offline preview)", `${localRow.name} · ${localRow.status}`);
-        toast.warning({
-          title: "Backend chưa kết nối — đã lưu tạm trên phiên trình duyệt",
-          detail: "Khi bật Spring Boot + MySQL, thao tác này sẽ ghi trực tiếp vào CSDL.",
-        });
-        setView("list");
-      } else {
-        toast.error({
-          title: "Lưu sản phẩm thất bại",
-          detail: err instanceof Error ? err.message : "Vui lòng kiểm tra dữ liệu nhập.",
-        });
-      }
+      toast.error({
+        title: err instanceof ApiError && err.status === 401 ? "Phiên đăng nhập đã hết" : `Chưa xác nhận được bước ${step}`,
+        detail: [savedId && `Mã sản phẩm ${savedId}.`, err instanceof Error && err.message].filter(Boolean).join(" "),
+      });
     } finally {
       setSaving(false);
     }
   };
 
   const handleQuickPublish = async (row: AdminProductRow) => {
+    setChangingStatus(true);
     try {
-      await api(`/admin/products/${encodeURIComponent(row.productId)}/publish`, "POST", {});
-      toast.success({ title: `Đã công bố ${row.name}` });
-      onAuditLog(`Công bố sản phẩm ${row.name}`, row.productId);
+      const updated = await api<AdminProductDetail>(`/admin/products/${encodeURIComponent(row.productId)}/publish`, "POST", {});
+      setProducts((prev) => prev.map((p) => p.productId === row.productId ? { ...p, status: updated.status } : p));
+      const action = row.status === "TAM_NGUNG" ? "Đã mở bán lại" : "Đã công bố";
+      toast.success({ title: `${action} ${row.name}` });
+      onAuditLog(action, row.productId);
       await loadCatalogData();
     } catch (err) {
-      toast.warning({
-        title: "Chưa đủ điều kiện công bố",
-        detail:
-          err instanceof Error
-            ? err.message
-            : "Mỗi biến thể cần có ảnh bóc nền và Agnostic Mask trên R2.",
+      toast.error({
+        title: "Chưa xác nhận được công bố",
+        detail: err instanceof Error ? err.message : "Vui lòng tải lại danh sách để kiểm tra.",
       });
+    } finally {
+      setChangingStatus(false);
     }
   };
 
   const handleArchiveProduct = async () => {
-    if (!archiveTarget) return;
+    if (!archiveTarget || changingStatus) return;
+    setChangingStatus(true);
     try {
-      await api(`/admin/products/${encodeURIComponent(archiveTarget.productId)}`, "DELETE");
-      toast.success({ title: `Đã tạm ngừng kinh doanh ${archiveTarget.name}` });
-      onAuditLog(`Tạm ngừng sản phẩm ${archiveTarget.name}`, archiveTarget.productId);
+      const updated = await api<{ status: ProductStatus }>(`/admin/products/${encodeURIComponent(archiveTarget.productId)}`, "DELETE");
+      setProducts((prev) => prev.map((p) =>
+        p.productId === archiveTarget.productId ? { ...p, status: updated.status } : p
+      ));
+      setForm((prev) => prev.productId === archiveTarget.productId ? { ...prev, status: updated.status } : prev);
+      toast.success({ title: `Đã tạm ngưng bán ${archiveTarget.name}` });
+      onAuditLog("Tạm ngưng bán", archiveTarget.productId);
       setArchiveTarget(null);
       await loadCatalogData();
     } catch (err) {
-      if (err instanceof ApiError && (err.status === 0 || err.status === 502)) {
-        setProducts((prev) =>
-          prev.map((p) =>
-            p.productId === archiveTarget.productId ? { ...p, status: "TAM_NGUNG" } : p
-          )
-        );
-        setArchiveTarget(null);
-      } else {
-        toast.error({
-          title: "Không thể tạm ngừng sản phẩm",
-          detail: err instanceof Error ? err.message : "Vui lòng thử lại.",
-        });
-      }
+      toast.error({
+        title: "Chưa xác nhận được tạm ngưng",
+        detail: err instanceof Error ? err.message : "Vui lòng tải lại danh sách để kiểm tra.",
+      });
+    } finally {
+      setChangingStatus(false);
     }
   };
 
@@ -1723,11 +1701,7 @@ export function ProductCrudStudio({
     [categories]
   );
 
-  // Sinh mã lưu trữ slug chuẩn R2: w- (Nữ) hoặc m- (Nam) theo danh mục và tên sản phẩm
-  const storageSlug = useMemo(
-    () => buildProductStorageSlug(form.name, form.categoryId, form.gender),
-    [form.name, form.categoryId, form.gender]
-  );
+
 
   return (
     <section className="space-y-6">
@@ -1778,7 +1752,7 @@ export function ProductCrudStudio({
       {backendOffline && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning bg-warning-subtle px-4 py-3 text-xs text-foreground">
           <span>
-            <strong>Chế độ xem trước ngoại tuyến:</strong> Chưa kết nối được Backend Spring Boot (hoặc chưa đăng nhập qua API). Dữ liệu thao tác đang chạy tạm trên phiên trình duyệt.
+            Chưa tải được danh sách sản phẩm. Kiểm tra kết nối hoặc đăng nhập lại.
           </span>
           <Button variant="outline" size="sm" onClick={() => void loadCatalogData()}>
             <RefreshCw className="h-3.5 w-3.5" />
@@ -1932,9 +1906,9 @@ export function ProductCrudStudio({
                         <td>
                           <div className="flex items-center gap-3">
                             <div className="h-14 w-12 shrink-0 overflow-hidden rounded-md border border-border bg-canvas">
-                              {row.coverUrl ? (
+                              {(row.adminCoverUrl || row.coverUrl) ? (
                                 <img
-                                  src={catalogImage(row.coverUrl)}
+                                  src={catalogImage(row.adminCoverUrl || row.coverUrl)}
                                   alt={row.name}
                                   className="h-full w-full object-cover"
                                 />
@@ -2023,32 +1997,29 @@ export function ProductCrudStudio({
       Sửa
     </Button>
 
-    {row.status === "BAN_NHAP" && (
+    {(row.status === "BAN_NHAP" || row.status === "TAM_NGUNG") && (
       <Button
         variant="success"
         size="sm"
+        disabled={changingStatus}
         onClick={() => void handleQuickPublish(row)}
       >
         <Check className="h-3.5 w-3.5" />
-        Công bố
+        {row.status === "TAM_NGUNG" ? "Bán lại" : "Công bố"}
       </Button>
     )}
 
-    {row.status !== "TAM_NGUNG" ? (
+    {(row.status === "DANG_KINH_DOANH" || row.status === "DANG_XU_LY_AI") && (
       <Button
         variant="ghost"
         size="sm"
         className="text-destructive hover:bg-danger-subtle hover:text-destructive"
-        title="Xóa hoặc Tạm ngừng kinh doanh sản phẩm (Ảnh R2 vẫn lưu trữ vĩnh viễn)"
+        disabled={changingStatus}
         onClick={() => setArchiveTarget(row)}
       >
         <PauseCircle className="h-3.5 w-3.5" />
-        Xóa / Ngừng
+        Tạm ngưng bán
       </Button>
-    ) : (
-      <span className="text-[11px] text-muted-foreground italic px-2 text-center">
-        Đã tạm ngừng
-      </span>
     )}
   </div>
 </div>
@@ -2200,7 +2171,7 @@ export function ProductCrudStudio({
                           onChange={() => setForm((prev) => ({ ...prev, gender: "FEMALE" }))}
                           className="h-3.5 w-3.5 text-accent"
                         />
-                        <span>Thời trang Nữ (Tiền tố <code className="font-mono text-accent-hover font-bold">w-</code>)</span>
+                        <span>Thời trang Nữ</span>
                       </label>
                       <label className="flex items-center gap-1.5 cursor-pointer font-medium text-foreground hover:text-accent-hover transition-colors">
                         <input
@@ -2211,33 +2182,12 @@ export function ProductCrudStudio({
                           onChange={() => setForm((prev) => ({ ...prev, gender: "MALE" }))}
                           className="h-3.5 w-3.5 text-accent"
                         />
-                        <span>Thời trang Nam (Tiền tố <code className="font-mono text-accent-hover font-bold">m-</code>)</span>
+                        <span>Thời trang Nam</span>
                       </label>
                     </div>
                   </div>
 
-                  <div className="rounded-lg border border-border bg-surface p-3 text-xs space-y-1.5">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-muted-foreground font-medium">Mã lưu trữ file (Storage Slug):</span>
-                      <code className="rounded bg-canvas px-2 py-0.5 font-mono text-xs font-bold text-accent-hover border border-border">
-                        {storageSlug}
-                      </code>
-                    </div>
-                    <div className="grid gap-1 pt-1 font-mono text-[11px] text-muted-foreground">
-                      <p className="truncate">
-                        📁 <strong>R2 Folder:</strong> catalog/products/{storageSlug}/
-                      </p>
-                      <p className="truncate">
-                        📸 <strong>Ảnh gốc &amp; PNG:</strong> {storageSlug}--img01--v01--original.png · {storageSlug}--img01--v01--cutout.png
-                      </p>
-                      <p className="truncate">
-                        🎭 <strong>Mặt nạ AI Mask:</strong> catalog-processing/products/{storageSlug}/{storageSlug}--img01--v01--mask.png
-                      </p>
-                    </div>
-                  </div>
-                  <p className="text-[11px] text-muted-foreground italic">
-                    💡 Lưu ý: Khi tải ảnh lên từ máy tính (dù tên file là gì: image.png, photo.jpg...), hệ thống sẽ tự động đổi tên và phân loại theo đúng cấu trúc chuẩn Cloudflare R2 ở trên khi lưu/phân tích.
-                  </p>
+
                 </div>
               </div>
 
@@ -2675,19 +2625,19 @@ export function ProductCrudStudio({
 
           {/* Thanh hành động lưu nháp hoặc công bố ngay */}
           <div className="sticky bottom-3 z-20 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border bg-surface/95 px-5 py-4 shadow-modal backdrop-blur-xs">
-            <label className="flex cursor-pointer items-center gap-2.5 text-xs font-medium text-foreground">
+            {form.status === "BAN_NHAP" && <label className="flex cursor-pointer items-center gap-2.5 text-xs font-medium text-foreground">
               <Checkbox
                 checked={autoTriggerAi}
                 onCheckedChange={(checked) => setAutoTriggerAi(checked)}
               />
-              <span>Tự động gửi pipeline AI bóc nền &amp; sinh Agnostic Mask vào R2 khi lưu</span>
-            </label>
+              <span>Gửi ảnh chưa xử lý sang AI khi lưu nháp</span>
+            </label>}
 
             <div className="flex flex-wrap items-center gap-2.5">
               <Button variant="ghost" disabled={saving} onClick={() => setView("list")}>
                 Hủy
               </Button>
-              {form.productId && form.status !== "TAM_NGUNG" && (
+              {form.productId && (form.status === "DANG_KINH_DOANH" || form.status === "DANG_XU_LY_AI") && (
                 <Button
                   variant="ghost"
                   disabled={saving}
@@ -2716,7 +2666,7 @@ export function ProductCrudStudio({
                   }}
                 >
                   <PauseCircle className="h-4 w-4" />
-                  Xóa / Ngừng kinh doanh
+                  Tạm ngưng bán
                 </Button>
               )}
               <Button
@@ -2725,16 +2675,16 @@ export function ProductCrudStudio({
                 onClick={() => void handleSaveProduct(false)}
               >
                 <Save className="h-4 w-4" />
-                {saving ? "Đang lưu…" : "Lưu bản nháp"}
+                {saving ? "Đang lưu…" : form.status === "BAN_NHAP" ? "Lưu bản nháp" : "Lưu thay đổi"}
               </Button>
-              <Button
+              {form.status !== "DANG_KINH_DOANH" && <Button
                 variant="success"
-                disabled={saving}
+                disabled={saving || form.status === "DANG_XU_LY_AI"}
                 onClick={() => void handleSaveProduct(true)}
               >
                 <Check className="h-4 w-4" />
-                {saving ? "Đang xử lý…" : "Lưu & Công bố ngay"}
-              </Button>
+                {saving ? "Đang xử lý…" : form.status === "TAM_NGUNG" ? "Lưu & Bán lại" : "Lưu & Công bố"}
+              </Button>}
             </div>
           </div>
         </div>
@@ -2813,35 +2763,12 @@ export function ProductCrudStudio({
       {/* Xác nhận xóa / ngừng kinh doanh sản phẩm & bảo toàn R2 */}
       <ConfirmDialog
         open={Boolean(archiveTarget)}
-        title="Xác nhận Xóa / Tạm ngừng kinh doanh sản phẩm?"
-        description={
-          archiveTarget ? (
-            <div className="space-y-3 text-xs leading-relaxed text-muted-foreground">
-              <p>
-                Bạn có chắc chắn muốn xóa hoặc tạm ngừng kinh doanh sản phẩm{" "}
-                <strong className="text-foreground">{archiveTarget.name}</strong>{" "}
-                <span className="font-mono text-muted-foreground">({archiveTarget.productId})</span>?
-              </p>
-              <div className="rounded-lg border border-border bg-canvas/60 p-3 space-y-2 text-left">
-                <div className="flex items-start gap-2">
-                  <span className="inline-block mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-warning" />
-                  <p>
-                    <strong className="text-foreground">Trạng thái hệ thống:</strong> Sản phẩm sẽ chuyển sang trạng thái <strong>TẠM NGỪNG KINH DOANH</strong> và lập tức ẩn khỏi App khách hàng cũng như danh mục bán lẻ.
-                  </p>
-                </div>
-                <div className="flex items-start gap-2">
-                  <span className="inline-block mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-success" />
-                  <p>
-                    <strong className="text-foreground">Bảo toàn tài nguyên Cloudflare R2:</strong> Toàn bộ hình ảnh sản phẩm (ảnh gốc, ảnh bóc nền PNG, Agnostic Mask và ảnh người mẫu) trên Cloudflare R2 <strong>vẫn được giữ nguyên vĩnh viễn</strong> để bảo đảm khách hàng xem lại Đơn hàng đã mua và Lịch sử thử đồ ảo không bao giờ bị lỗi vỡ ảnh.
-                  </p>
-                </div>
-              </div>
-            </div>
-          ) : null
-        }
-        confirmLabel="Xác nhận (Chuyển Tạm Ngừng)"
+        title="Tạm ngưng bán sản phẩm?"
+        description={archiveTarget ? `${archiveTarget.name} sẽ được ẩn khỏi danh mục khách. Bạn có thể mở bán lại từ danh sách sản phẩm.` : null}
+        confirmLabel="Tạm ngưng bán"
         cancelLabel="Hủy bỏ"
         tone="danger"
+        loading={changingStatus}
         onConfirm={() => void handleArchiveProduct()}
         onClose={() => setArchiveTarget(null)}
       />
@@ -2876,6 +2803,16 @@ export function ProductCrudStudio({
             </div>
           ) : detailProduct ? (
             <div className="space-y-6 pt-2">
+              {detailAnalysis?.status && (
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <span>Phân tích AI: {detailAnalysis.status === "COMPLETED" ? (detailAnalysis.simulated ? "Kết quả mô phỏng" : "Đã xử lý xong") : vnLabel(detailAnalysis.status)}</span>
+                  {detailAnalysis.error && <span className="text-destructive">{detailAnalysis.error}</span>}
+                  <Button variant="outline" size="sm" onClick={() => void openProductDetail(detailProduct)}>Cập nhật tiến độ</Button>
+                  {detailAnalysis.status === "COMPLETED" && !detailAnalysis.simulated && (
+                    <Button variant="outline" size="sm" disabled={approvingAnalysis} onClick={() => void approveDetailAnalysis()}>Duyệt kết quả AI</Button>
+                  )}
+                </div>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
                 {/* Cột trái: Bộ sưu tập ảnh & xem trước */}
                 <div className="md:col-span-5 space-y-3">

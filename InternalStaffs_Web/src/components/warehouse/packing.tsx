@@ -36,7 +36,7 @@ export function PackingStation({
   orders: WhOrder[];
   onRefresh?: () => void;
 }) {
-  const packable = orders.filter((o) => o.status === "CHO_XAC_NHAN" || o.status === "DANG_DONG_GOI");
+  const packable = orders.filter((o) => (o.status === "CHO_XAC_NHAN" || o.status === "DANG_DONG_GOI") && (o.payment !== "VIETQR" || o.paymentStatus === "DA_THANH_TOAN"));
   const [orderId, setOrderId] = useState("");
   const [order, setOrder] = useState<WhOrder | null>(null);
   const [scanned, setScanned] = useState<Record<string, number>>({});
@@ -115,7 +115,8 @@ export function PackingStation({
         pushToast({ tone: "success", title: `Đã đóng gói đơn #${order.id} thành công!` });
         onRefresh?.();
       } catch (e: any) {
-        console.error(e);
+        setError(e.message || "Không thể xác nhận đóng gói.");
+        return;
       }
     }
     setShowWaybill(true);

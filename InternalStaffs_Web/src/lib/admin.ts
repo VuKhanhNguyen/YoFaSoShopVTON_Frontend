@@ -10,6 +10,7 @@ export interface AdminOrder {
   shipper: string;
   status: AdminOrderStatus;
   paid: boolean;
+  paymentMethod?: string;
   lines: { name: string; qty: number; price: number }[];
   discount: number;
   history: string[];

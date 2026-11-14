@@ -30,6 +30,8 @@ import {
   type StaffRole,
 } from "@/lib/admin";
 import { vnd } from "@/lib/pos";
+import { InventoryAuditReview } from "./inventory-audit-review";
+import { PrintStockSlip } from "@/components/warehouse/print-slip";
 import { api, ApiError } from "@/lib/api";
 import { pushToast } from "@/lib/feedback";
 import { vnLabel } from "@/lib/vietnamese-labels";
@@ -57,6 +59,7 @@ export interface RealMovement {
   color: string;
   type: string;
   delta: number;
+  quantity?: number;
   beforeStock: number;
   afterStock: number;
   referenceId?: string;
@@ -780,6 +783,7 @@ export function Governance({
             </div>
           </div>
 
+          <InventoryAuditReview onApproved={loadMovements} />
           <div className="mb-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_200px]">
             <div className="relative">
               <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
@@ -1803,6 +1807,17 @@ export function Governance({
               )}
             </div>
             <div className="flex justify-end pt-3">
+              {["NHAP_KHO_BO_SUNG", "NHAP_KHO_HANG_HOAN", "XUAT_KHO_GIAO_HANG"].includes(movementDetailModal.type) && (
+                <PrintStockSlip title={vnLabel(movementDetailModal.type)} lines={[
+                  movementDetailModal.movementId + " · " + (movementDetailModal.referenceId || "—"),
+                  movementDetailModal.createdAt,
+                  [movementDetailModal.variantId, movementDetailModal.productName, movementDetailModal.color, movementDetailModal.size].join(" · "),
+                  "Số lượng hàng: " + (movementDetailModal.quantity ?? Math.abs(movementDetailModal.delta)),
+                  "Thay đổi tồn bán: " + movementDetailModal.delta,
+                  "Người ghi sổ: " + (movementDetailModal.performerName || movementDetailModal.performerId || "Hệ thống"),
+                  movementDetailModal.reason || "",
+                ]} />
+              )}
               <Button variant="outline" onClick={() => setMovementDetailModal(null)}>
                 Đóng
               </Button>

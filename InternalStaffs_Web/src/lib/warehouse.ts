@@ -39,6 +39,9 @@ export interface WhLine {
 export interface WhOrder {
   id: string;
   orderId?: string;
+  returnPending?: boolean | number;
+  paymentStatus?: string;
+  channel?: string;
   placedAt: string;
   shipper: string;
   shipperId?: string;
@@ -263,6 +266,7 @@ export interface AuditItem {
   size: string;
   mau: string;
   book: number;
+  revision?: number;
 }
 
 export const AUDIT_ZONES: Record<string, { label: string; items: AuditItem[] }> = {

@@ -511,6 +511,7 @@ export function PosTerminal() {
 
       return createdOrder;
     } catch (err: any) {
+      if (err.code === "STOCK_INSUFFICIENT") void fetchProducts();
       pushToast({
         tone: "error",
         title: "Lỗi tạo đơn hàng POS",

@@ -48,6 +48,10 @@
     "path": "/admin/products/{id}"
   },
   {
+    "method": "GET",
+    "path": "/admin/products/{id}/analysis"
+  },
+  {
     "method": "POST",
     "path": "/admin/products/{id}/analysis"
   },

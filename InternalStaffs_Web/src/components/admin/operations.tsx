@@ -30,6 +30,7 @@ import {
 } from "@/lib/admin";
 import { vnd } from "@/lib/pos";
 import { api } from "@/lib/api";
+import { pushToast } from "@/lib/feedback";
 import { vnLabel } from "@/lib/vietnamese-labels";
 import { Badge, Confirm, Field, PageHeading, SubTabs, TablePagination, inputClass } from "./shared";
 
@@ -148,7 +149,6 @@ export function AdminOperations({
   const [editRecipient, setEditRecipient] = useState("");
   const [editPhone, setEditPhone] = useState("");
   const [editAddress, setEditAddress] = useState("");
-  const [editStatus, setEditStatus] = useState<AdminOrderStatus>("CHO_XAC_NHAN");
   const [editNote, setEditNote] = useState("");
   const [updatingOrder, setUpdatingOrder] = useState(false);
   const [editOrderError, setEditOrderError] = useState("");
@@ -202,6 +202,7 @@ export function AdminOperations({
           shipperId?: string;
           status: string;
           paymentStatus: string;
+          paymentMethod?: string;
           discount?: number;
           subtotal?: number;
           collectAmount?: number;
@@ -220,6 +221,7 @@ export function AdminOperations({
             address: o.address || "Nhận tại quầy",
             shipper: o.shipperId ? `Shipper ${o.shipperId}` : "Chưa bàn giao",
             status: (o.status || "CHO_XAC_NHAN") as AdminOrderStatus,
+            paymentMethod: o.paymentMethod,
             paid: o.paymentStatus === "DA_THANH_TOAN",
             lines: [
               {
@@ -354,6 +356,7 @@ export function AdminOperations({
         shipperId?: string;
         status: string;
         paymentStatus: string;
+        paymentMethod?: string;
         discount?: number;
         subtotal?: number;
         collectAmount?: number;
@@ -373,6 +376,7 @@ export function AdminOperations({
             address: o.address || "Nhận tại quầy",
             shipper: o.shipperId ? `Shipper ${o.shipperId}` : "Chưa bàn giao",
             status: (o.status || "CHO_XAC_NHAN") as AdminOrderStatus,
+            paymentMethod: o.paymentMethod,
             paid: o.paymentStatus === "DA_THANH_TOAN",
             lines: [
               {
@@ -558,7 +562,6 @@ export function AdminOperations({
         recipientName: editRecipient.trim(),
         phone: editPhone.trim(),
         address: editAddress.trim(),
-        status: editStatus,
         note: editNote.trim() || undefined,
       });
       setOrders((prev) =>
@@ -569,15 +572,14 @@ export function AdminOperations({
                 customer: editRecipient.trim(),
                 phone: editPhone.trim(),
                 address: editAddress.trim(),
-                status: editStatus,
-                history: editNote.trim()
+                        history: editNote.trim()
                   ? [...o.history, `[Quản trị viên sửa] ${editNote.trim()}`]
                   : o.history,
               }
             : o
         )
       );
-      log(`Cập nhật đơn hàng #${editingOrder.id}`, `Trạng thái: ${editStatus}, Người nhận: ${editRecipient.trim()}`);
+      log(`Cập nhật đơn hàng #${editingOrder.id}`, `Người nhận: ${editRecipient.trim()}`);
       setEditingOrder(null);
     } catch (err: unknown) {
       setEditOrderError(err instanceof Error ? err.message : "Cập nhật đơn hàng thất bại.");
@@ -837,7 +839,6 @@ export function AdminOperations({
                             setEditRecipient(o.customer);
                             setEditPhone(o.phone);
                             setEditAddress(o.address);
-                            setEditStatus(o.status);
                             setEditNote("");
                             setEditOrderError("");
                           }}
@@ -1462,6 +1463,28 @@ export function AdminOperations({
             <DialogDescription>
               {selected.customer} · {selected.phone} · {STATUS[selected.status]}
             </DialogDescription>
+              {selected.paymentMethod === "VIETQR_CHUYEN_KHOAN_ONLINE" && !selected.paid && selected.status === "CHO_XAC_NHAN" && (
+                <form className="mt-3 flex flex-wrap items-center gap-2" onSubmit={async (event) => {
+                  event.preventDefault();
+                  const form = event.currentTarget;
+                  const button = form.querySelector("button");
+                  if (button) button.disabled = true;
+                  try {
+                    await api("/admin/orders/" + selected.id + "/confirm-payment", "POST", {
+                      transactionRef: String(new FormData(form).get("reference") ?? "").trim(),
+                    });
+                    setOrders((rows) => rows.map((o) => o.id === selected.id ? { ...o, paid: true } : o));
+                    pushToast({ tone: "success", title: "Đã xác nhận khoản tiền thực nhận." });
+                  } catch (error) {
+                    pushToast({ tone: "error", title: error instanceof Error ? error.message : "Không thể xác nhận thanh toán." });
+                  } finally {
+                    if (button) button.disabled = false;
+                  }
+                }}>
+                  <input className={inputClass} name="reference" aria-label="Mã giao dịch ngân hàng" placeholder="Mã giao dịch ngân hàng" required maxLength={100} />
+                  <Button type="submit">Xác nhận đã đối soát tiền về</Button>
+                </form>
+              )}
             <div className="space-y-2 border-y border-border py-3">
               {selected.lines.map((l) => (
                 <div key={l.name} className="flex justify-between gap-3 text-sm">
@@ -1558,7 +1581,13 @@ export function AdminOperations({
           }`}
           danger
           close={() => setCancel(false)}
-          confirm={() => {
+          confirm={async () => {
+            try {
+              await api("/admin/orders/" + selected.id + "/cancel", "POST");
+            } catch (error) {
+              pushToast({ tone: "error", title: error instanceof Error ? error.message : "Không thể hủy đơn." });
+              return;
+            }
             setOrders(
               orders.map((o) =>
                 o.id === selected.id
@@ -1797,20 +1826,6 @@ export function AdminOperations({
                   disabled={editingOrder.channel === "TAI_QUAY_POS"}
                   onChange={(e) => setEditAddress(e.target.value)}
                 />
-              </Field>
-
-              <Field label="Trạng thái đơn hàng">
-                <select
-                  className={inputClass}
-                  value={editStatus}
-                  onChange={(e) => setEditStatus(e.target.value as AdminOrderStatus)}
-                >
-                  {Object.entries(STATUS).map(([k, label]) => (
-                    <option key={k} value={k}>
-                      {label} ({k})
-                    </option>
-                  ))}
-                </select>
               </Field>
 
               <Field label="Ghi chú cập nhật / Lý do điều chỉnh">
