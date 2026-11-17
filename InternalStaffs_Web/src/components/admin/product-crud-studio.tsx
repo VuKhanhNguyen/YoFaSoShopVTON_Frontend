@@ -7,7 +7,6 @@ import {
   Edit3,
   Eye,
   FileText,
-  Folder,
   FolderPlus,
   ImagePlus,
   Keyboard,
@@ -151,7 +150,7 @@ interface ProductAnalysis {
   status: string;
   simulated: boolean;
   error?: string;
-  result?: { variants?: { sourceAssetId: string; originalKey?: string }[] };
+  result?: { variants?: { sourceAssetId: string; sourceKey?: string; originalKey?: string }[] };
 }
 
 interface EditorFormState {
@@ -954,6 +953,7 @@ export function ProductCrudStudio({
         image.colors === v.colors && (
           image.originalAssetId === result.sourceAssetId ||
           image.originalAssetId === result.originalKey ||
+          image.originalAssetId === result.sourceKey ||
           image.originalAssetId.startsWith(`catalog/products/${detailProduct.productId.toLowerCase()}-${result.sourceAssetId}/`)
         )
       ));
@@ -2153,42 +2153,6 @@ export function ProductCrudStudio({
                     </div>
                   </Field>
                 </div>
-
-                {/* Khối phân loại Giới tính & Xem trước Quy tắc đặt tên Cloudflare R2 */}
-                <div className="sm:col-span-2 rounded-xl border border-border bg-canvas/50 p-4 space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 pb-2.5">
-                    <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                      <Folder className="h-4 w-4 text-accent-hover" />
-                      Phân loại giới tính &amp; Thư mục lưu trữ R2:
-                    </span>
-                    <div className="flex items-center gap-4 text-xs" role="radiogroup" aria-label="Giới tính trang phục">
-                      <label className="flex items-center gap-1.5 cursor-pointer font-medium text-foreground hover:text-accent-hover transition-colors">
-                        <input
-                          type="radio"
-                          name="gender_select"
-                          value="FEMALE"
-                          checked={form.gender === "FEMALE"}
-                          onChange={() => setForm((prev) => ({ ...prev, gender: "FEMALE" }))}
-                          className="h-3.5 w-3.5 text-accent"
-                        />
-                        <span>Thời trang Nữ</span>
-                      </label>
-                      <label className="flex items-center gap-1.5 cursor-pointer font-medium text-foreground hover:text-accent-hover transition-colors">
-                        <input
-                          type="radio"
-                          name="gender_select"
-                          value="MALE"
-                          checked={form.gender === "MALE"}
-                          onChange={() => setForm((prev) => ({ ...prev, gender: "MALE" }))}
-                          className="h-3.5 w-3.5 text-accent"
-                        />
-                        <span>Thời trang Nam</span>
-                      </label>
-                    </div>
-                  </div>
-
-
-                </div>
               </div>
 
               {/* Radio button Kiểu dáng */}
@@ -2789,8 +2753,6 @@ export function ProductCrudStudio({
                   Mã sản phẩm: <span className="font-semibold text-foreground">{detailProduct?.productId}</span>
                   {" · "}
                   Danh mục: <span className="font-medium text-foreground">{categories.find(c => c.value === detailProduct?.categoryId)?.label || detailProduct?.categoryId}</span>
-                  {" · "}
-                  Giới tính: <span className="font-medium text-foreground">{detailProduct?.gender === "MALE" ? "Nam" : "Nữ"}</span>
                 </DialogDescription>
               </div>
             </div>

@@ -275,8 +275,8 @@ export function ProductColorAreaCard({
             <thead>
               <tr>
                 <th>Size</th>
-                <th>Mã SKU (Barcode)</th>
-                <th>Số lượng tồn</th>
+                <th>Mã SKU</th>
+                <th>Số lượng</th>
                 <th>Giá niêm yết (đ)</th>
                 <th>Giá khuyến mãi (đ)</th>
                 <th>Vị trí giá kệ</th>
