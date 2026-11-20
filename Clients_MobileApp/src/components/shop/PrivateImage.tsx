@@ -1,54 +1,43 @@
 import { useEffect, useState } from "react";
-import { Image, Platform, type ImageStyle, type StyleProp } from "react-native";
-import { api, imageSource } from "@/lib/api";
-import { Notice } from "./ui";
-export function PrivateImage({
-  assetId,
-  style,
-}: {
+import { Image, type ImageProps } from "react-native";
+import * as FileSystem from "expo-file-system/legacy";
+import { api, imageSource, requestKey } from "@/lib/api";
+
+export function PrivateImage({ assetId, thumbnail, onError, ...props }: Omit<ImageProps, "source" | "onError"> & {
   assetId: string;
-  style: StyleProp<ImageStyle>;
+  thumbnail?: boolean;
+  onError?: (message?: string) => void;
 }) {
-  const [url, setUrl] = useState(""),
-    [error, setError] = useState("");
+  const [loaded, setLoaded] = useState<{ assetId: string; uri?: string; error?: string }>();
   useEffect(() => {
-    let active = true,
-      objectUrl = "";
-    if (Platform.OS !== "web") return;
-    // HTML img không gửi headers của RN Image: tải qua fetch có Bearer rồi tạo URL cục bộ.
-    api("/me")
-      .then(async () => {
-        const source = imageSource(assetId);
-        const response = await fetch(source.uri, { headers: source.headers });
-        if (!response.ok) throw new Error("Không tải được ảnh riêng.");
-        objectUrl = URL.createObjectURL(await response.blob());
-        if (active) setUrl(objectUrl);
-        else URL.revokeObjectURL(objectUrl);
-      })
-      .catch((e) => {
-        if (active) setError(e.message);
-      });
-    return () => {
-      active = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [assetId]);
-  if (error) return <Notice error>{error}</Notice>;
-  return Platform.OS === "web" ? (
-    url ? (
-      <Image
-        accessibilityLabel="Ảnh thử đồ riêng của bạn"
-        source={{ uri: url }}
-        style={style}
-      />
-    ) : (
-      <Notice>Đang tải ảnh...</Notice>
-    )
-  ) : (
-    <Image
-      accessibilityLabel="Ảnh thử đồ riêng của bạn"
-      source={imageSource(assetId)}
-      style={style}
-    />
-  );
+    let active = true;
+    const path = FileSystem.cacheDirectory && FileSystem.cacheDirectory + "private-" + requestKey() + ".png";
+    const remove = () => path ? FileSystem.deleteAsync(path, { idempotent: true }).catch(() => {}) : Promise.resolve();
+    async function load() {
+      if (!path) throw new Error("Không có thư mục lưu ảnh tạm.");
+      const download = () => {
+        const source = imageSource(assetId, thumbnail);
+        return FileSystem.downloadAsync(source.uri, path, { headers: source.headers });
+      };
+      let response = await download();
+      if (response.status === 401 && active) {
+        await api("/me");
+        if (active) response = await download();
+      }
+      if (response.status !== 200) throw new Error("Máy chủ trả HTTP " + response.status + " khi tải ảnh.");
+      if (active) setLoaded({ assetId, uri: response.uri });
+    }
+    void load().catch((error: Error) => {
+      if (active) setLoaded({ assetId, error: error.message });
+    }).finally(() => {
+      if (!active) void remove();
+    });
+    return () => { active = false; void remove(); };
+  }, [assetId, thumbnail]);
+  const current = loaded?.assetId === assetId ? loaded : undefined;
+  useEffect(() => {
+    if (current?.error) onError?.(current.error);
+  }, [current, onError]);
+  return current?.uri ? <Image {...props} onError={() => onError?.("Thiết bị không giải mã được ảnh.")}
+    source={{ uri: current.uri }} /> : null;
 }

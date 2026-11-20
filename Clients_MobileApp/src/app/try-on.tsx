@@ -1,404 +1,771 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Animated,
-  Dimensions,
   Image,
+  ImageBackground,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
-import { router, Stack, useLocalSearchParams } from "expo-router";
+import { Stack, router, useLocalSearchParams } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
-import { File as ExpoFile } from "expo-file-system";
+import { File } from "expo-file-system";
 import { Ionicons } from "@expo/vector-icons";
-import { api, requestKey } from "@/lib/api";
-import type { Row } from "@/lib/models";
-import { Colors, Fonts, Radii, Shadows } from "@/constants/theme";
+import { api, publicUrl, requestKey } from "@/lib/api";
+import { formatVND } from "@/lib/catalog-data";
+import { useSession } from "@/lib/session";
+import { useResource } from "@/hooks/use-resource";
+import { type Product } from "@/lib/models";
 import {
-  EditorialImages,
-  SAN_PHAM_MOCK,
-  SanPham,
-} from "@/lib/catalog-data";
-import {
-  LoaiKhungAnhNguoi,
-  khungTuTiLe,
-  khungHopLe,
-} from "@/lib/vton-engine";
-import { Button, Notice, colors } from "@/components/shop/ui";
+  checkModelGenderLock,
+  checkTryOnCompatibility,
+  groupVariantsByColor,
+  matchColor,
+  normalizeGender,
+  pickProductImageForColor,
+  type FashionGender,
+} from "@/lib/try-on";
+import { Colors, Radii, Shadows } from "@/constants/theme";
+import { Button, Notice, State } from "@/components/shop/ui";
+import { PrivateImage } from "@/components/shop/PrivateImage";
+import { CatalogPickerModal } from "@/components/shop/CatalogPickerModal";
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
+const portraits = {
+  female: require("../../assets/humanModelVTON/FemaleModel.png"),
+  male: require("../../assets/humanModelVTON/MaleModel.png"),
+  female_upper: require("../../assets/humanModelVTON/FemaleModel_UpperBody.png"),
+  male_upper: require("../../assets/humanModelVTON/MaleModel_UpperBody.png"),
+};
+const room = require("../../assets/humanModelVTON/RoomBackground.png");
+const categories = [
+  ["upper_body", "Áo", "Chụp chính diện, thấy rõ vai, thân trên và hai tay."],
+  ["lower_body", "Quần / chân váy", "Chụp rõ từ eo đến mắt cá chân. Nên đứng thẳng tự nhiên."],
+  ["dress", "Đầm liền", "Chụp toàn thân, đứng thẳng và để hai tay hơi tách khỏi thân."],
+] as const;
 
-const STEPS = [
-  "Đang dò 18 khớp xương OpenPose...",
-  "Đang bóc tách Agnostic Mask trang phục...",
-  "Đang dệt đồ qua mô hình OOTDiffusion DressCode...",
-];
+type ChainedContext = {
+  sessionId: string;
+  category: string;
+  frame?: string;
+};
 
 export default function TryOnScreen() {
-  const { variantId, category } = useLocalSearchParams<{
-    variantId: string;
-    category: string;
+  const params = useLocalSearchParams<{
+    productId?: string;
+    variantId?: string;
+    category?: string;
+    gender?: string;
+    mode?: string;
+    shopModelId?: string;
+    personAssetId?: string;
+    chainedFromSessionId?: string;
+    chainedFromCategory?: string;
+    chainedFromFrame?: string;
+    seed?: string;
   }>();
+  const { user } = useSession();
 
-  const [photoUri, setPhotoUri] = useState<string | null>(null);
-  const [photoDimensions, setPhotoDimensions] = useState<{ width: number; height: number } | null>(null);
-  const [stage, setStage] = useState<"gate" | "processing">("gate");
-  const [currentStep, setCurrentStep] = useState(0);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  // Animations
-  const scanAnim = useRef(new Animated.Value(0)).current;
-
-  // Frame estimation
-  const khung: LoaiKhungAnhNguoi = photoDimensions
-    ? khungTuTiLe(photoDimensions.width, photoDimensions.height)
-    : "HALF_BODY";
-  const isValidPose = photoUri
-    ? khungHopLe(khung, (category as any) || "upper_body")
-    : false;
-
-  // Scan beam animation loop
-  useEffect(() => {
-    if (stage === "processing") {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(scanAnim, {
-            toValue: 1,
-            duration: 1500,
-            useNativeDriver: true,
-          }),
-          Animated.timing(scanAnim, {
-            toValue: 0,
-            duration: 1500,
-            useNativeDriver: true,
-          }),
-        ])
-      ).start();
-    }
-  }, [stage]);
-
-  const pickImage = async (useCamera: boolean) => {
-    try {
-      if (useCamera) {
-        const { granted } = await ImagePicker.requestCameraPermissionsAsync();
-        if (!granted) {
-          setError("Cần cấp quyền máy ảnh để chụp ảnh thử đồ.");
-          return;
+  const initialGender = normalizeGender(params.gender);
+  const [productId, setProduct] = useState(params.productId || "");
+  const [variantId, setVariant] = useState(params.variantId || "");
+  const [category, setCategory] = useState(
+    categories.some((c) => c[0] === params.category) ? params.category! : "upper_body"
+  );
+  const [mode, setMode] = useState<"shop" | "photo">(
+    params.mode === "photo" || params.personAssetId ? "photo" : "shop"
+  );
+  const [modelGender, setModelGender] = useState<"female" | "male">(
+    params.shopModelId?.startsWith("male")
+      ? "male"
+      : params.shopModelId?.startsWith("female")
+      ? "female"
+      : initialGender === "NAM"
+      ? "male"
+      : "female"
+  );
+  const [modelFrame, setModelFrame] = useState<"full" | "upper">(
+    params.shopModelId?.includes("upper") ? "upper" : "full"
+  );
+  const [photoGender, setPhotoGender] = useState<FashionGender>(
+    initialGender || normalizeGender(user?.gender) || "NU"
+  );
+  const [photo, setPhoto] = useState<ImagePicker.ImagePickerAsset>();
+  const [assetId, setAssetId] = useState(params.personAssetId);
+  const [validatedPhotoFrame, setValidatedPhotoFrame] = useState<string | undefined>(
+    params.chainedFromFrame || undefined
+  );
+  const [chainedContext, setChainedContext] = useState<ChainedContext | null>(
+    params.chainedFromCategory
+      ? {
+          sessionId: params.chainedFromSessionId || "",
+          category: params.chainedFromCategory,
+          frame: params.chainedFromFrame || undefined,
         }
+      : null
+  );
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [toast, setToast] = useState("");
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sending = useRef(false);
+  const attempt = useRef<{ input: string; key: string } | undefined>(undefined);
+  const checkedPhoto = useRef<string | undefined>(undefined);
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(""), 3200);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    };
+  }, []);
+
+  const detail = useResource<Product>(
+    productId ? "/catalog/products/" + encodeURIComponent(productId) : null
+  );
+  const product = detail.data?.productId === productId ? detail.data : undefined;
+  const activeCategory = product?.vtonCategory || category;
+  const productGender = normalizeGender(
+    product?.gender || (productId === params.productId ? params.gender : undefined)
+  );
+
+  // Sync shop model gender to match selected product gender (NU -> female, NAM -> male)
+  useEffect(() => {
+    if (!productGender) return;
+    setModelGender(productGender === "NAM" ? "male" : "female");
+  }, [productGender]);
+
+  const isUpperBodyAllowed = activeCategory === "upper_body";
+  const activeModelKey = (
+    modelFrame === "upper" && isUpperBodyAllowed ? `${modelGender}_upper` : modelGender
+  ) as keyof typeof portraits;
+  const catalogGender: FashionGender =
+    mode === "shop" ? (modelGender === "male" ? "NAM" : "NU") : photoGender;
+
+  const variants = (product?.variants ?? []).filter(
+    (v) =>
+      v.status === "DANG_BAN" &&
+      v.stock > 0 &&
+      product?.images?.some((i) => matchColor(i.colors, v.colors) && i.cutoutUrl)
+  );
+  const colorGroups = groupVariantsByColor(variants);
+  const variant =
+    variants.find((v) => v.variantId === variantId) ||
+    (!variantId ? colorGroups[0]?.variants[0] : undefined);
+  const activeColor = variant
+    ? colorGroups.find((g) => g.variants.some((v) => v.variantId === variant.variantId))
+    : undefined;
+  const activeThumbUrl = pickProductImageForColor(product, activeColor?.hex);
+  const guide = categories.find((c) => c[0] === activeCategory)?.[2];
+
+  function handleSelectModelGender(target: "female" | "male") {
+    const lock = checkModelGenderLock(productGender, target);
+    if (!lock.allowed) {
+      showToast(lock.reason);
+      return;
+    }
+    setModelGender(target);
+  }
+
+  function handleSelectModelFrame(target: "full" | "upper") {
+    if (target === "upper") {
+      const compat = checkTryOnCompatibility({
+        targetCategory: activeCategory,
+        frame: "HALF_BODY",
+      });
+      if (!compat.allowed) {
+        showToast(compat.reason);
+        return;
       }
-      const options: ImagePicker.ImagePickerOptions = {
-        mediaTypes: ["images"],
-        quality: 0.9,
-        allowsEditing: false,
-      };
-      const result = useCamera
+    }
+    setModelFrame(target);
+  }
+
+  function handleModeChange(nextMode: "shop" | "photo") {
+    setMode(nextMode);
+    if (nextMode === "shop") {
+      setChainedContext(null);
+      setValidatedPhotoFrame(undefined);
+    }
+  }
+
+  async function pick(camera: boolean) {
+    setError("");
+    try {
+      if (camera && !(await ImagePicker.requestCameraPermissionsAsync()).granted) {
+        setError("Cần cấp quyền máy ảnh để chụp ảnh thử đồ.");
+        return;
+      }
+      const options: ImagePicker.ImagePickerOptions = { mediaTypes: ["images"], quality: 0.95 };
+      const selection = camera
         ? await ImagePicker.launchCameraAsync(options)
         : await ImagePicker.launchImageLibraryAsync(options);
-
-      if (!result.canceled && result.assets[0]) {
-        const asset = result.assets[0];
-        setPhotoUri(asset.uri);
-        setPhotoDimensions({ width: asset.width, height: asset.height });
-        setError("");
+      if (!selection.canceled) {
+        setPhoto(selection.assets[0]);
+        setAssetId(undefined);
+        setChainedContext(null);
+        setValidatedPhotoFrame(undefined);
+        checkedPhoto.current = undefined;
       }
-    } catch (e: any) {
-      setError(e.message || "Không thể chọn ảnh.");
+    } catch (err) {
+      setError((err as Error).message);
     }
-  };
+  }
 
-  const useSamplePhoto = () => {
-    // High-fashion sample model image from Editorial assets
-    const sample = Image.resolveAssetSource(EditorialImages.onboard1);
-    setPhotoUri(sample.uri);
-    setPhotoDimensions({ width: sample.width, height: sample.height });
+  async function submit() {
+    if (!variant || sending.current) return;
+    if (!user) {
+      router.push({ pathname: "/auth", params: { returnToFitting: "1" } });
+      return;
+    }
+
+    const preCompat = checkTryOnCompatibility({
+      targetCategory: activeCategory,
+      frame:
+        mode === "shop"
+          ? modelFrame === "upper"
+            ? "HALF_BODY"
+            : "FULL_BODY"
+          : validatedPhotoFrame,
+      shopModelId: mode === "shop" ? activeModelKey : undefined,
+      chainedFromCategory: chainedContext?.category,
+      chainedFromFrame: chainedContext?.frame,
+    });
+    if (!preCompat.allowed) {
+      setError(preCompat.reason);
+      showToast(preCompat.reason);
+      return;
+    }
+
+    if (mode === "shop") {
+      const genderLock = checkModelGenderLock(productGender, modelGender);
+      if (!genderLock.allowed) {
+        setError(genderLock.reason);
+        showToast(genderLock.reason);
+        return;
+      }
+    }
+
+    sending.current = true;
+    setBusy(true);
     setError("");
-  };
-
-  const handleStartVton = async () => {
-    if (!photoUri) return;
-    setStage("processing");
-    setCurrentStep(0);
-
-    const t1 = setTimeout(() => setCurrentStep(1), 1100);
-    const t2 = setTimeout(() => setCurrentStep(2), 2200);
-
-    // Call real API if available, or simulate fallback session
     try {
-      const form = new FormData();
-      form.append("role", "person");
-      form.append("consent", "true");
-      if (Platform.OS === "web") {
-        form.append("file", await (await fetch(photoUri)).blob(), "person.jpg");
-      } else {
-        try {
-          const file = new ExpoFile(photoUri);
-          form.append("file", file as unknown as Blob, "person.jpg");
-        } catch {
-          form.append("file", {
-            uri: photoUri,
-            type: "image/jpeg",
-            name: "person.jpg",
-          } as any);
+      let personAssetId = assetId;
+      if (mode === "photo") {
+        if (!personAssetId && photo) {
+          const form = new FormData();
+          form.append("role", "person");
+          form.append("consent", "true");
+          if (Platform.OS === "web") {
+            form.append(
+              "file",
+              photo.file || (await (await fetch(photo.uri)).blob()),
+              photo.fileName || "person.png"
+            );
+          } else {
+            form.append(
+              "file",
+              new File(photo.uri) as unknown as Blob,
+              photo.fileName || "person.png"
+            );
+          }
+          personAssetId = (await api<{ assetId: string }>("/assets", "POST", form)).assetId;
+          setAssetId(personAssetId);
+        }
+        if (!personAssetId) throw new Error("Chọn ảnh của bạn trước khi thử.");
+        const checkKey = personAssetId + ":" + variant.variantId;
+        if (checkedPhoto.current !== checkKey) {
+          const check = await api<{
+            accepted: boolean;
+            personFrame?: string;
+            warnings?: string[];
+            route?: { personFrame?: string; warnings?: string[] };
+          }>("/ai/persons/validate", "POST", {
+            assetId: personAssetId,
+            variantId: variant.variantId,
+          });
+          const detectedFrame = check.personFrame || check.route?.personFrame;
+          if (detectedFrame) setValidatedPhotoFrame(detectedFrame);
+
+          const postCompat = checkTryOnCompatibility({
+            targetCategory: activeCategory,
+            frame: detectedFrame,
+            chainedFromCategory: chainedContext?.category,
+            chainedFromFrame: chainedContext?.frame || detectedFrame,
+          });
+          if (!postCompat.allowed) {
+            showToast(postCompat.reason);
+            throw new Error(postCompat.reason);
+          }
+          if (!check.accepted) {
+            const msg =
+              check.route?.warnings?.[0] ||
+              check.warnings?.[0] ||
+              "Ảnh chưa đủ rõ để nhận diện tư thế. Hãy chọn ảnh khác.";
+            showToast(msg);
+            throw new Error(msg);
+          }
+          checkedPhoto.current = checkKey;
         }
       }
-
-      // Try uploading asset to backend
-      const uploadRes = await api<{ assetId: string }>("/assets", "POST", form).catch(() => null);
-      const personAssetId = uploadRes?.assetId || "mock-asset-person";
-
-      const sessionBody = {
-        variantId: variantId || "SP00000001",
-        personAssetId,
-        seed: 42,
-        steps: 20,
-        samples: 1,
+      const body = {
+        variantId: variant.variantId,
+        ...(mode === "photo" ? { personAssetId } : { shopModelId: activeModelKey }),
         consent: true,
+        seed: /^\d{1,9}$/.test(params.seed || "") ? Number(params.seed) : 42,
+        steps: 20,
+        samples: 4,
       };
-
-      const sessionRes = await api<Row>("/try-on/sessions", "POST", sessionBody, requestKey()).catch(() => null);
-      const sessionId = sessionRes?.resourceId || sessionRes?.operationId || `SESSION-${Date.now().toString().slice(-6)}`;
-
-      setTimeout(() => {
-        router.replace({
-          pathname: "/session/[id]",
-          params: {
-            id: String(sessionId),
-            variantId: variantId || "SP00000001",
-            before: photoUri,
-          },
-        });
-      }, 3400);
-    } catch (e) {
-      // In case of network error, proceed with local session simulation
-      setTimeout(() => {
-        router.replace({
-          pathname: "/session/[id]",
-          params: {
-            id: `SESSION-${Date.now().toString().slice(-6)}`,
-            variantId: variantId || "SP00000001",
-            before: photoUri,
-          },
-        });
-      }, 3400);
+      const input = JSON.stringify(body);
+      if (attempt.current?.input !== input) attempt.current = { input, key: requestKey() };
+      const session = await api<{ resourceId: string }>(
+        "/try-on/sessions",
+        "POST",
+        body,
+        attempt.current.key
+      );
+      router.replace({ pathname: "/session/[id]", params: { id: session.resourceId } });
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      sending.current = false;
+      setBusy(false);
     }
-  };
+  }
+
+  const before = !!photo || (!!assetId && !!user);
 
   return (
-    <View style={st.container}>
-      <Stack.Screen options={{ headerShown: false }} />
+    <View style={st.page}>
+      <Stack.Screen
+        options={{
+          title: "Phòng thử đồ",
+          headerStyle: { backgroundColor: Colors.canvas },
+          headerTintColor: Colors.primary,
+          headerTitleStyle: { fontFamily: "Editorial", fontSize: 19, color: Colors.primary },
+          headerShadowVisible: false,
+          headerRight: () => (
+            <Pressable
+              onPress={() => router.push("/(shop)/wardrobe")}
+              style={st.headerWardrobeBtn}
+              accessibilityLabel="Mở Tủ đồ VTON"
+            >
+              <Ionicons name="shirt-outline" size={16} color={Colors.primary} />
+              <Text style={st.headerWardrobeText}>Tủ đồ</Text>
+            </Pressable>
+          ),
+        }}
+      />
 
-      {/* Top Header */}
-      <View style={st.topHeader}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Đóng"
-          onPress={() => router.back()}
-          style={st.closeCircleBtn}
-        >
-          <Ionicons name="close" size={20} color="#FFFFFF" />
-        </Pressable>
-        <View style={{ alignItems: "center" }}>
-          <Text style={st.headerMonoTag}>
-            UC_VTON · {stage === "gate" ? "POSE GATE HUD" : "GPU RENDER"}
-          </Text>
-          <Text style={st.headerSub}>
-            {stage === "gate" ? "Kiểm tra tư thế dáng người" : "Đang xử lý OOTDiffusion"}
-          </Text>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={st.scrollContent}
+      >
+        {/* Segmented Mode Control */}
+        <View style={st.segmentedBar}>
+          <Pressable
+            disabled={busy}
+            onPress={() => handleModeChange("shop")}
+            style={[st.segmentItem, mode === "shop" && st.segmentActive]}
+          >
+            <Ionicons
+              name="person-outline"
+              size={15}
+              color={mode === "shop" ? Colors.primary : Colors.textSecondary}
+            />
+            <Text style={[st.segmentText, mode === "shop" && st.segmentTextActive]}>Mẫu của shop</Text>
+          </Pressable>
+          <Pressable
+            disabled={busy}
+            onPress={() => handleModeChange("photo")}
+            style={[st.segmentItem, mode === "photo" && st.segmentActive]}
+          >
+            <Ionicons
+              name="camera-outline"
+              size={15}
+              color={mode === "photo" ? Colors.primary : Colors.textSecondary}
+            />
+            <Text style={[st.segmentText, mode === "photo" && st.segmentTextActive]}>Ảnh của tôi</Text>
+          </Pressable>
         </View>
-        <View style={{ width: 36 }} />
-      </View>
 
-      {stage === "gate" ? (
-        <View style={st.contentArea}>
-          {/* Viewfinder Canvas Frame */}
-          <View style={st.viewfinderFrame}>
-            {photoUri ? (
-              <Image source={{ uri: photoUri }} style={st.photoPreview} resizeMode="contain" />
+        {/* Portrait / Model Stage */}
+        {mode === "shop" ? (
+          <ImageBackground source={room} style={st.stageCard} imageStyle={st.stageBgImage}>
+            <Image
+              source={portraits[activeModelKey]}
+              style={st.personImage}
+              resizeMode="contain"
+              accessibilityLabel="Mẫu minh họa của shop"
+            />
+            <View style={st.stagePill}>
+              <View style={st.goldDot} />
+              <Text style={st.stagePillText}>
+                {modelGender === "female" ? "Mẫu nữ" : "Mẫu nam"} ·{" "}
+                {modelFrame === "upper" && isUpperBodyAllowed ? "Nửa thân trên" : "Toàn thân"}
+              </Text>
+            </View>
+          </ImageBackground>
+        ) : (
+          <View style={st.stageCard}>
+            {photo ? (
+              <Image
+                source={{ uri: photo.uri }}
+                style={st.personImage}
+                resizeMode="contain"
+                accessibilityLabel="Ảnh gốc của bạn"
+              />
+            ) : assetId && user ? (
+              <PrivateImage
+                assetId={assetId}
+                style={st.personImage}
+                resizeMode="contain"
+                accessibilityLabel="Ảnh gốc của bạn"
+              />
             ) : (
-              <View style={st.emptyDottedPose}>
-                <Ionicons name="body-outline" size={130} color={Colors.champagne} style={{ opacity: 0.65 }} />
-                <Text style={st.viewfinderPrompt}>
-                  Chụp ảnh hoặc chọn ảnh đứng thẳng rõ vóc dáng
+              <View style={st.emptyPhoto}>
+                <View style={st.emptyPhotoCircle}>
+                  <Ionicons name="scan-outline" size={32} color={Colors.champagneDeep} />
+                </View>
+                <Text style={st.emptyPhotoTitle}>Tải ảnh chân dung của bạn</Text>
+                <Text style={st.emptyPhotoSub}>{guide}</Text>
+              </View>
+            )}
+            {before && (
+              <View style={st.stagePill}>
+                <View style={[st.goldDot, { backgroundColor: Colors.statusSuccess }]} />
+                <Text style={st.stagePillText}>
+                  {chainedContext ? "Ảnh kết quả VTON · Sẵn sàng" : "Ảnh của bạn · Sẵn sàng"}
                 </Text>
               </View>
             )}
+          </View>
+        )}
 
-            {/* Tactical 4 Corner Brackets (Design.md) */}
-            <View style={[st.cornerBracket, st.cornerTL]} />
-            <View style={[st.cornerBracket, st.cornerTR]} />
-            <View style={[st.cornerBracket, st.cornerBL]} />
-            <View style={[st.cornerBracket, st.cornerBR]} />
+        {/* Chained Try-On Banner */}
+        {mode === "photo" && chainedContext && (
+          <View style={st.chainedBanner}>
+            <Ionicons name="layers-outline" size={18} color={Colors.champagneDeep} />
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={st.chainedTitle}>
+                Đang thử tiếp từ ảnh kết quả #{chainedContext.sessionId || "VTON"}
+              </Text>
+              <Text style={st.chainedSub}>
+                Ảnh kết quả đã được nạp sẵn làm ảnh gốc. Bạn vẫn có thể chọn ảnh khác từ thư viện hoặc chụp ảnh mới bên dưới.
+              </Text>
+            </View>
+          </View>
+        )}
 
-            {/* Status Chips HUD Overlay */}
-            <View style={st.chipsOverlayRow}>
-              <View
-                style={[
-                  st.hudChip,
-                  { backgroundColor: photoUri ? "rgba(5, 150, 105, 0.85)" : "rgba(15, 23, 42, 0.65)" },
-                ]}
-              >
-                <Ionicons name="sunny" size={11} color="#FFFFFF" />
-                <Text style={st.hudChipText}>{photoUri ? "Độ sáng: Chuẩn" : "Độ sáng: —"}</Text>
+        {/* Model Configuration or Photo Picker Card */}
+        <View style={st.editorialCard}>
+          {mode === "shop" ? (
+            <>
+              <View style={st.optionGroup}>
+                <Text style={st.optionLabel}>Giới tính người mẫu</Text>
+                <View style={st.chipRow}>
+                  <Pressable
+                    disabled={busy}
+                    onPress={() => handleSelectModelGender("female")}
+                    style={[
+                      st.chip,
+                      modelGender === "female" && st.chipActive,
+                      productGender === "NAM" && st.chipDisabled,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        st.chipText,
+                        modelGender === "female" && st.chipTextActive,
+                        productGender === "NAM" && st.chipTextDisabled,
+                      ]}
+                    >
+                      Mẫu nữ
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    disabled={busy}
+                    onPress={() => handleSelectModelGender("male")}
+                    style={[
+                      st.chip,
+                      modelGender === "male" && st.chipActive,
+                      productGender === "NU" && st.chipDisabled,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        st.chipText,
+                        modelGender === "male" && st.chipTextActive,
+                        productGender === "NU" && st.chipTextDisabled,
+                      ]}
+                    >
+                      Mẫu nam
+                    </Text>
+                  </Pressable>
+                </View>
               </View>
 
-              <View
-                style={[
-                  st.hudChip,
-                  {
-                    backgroundColor: !photoUri
-                      ? "rgba(15, 23, 42, 0.65)"
-                      : isValidPose
-                      ? "rgba(5, 150, 105, 0.85)"
-                      : "rgba(217, 119, 6, 0.85)",
-                  },
-                ]}
-              >
-                <Ionicons name="person" size={11} color="#FFFFFF" />
-                <Text style={st.hudChipText}>
-                  {photoUri
-                    ? isValidPose
-                      ? "Khung hình: Chuẩn"
-                      : "Khung hình: Chưa chuẩn"
-                    : "Khung hình: —"}
-                </Text>
+              <View style={st.optionGroup}>
+                <Text style={st.optionLabel}>Khung hình VTON</Text>
+                <View style={st.chipRow}>
+                  <Pressable
+                    disabled={busy}
+                    onPress={() => handleSelectModelFrame("full")}
+                    style={[st.chip, (modelFrame === "full" || !isUpperBodyAllowed) && st.chipActive]}
+                  >
+                    <Text
+                      style={[
+                        st.chipText,
+                        (modelFrame === "full" || !isUpperBodyAllowed) && st.chipTextActive,
+                      ]}
+                    >
+                      Toàn thân (Full-body)
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    disabled={busy}
+                    onPress={() => handleSelectModelFrame("upper")}
+                    style={[
+                      st.chip,
+                      modelFrame === "upper" && isUpperBodyAllowed && st.chipActive,
+                      !isUpperBodyAllowed && st.chipDisabled,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        st.chipText,
+                        modelFrame === "upper" && isUpperBodyAllowed && st.chipTextActive,
+                        !isUpperBodyAllowed && st.chipTextDisabled,
+                      ]}
+                    >
+                      Nửa thân (Chỉ Áo)
+                    </Text>
+                  </Pressable>
+                </View>
               </View>
 
-              <View
-                style={[
-                  st.hudChip,
-                  {
-                    backgroundColor: photoUri && isValidPose
-                      ? "rgba(5, 150, 105, 0.85)"
-                      : "rgba(15, 23, 42, 0.65)",
-                  },
-                ]}
-              >
-                <Ionicons name="git-commit" size={11} color="#FFFFFF" />
-                <Text style={st.hudChipText}>
-                  {photoUri ? (isValidPose ? "Khớp xương: 18/18" : "Khớp xương: 12/18") : "Khớp: —"}
+              {!isUpperBodyAllowed && (
+                <View style={st.compatNote}>
+                  <Ionicons name="information-circle-outline" size={16} color={Colors.champagneDeep} />
+                  <Text style={st.compatNoteText}>
+                    Quần / Đầm liền bắt buộc khung hình Toàn thân để AI dựng chính xác phần hông và chân.
+                  </Text>
+                </View>
+              )}
+            </>
+          ) : (
+            <View style={{ gap: 14 }}>
+              <View style={st.photoBtnRow}>
+                <Pressable
+                  disabled={busy}
+                  onPress={() => void pick(false)}
+                  style={st.photoPickBtn}
+                >
+                  <Ionicons name="images-outline" size={18} color={Colors.primary} />
+                  <Text style={st.photoPickText}>{before ? "Đổi ảnh thư viện" : "Chọn từ thư viện"}</Text>
+                </Pressable>
+                <Pressable
+                  disabled={busy}
+                  onPress={() => void pick(true)}
+                  style={st.photoPickBtn}
+                >
+                  <Ionicons name="camera-outline" size={18} color={Colors.primary} />
+                  <Text style={st.photoPickText}>Chụp ảnh mới</Text>
+                </Pressable>
+              </View>
+
+              {/* Gender selector ONLY in personal photo mode — solely filters the Catalog Picker Dialog */}
+              <View style={st.optionGroup}>
+                <Text style={st.optionLabel}>Hiển thị danh mục trang phục theo giới tính</Text>
+                <View style={st.chipRow}>
+                  <Pressable
+                    disabled={busy}
+                    onPress={() => setPhotoGender("NU")}
+                    style={[st.chip, photoGender === "NU" && st.chipActive]}
+                  >
+                    <Text style={[st.chipText, photoGender === "NU" && st.chipTextActive]}>
+                      Thời trang Nữ
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    disabled={busy}
+                    onPress={() => setPhotoGender("NAM")}
+                    style={[st.chip, photoGender === "NAM" && st.chipActive]}
+                  >
+                    <Text style={[st.chipText, photoGender === "NAM" && st.chipTextActive]}>
+                      Thời trang Nam
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              <View style={st.compatNote}>
+                <Ionicons name="shield-checkmark-outline" size={16} color={Colors.champagneDeep} />
+                <Text style={st.compatNoteText}>
+                  {guide} Ảnh cá nhân được bảo mật riêng tư trong Tủ đồ VTON của bạn.
                 </Text>
               </View>
             </View>
-
-            {/* Warning Box if pose not valid */}
-            {photoUri && !isValidPose ? (
-              <View style={st.warningOverlayBox}>
-                <Ionicons name="warning-outline" size={16} color="#FFFFFF" />
-                <Text style={st.warningOverlayText}>
-                  {category === "lower_body"
-                    ? "Bạn đang thử quần/chân váy: Ảnh cần thấy rõ mắt cá chân và mũi giày. Hãy lùi xa 2m và chụp lại."
-                    : "Ảnh chưa thấy rõ vai và hông. Vui lòng đứng thẳng, không khoanh tay để AI đo phom chuẩn."}
-                </Text>
-              </View>
-            ) : null}
-          </View>
-
-          {/* 3 Source Buttons */}
-          <View style={st.sourceButtonsRow}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Chụp ảnh ngay"
-              onPress={() => pickImage(true)}
-              style={st.sourceBtnPrimary}
-            >
-              <Ionicons name="camera" size={20} color={Colors.primary} />
-              <Text style={st.sourceBtnPrimaryText}>Chụp ảnh</Text>
-            </Pressable>
-
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Chọn từ Thư viện"
-              onPress={() => pickImage(false)}
-              style={st.sourceBtnSecondary}
-            >
-              <Ionicons name="images-outline" size={20} color="#FFFFFF" />
-              <Text style={st.sourceBtnSecondaryText}>Thư viện</Text>
-            </Pressable>
-
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Dùng ảnh mẫu"
-              onPress={useSamplePhoto}
-              style={st.sourceBtnSecondary}
-            >
-              <Ionicons name="sparkles-outline" size={20} color={Colors.champagne} />
-              <Text style={st.sourceBtnSecondaryText}>Ảnh mẫu</Text>
-            </Pressable>
-          </View>
-
-          {!!error && <Notice error style={{ marginTop: 10 }}>{error}</Notice>}
-
-          {/* Action CTA */}
-          <Button
-            title="BẮT ĐẦU ƯỚM THỬ VTON"
-            disabled={!photoUri || !isValidPose}
-            onPress={handleStartVton}
-            accent
-            icon={<Ionicons name="scan-outline" size={18} color={Colors.primary} />}
-            style={{ height: 54, marginTop: 14 }}
-          />
+          )}
         </View>
-      ) : (
-        /* Processing Stage with Laser Fabric Scan Animation */
-        <View style={st.processingContainer}>
-          <View style={st.scanCanvas}>
-            {photoUri && (
-              <Image source={{ uri: photoUri }} style={st.scanImage} resizeMode="cover" />
-            )}
-            <View style={st.scanTintOverlay} />
 
-            {/* Vertical Animated Laser Scan Beam (Design.md) */}
-            <Animated.View
-              style={[
-                st.laserScanBeam,
-                {
-                  transform: [
-                    {
-                      translateY: scanAnim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [10, SCREEN_HEIGHT * 0.48],
-                      }),
-                    },
-                  ],
-                },
-              ]}
-            />
-          </View>
+        {error ? <Notice error>{error}</Notice> : null}
 
-          {/* Step Checkpoints */}
-          <View style={st.stepsList}>
-            {STEPS.map((stepText, idx) => {
-              const isPast = idx < currentStep;
-              const isCurrent = idx === currentStep;
+        {/* Selected Product & Variant Card */}
+        {!!productId && <State loading={detail.loading} error={detail.error} retry={detail.reload} />}
+        {product && (
+          <View style={st.editorialCard}>
+            <View style={st.selectedProductHeader}>
+              {activeThumbUrl ? (
+                <Image
+                  source={{ uri: publicUrl(activeThumbUrl) }}
+                  style={st.selectedProductThumb}
+                  resizeMode="cover"
+                />
+              ) : null}
+              <View style={{ flex: 1, gap: 4 }}>
+                <Text style={st.selectedLabel}>TRANG PHỤC ĐANG CHỌN</Text>
+                <Text style={st.selectedTitle} numberOfLines={2}>{product.name}</Text>
+                {variant && (
+                  <Text style={st.selectedPrice}>{formatVND(variant.salePrice ?? variant.price)}</Text>
+                )}
+              </View>
+            </View>
 
-              return (
-                <View key={idx} style={st.stepItemRow}>
-                  <View
-                    style={[
-                      st.stepStatusDot,
-                      isPast && { backgroundColor: Colors.statusSuccess },
-                      isCurrent && { backgroundColor: Colors.champagne, borderWidth: 2, borderColor: "#FFFFFF" },
-                    ]}
-                  />
-                  <Text
-                    style={[
-                      st.stepItemText,
-                      (isPast || isCurrent) && { color: "#FFFFFF", fontFamily: "JakartaSemiBold" },
-                    ]}
+            {!variants.length ? (
+              <Notice>Sản phẩm hiện chưa có phiên bản bóc nền sẵn sàng để thử đồ.</Notice>
+            ) : (
+              <View style={st.variantSelectorStack}>
+                <View style={st.optionGroup}>
+                  <View style={st.colorHeaderRow}>
+                    <Text style={st.optionLabel}>{activeColor ? "Màu sắc:" : "Màu sắc"}</Text>
+                    {activeColor ? <Text style={st.colorSelectedName}>{activeColor.name}</Text> : null}
+                  </View>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={st.swatchRow}
                   >
-                    {stepText}
-                  </Text>
+                    {colorGroups.map((group) => {
+                      const active = activeColor?.key === group.key;
+                      return (
+                        <Pressable
+                          key={group.key}
+                          disabled={busy}
+                          hitSlop={6}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Màu ${group.name}`}
+                          accessibilityState={{ selected: active }}
+                          onPress={() => {
+                            const next =
+                              group.variants.find((v) => v.size === variant?.size) ?? group.variants[0];
+                            if (next) setVariant(next.variantId);
+                          }}
+                          style={[st.swatchRing, active && st.swatchRingActive, busy && st.chipDisabled]}
+                        >
+                          <View
+                            style={[
+                              st.swatchColor,
+                              { backgroundColor: group.primaryHex },
+                            ]}
+                          />
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
                 </View>
-              );
-            })}
-          </View>
 
-          <Text style={st.gpuNoticeText}>
-            YoFaSo Virtual Atelier · Mô hình AI chạy điện toán đám mây GPU H100
-          </Text>
+                {activeColor && (
+                  <View style={st.optionGroup}>
+                    <Text style={st.optionLabel}>Kích cỡ</Text>
+                    <View style={st.chipRow}>
+                      {activeColor.variants.map((v) => {
+                        const active = variant?.variantId === v.variantId;
+                        return (
+                          <Pressable
+                            key={v.variantId}
+                            disabled={busy}
+                            hitSlop={4}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Kích cỡ ${v.size}`}
+                            accessibilityState={{ selected: active }}
+                            onPress={() => setVariant(v.variantId)}
+                            style={[st.chip, st.sizeChip, active && st.chipActive]}
+                          >
+                            <Text style={[st.chipText, active && st.chipTextActive]}>{v.size}</Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+                )}
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Primary CTA */}
+        <Button
+          title={
+            busy
+              ? "Đang gửi yêu cầu…"
+              : !user
+              ? "Đăng nhập để thử đồ"
+              : mode === "shop"
+              ? "Bắt đầu ướm thử trên mẫu"
+              : "Tạo ảnh thử đồ AI"
+          }
+          icon={<Ionicons name="sparkles" size={16} color={Colors.champagne} />}
+          disabled={busy || !variant || (mode === "photo" && !before)}
+          onPress={() => void submit()}
+        />
+
+        {/* Button opening full 2-column Catalog Picker Dialog (Req 3) */}
+        <Button
+          title={product ? "Đổi trang phục khác" : "Chọn trang phục để thử"}
+          secondary
+          icon={<Ionicons name="grid-outline" size={17} color={Colors.primary} />}
+          disabled={busy}
+          onPress={() => setCatalogOpen(true)}
+        />
+      </ScrollView>
+
+      {/* Catalog Picker Modal */}
+      <CatalogPickerModal
+        visible={catalogOpen}
+        onClose={() => setCatalogOpen(false)}
+        lockedGender={catalogGender}
+        selectedProductId={productId}
+        frame={
+          mode === "shop"
+            ? modelFrame === "upper"
+              ? "HALF_BODY"
+              : "FULL_BODY"
+            : validatedPhotoFrame
+        }
+        shopModelId={mode === "shop" ? activeModelKey : undefined}
+        chainedFromCategory={chainedContext?.category}
+        chainedFromFrame={chainedContext?.frame}
+        onSelect={(item) => {
+          setProduct(item.id);
+          setVariant("");
+          setCategory(item.vtonCategory || "upper_body");
+          setError("");
+        }}
+      />
+
+      {/* Floating Blocking Toast */}
+      {!!toast && (
+        <View style={st.toastPopup} pointerEvents="none">
+          <Ionicons name="alert-circle" size={18} color="#FDE68A" />
+          <Text style={st.toastPopupText}>{toast}</Text>
         </View>
       )}
     </View>
@@ -406,242 +773,337 @@ export default function TryOnScreen() {
 }
 
 const st = StyleSheet.create({
-  container: {
+  page: {
     flex: 1,
-    backgroundColor: Colors.primary,
+    backgroundColor: Colors.canvas,
   },
-  topHeader: {
+  headerWardrobeBtn: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingTop: Platform.OS === "ios" ? 50 : 36,
-    paddingHorizontal: 18,
-    paddingBottom: 14,
-  },
-  closeCircleBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(255, 255, 255, 0.15)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  headerMonoTag: {
-    fontSize: 10,
-    fontFamily: "Mono",
-    color: Colors.champagne,
-    letterSpacing: 1.2,
-  },
-  headerSub: {
-    fontSize: 12,
-    fontFamily: "Jakarta",
-    color: "rgba(255, 255, 255, 0.75)",
-    marginTop: 2,
-  },
-  contentArea: {
-    flex: 1,
-    paddingHorizontal: 18,
-    paddingBottom: 24,
-  },
-  viewfinderFrame: {
-    flex: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.05)",
-    borderRadius: Radii.xl,
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: Radii.full,
+    backgroundColor: Colors.surface,
     borderWidth: 1,
-    borderColor: "rgba(197, 168, 128, 0.35)",
-    position: "relative",
-    overflow: "hidden",
+    borderColor: Colors.borderHairline,
+  },
+  headerWardrobeText: {
+    fontFamily: "JakartaSemiBold",
+    fontSize: 12,
+    color: Colors.primary,
+  },
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 48,
+    gap: 16,
+  },
+  segmentedBar: {
+    flexDirection: "row",
+    backgroundColor: Colors.surfaceMuted,
+    padding: 4,
+    borderRadius: Radii.lg,
+    borderWidth: 1,
+    borderColor: Colors.borderHairline,
+    gap: 4,
+  },
+  segmentItem: {
+    flex: 1,
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: Radii.md,
   },
-  photoPreview: {
+  segmentActive: {
+    backgroundColor: Colors.surface,
+    ...Shadows.sm,
+  },
+  segmentText: {
+    fontFamily: "JakartaSemiBold",
+    fontSize: 13,
+    color: Colors.textSecondary,
+  },
+  segmentTextActive: {
+    color: Colors.primary,
+  },
+  stageCard: {
+    height: 390,
+    borderRadius: Radii.xl,
+    overflow: "hidden",
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.borderHairline,
+    justifyContent: "center",
+    position: "relative",
+    ...Shadows.sm,
+  },
+  stageBgImage: {
+    borderRadius: Radii.xl,
+  },
+  personImage: {
     width: "100%",
     height: "100%",
   },
-  emptyDottedPose: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 24,
-  },
-  viewfinderPrompt: {
-    fontSize: 12.5,
-    fontFamily: "Jakarta",
-    color: "rgba(255, 255, 255, 0.65)",
-    textAlign: "center",
-    marginTop: 12,
-    lineHeight: 18,
-  },
-  cornerBracket: {
+  stagePill: {
     position: "absolute",
-    width: 20,
-    height: 20,
-    borderColor: Colors.champagne,
-  },
-  cornerTL: {
-    top: 12,
     left: 12,
-    borderTopWidth: 2,
-    borderLeftWidth: 2,
-  },
-  cornerTR: {
-    top: 12,
-    right: 12,
-    borderTopWidth: 2,
-    borderRightWidth: 2,
-  },
-  cornerBL: {
     bottom: 12,
-    left: 12,
-    borderBottomWidth: 2,
-    borderLeftWidth: 2,
-  },
-  cornerBR: {
-    bottom: 12,
-    right: 12,
-    borderBottomWidth: 2,
-    borderRightWidth: 2,
-  },
-  chipsOverlayRow: {
-    position: "absolute",
-    top: 14,
-    left: 14,
-    right: 14,
     flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "center",
+    alignItems: "center",
     gap: 6,
-  },
-  hudChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    backgroundColor: "rgba(255, 255, 255, 0.92)",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: Radii.full,
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.2)",
+    borderColor: Colors.borderHairline,
   },
-  hudChipText: {
-    fontSize: 10,
-    fontFamily: "Mono",
-    color: "#FFFFFF",
+  goldDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: Colors.champagneDeep,
   },
-  warningOverlayBox: {
-    position: "absolute",
-    bottom: 14,
-    left: 14,
-    right: 14,
-    backgroundColor: "rgba(217, 119, 6, 0.95)",
-    borderRadius: Radii.md,
-    padding: 12,
+  stagePillText: {
+    fontFamily: "JakartaSemiBold",
+    fontSize: 12,
+    color: Colors.primary,
+  },
+  emptyPhoto: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 28,
+    gap: 8,
+  },
+  emptyPhotoCircle: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: Colors.champagneSubtle,
+    borderWidth: 1,
+    borderColor: "rgba(197, 168, 128, 0.4)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 4,
+  },
+  emptyPhotoTitle: {
+    fontFamily: "Editorial",
+    fontSize: 17,
+    color: Colors.primary,
+    textAlign: "center",
+  },
+  emptyPhotoSub: {
+    fontFamily: "Jakarta",
+    fontSize: 12,
+    color: Colors.textSecondary,
+    textAlign: "center",
+    lineHeight: 18,
+  },
+  chainedBanner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    backgroundColor: Colors.champagneSubtle,
+    borderRadius: Radii.lg,
+    padding: 13,
+    borderWidth: 1,
+    borderColor: "rgba(197, 168, 128, 0.45)",
+  },
+  chainedTitle: {
+    fontFamily: "JakartaSemiBold",
+    fontSize: 12.5,
+    color: Colors.primary,
+  },
+  chainedSub: {
+    fontFamily: "Jakarta",
+    fontSize: 11.5,
+    color: Colors.textSecondary,
+    lineHeight: 17,
+  },
+  editorialCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radii.lg,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: Colors.borderHairline,
+    gap: 14,
+    ...Shadows.sm,
+  },
+  optionGroup: {
+    gap: 8,
+  },
+  optionLabel: {
+    fontFamily: "JakartaSemiBold",
+    fontSize: 13,
+    color: Colors.textSecondary,
+  },
+  chipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: Radii.full,
+    backgroundColor: Colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: Colors.borderHairline,
+  },
+  chipActive: {
+    backgroundColor: Colors.champagneSubtle,
+    borderColor: Colors.champagne,
+  },
+  chipDisabled: {
+    opacity: 0.45,
+  },
+  chipText: {
+    fontFamily: "JakartaSemiBold",
+    fontSize: 12,
+    color: Colors.textSecondary,
+  },
+  chipTextActive: {
+    color: Colors.primary,
+  },
+  chipTextDisabled: {
+    color: Colors.textMuted,
+  },
+  variantSelectorStack: {
+    gap: 14,
+  },
+  colorHeaderRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 6,
+  },
+  colorSelectedName: {
+    fontFamily: "Jakarta",
+    fontSize: 13,
+    color: Colors.primary,
+  },
+  swatchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 2,
+    paddingRight: 8,
+  },
+  swatchRing: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    padding: 2,
+    borderWidth: 1,
+    borderColor: Colors.borderHairline,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  swatchRingActive: {
+    borderColor: Colors.primary,
+    borderWidth: 2,
+  },
+  swatchColor: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(15, 23, 42, 0.14)",
+  },
+  sizeChip: {
+    minWidth: 48,
+    alignItems: "center",
+  },
+  compatNote: {
     flexDirection: "row",
     alignItems: "flex-start",
     gap: 8,
-  },
-  warningOverlayText: {
-    flex: 1,
-    fontSize: 11.5,
-    fontFamily: "Jakarta",
-    color: "#FFFFFF",
-    lineHeight: 16,
-  },
-  sourceButtonsRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginTop: 14,
-  },
-  sourceBtnPrimary: {
-    flex: 1,
-    height: 60,
-    borderRadius: Radii.lg,
-    backgroundColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 4,
-  },
-  sourceBtnPrimaryText: {
-    fontSize: 12,
-    fontFamily: "JakartaSemiBold",
-    color: Colors.primary,
-  },
-  sourceBtnSecondary: {
-    flex: 1,
-    height: 60,
-    borderRadius: Radii.lg,
+    backgroundColor: Colors.champagneSubtle,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: Radii.md,
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.25)",
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 4,
+    borderColor: "rgba(197, 168, 128, 0.35)",
   },
-  sourceBtnSecondaryText: {
-    fontSize: 12,
-    fontFamily: "JakartaSemiBold",
-    color: "#FFFFFF",
-  },
-  processingContainer: {
+  compatNoteText: {
     flex: 1,
-    paddingHorizontal: 20,
-    paddingBottom: 36,
+    fontFamily: "Jakarta",
+    fontSize: 12,
+    color: Colors.primary,
+    lineHeight: 17,
   },
-  scanCanvas: {
-    height: SCREEN_HEIGHT * 0.52,
-    borderRadius: Radii.xl,
-    overflow: "hidden",
-    position: "relative",
-    backgroundColor: "rgba(255, 255, 255, 0.05)",
-  },
-  scanImage: {
-    width: "100%",
-    height: "100%",
-  },
-  scanTintOverlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "rgba(15, 23, 42, 0.4)",
-  },
-  laserScanBeam: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    height: 3,
-    backgroundColor: Colors.champagne,
-    shadowColor: Colors.champagne,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 1,
-    shadowRadius: 10,
-    elevation: 8,
-  },
-  stepsList: {
-    marginTop: 24,
-    gap: 12,
-  },
-  stepItemRow: {
+  photoBtnRow: {
     flexDirection: "row",
-    alignItems: "center",
     gap: 10,
   },
-  stepStatusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "rgba(255, 255, 255, 0.3)",
+  photoPickBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: Radii.md,
+    backgroundColor: Colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: Colors.borderHairline,
   },
-  stepItemText: {
+  photoPickText: {
+    fontFamily: "JakartaSemiBold",
     fontSize: 13,
-    fontFamily: "Mono",
-    color: "rgba(255, 255, 255, 0.65)",
+    color: Colors.primary,
   },
-  gpuNoticeText: {
-    marginTop: "auto",
-    textAlign: "center",
-    fontSize: 11,
+  selectedProductHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  selectedProductThumb: {
+    width: 64,
+    height: 80,
+    borderRadius: Radii.md,
+    backgroundColor: Colors.surfaceMuted,
+  },
+  selectedLabel: {
     fontFamily: "Mono",
-    color: Colors.champagne,
-    opacity: 0.8,
+    fontSize: 10,
+    color: Colors.champagneDeep,
+    letterSpacing: 0.6,
+  },
+  selectedTitle: {
+    fontFamily: "Editorial",
+    fontSize: 17,
+    color: Colors.primary,
+  },
+  selectedPrice: {
+    fontFamily: "Mono",
+    fontSize: 14,
+    color: Colors.primary,
+  },
+  toastPopup: {
+    position: "absolute",
+    top: 14,
+    left: 16,
+    right: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#0F172A",
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderRadius: Radii.lg,
+    borderWidth: 1,
+    borderColor: "rgba(197, 168, 128, 0.45)",
+    zIndex: 999,
+    ...Shadows.toast,
+  },
+  toastPopupText: {
+    flex: 1,
+    fontFamily: "JakartaSemiBold",
+    fontSize: 12.5,
+    color: "#FFFFFF",
+    lineHeight: 17,
   },
 });

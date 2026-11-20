@@ -98,8 +98,9 @@ export const Explore = memo(function Explore() {
     router.push({
       pathname: "/try-on",
       params: {
-        variantId: item.sku || item.id,
+        productId: item.id,
         category: item.vtonCategory,
+        gender: item.gender,
       },
     });
   };
@@ -185,7 +186,7 @@ export const Explore = memo(function Explore() {
                 router.push({
                   pathname: "/try-on",
                   params: {
-                    variantId: newestItems[0]?.sku || "SKU-WAOGILE-EN-S-001",
+                    productId: newestItems[0]?.id,
                     category: "upper_body",
                   },
                 })
@@ -586,14 +587,14 @@ export const Explore = memo(function Explore() {
                 router.push({
                   pathname: "/try-on",
                   params: {
-                    variantId: newestItems[0]?.sku || "SKU-WAOGILE-EN-S-001",
+                    productId: newestItems[0]?.id,
                     category: "upper_body",
                   },
                 })
               }
               style={st.comboTryBtn}
             >
-              <Text style={st.comboTryBtnText}>Ướm thử cả Set AI</Text>
+              <Text style={st.comboTryBtnText}>Mở phòng thử đồ</Text>
             </Pressable>
           </View>
         </View>

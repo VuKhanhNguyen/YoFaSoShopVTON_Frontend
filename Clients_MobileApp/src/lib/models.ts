@@ -68,6 +68,7 @@ export type Product = {
     colors?: string;
     cover?: boolean;
     position?: number;
+    role?: string;
   }[];
 };
 

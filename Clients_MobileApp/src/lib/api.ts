@@ -135,8 +135,15 @@ async function restoreSavedSession(): Promise<User | null> {
     return null;
   }
 }
-export const imageSource = (assetId: string) => ({
-  uri: `${BASE_URL}/assets/${encodeURIComponent(assetId)}/content`,
+const encodeAssetPath = (assetId: string) =>
+  assetId
+    .split("/")
+    .filter((segment) => segment.length > 0)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+
+export const imageSource = (assetId: string, thumbnail = false) => ({
+  uri: `${BASE_URL}/assets/${encodeAssetPath(assetId)}/content${thumbnail ? "?thumbnail=true" : ""}`,
   headers: current
     ? { Authorization: `Bearer ${current.accessToken}` }
     : undefined,

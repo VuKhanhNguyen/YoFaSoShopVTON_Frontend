@@ -28,7 +28,7 @@ const slides = [
     image: EditorialImages.onboard1,
     icon: "sparkles-outline" as const,
     title: "Thử đồ ảo AI chuẩn vóc dáng",
-    tag: "OOTDiffusion · VITON-HD & DressCode",
+    tag: "FASHN v1.6 · YOLO26-Pose",
     desc: "Tải một tấm ảnh, AI mặc thử trang phục lên chính bạn — đúng phom dáng, chuẩn từng nếp vải và màu sắc thực tế.",
   },
   {

@@ -13,7 +13,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSession } from "@/lib/session";
@@ -56,6 +56,11 @@ function FormField({ label, required, error, children }: FormFieldProps) {
 }
 
 export default function AuthScreen() {
+  const { returnToFitting } = useLocalSearchParams<{ returnToFitting?: string }>();
+  const finishAuth = () => {
+    if (returnToFitting === "1" && router.canGoBack()) router.back();
+    else router.replace("/(shop)");
+  };
   const { setUser } = useSession();
   const [tab, setTab] = useState<"login" | "register">("login");
   const [isForgotMode, setIsForgotMode] = useState(false);
@@ -187,7 +192,7 @@ export default function AuthScreen() {
       );
       await AsyncStorage.setItem("yofaso.onboarding.v1", "seen").catch(() => {});
       setUser(u);
-      router.replace("/(shop)");
+      finishAuth();
     } catch (e: any) {
       const msg = e.message || "Tên đăng nhập hoặc mật khẩu không chính xác.";
       setLoginErrors({
@@ -288,7 +293,7 @@ export default function AuthScreen() {
       );
       await AsyncStorage.setItem("yofaso.onboarding.v1", "seen").catch(() => {});
       setUser(u);
-      router.replace("/(shop)");
+      finishAuth();
     } catch (e: any) {
       const msg = e.message || "Không thể đăng ký tài khoản. Vui lòng kiểm tra lại thông tin.";
       const lower = msg.toLowerCase();

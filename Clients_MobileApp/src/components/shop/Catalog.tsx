@@ -123,6 +123,7 @@ export const Catalog = memo(function Catalog({
           if (!hasColor) return false;
         }
         if (selectedFit && p.formDang !== selectedFit) return false;
+        if (selectedPattern && p.hoaTiet !== selectedPattern) return false;
         return true;
       });
 
@@ -161,7 +162,7 @@ export const Catalog = memo(function Catalog({
 
       return { items: mapped, total: mockTotal };
     },
-    [search, selectedCategory, selectedColor, selectedFit]
+    [search, selectedCategory, selectedColor, selectedFit, selectedPattern]
   );
 
   // Fetch Catalog data (Full paginated feed)
@@ -264,7 +265,11 @@ export const Catalog = memo(function Catalog({
   const handleTryOnProduct = (item: UnifiedProduct) => {
     router.push({
       pathname: "/try-on",
-      params: { variantId: item.sku || item.id, category: item.vtonCategory },
+      params: {
+        productId: item.id,
+        category: item.vtonCategory,
+        gender: item.gender,
+      },
     });
   };
 
@@ -435,9 +440,11 @@ export const Catalog = memo(function Catalog({
                   : "Đầm Liền Thân"}
               </Text>
               <Text style={st.sectionCount}>
-                {totalCount > 0
+                {loading
+                  ? "Đang tải dữ liệu..."
+                  : totalCount > 0
                   ? `Hiển thị ${items.length} / ${totalCount} sản phẩm`
-                  : "Đang tải dữ liệu..."}
+                  : "0 sản phẩm"}
               </Text>
             </View>
 
@@ -457,6 +464,21 @@ export const Catalog = memo(function Catalog({
               </Text>
             </Pressable>
           </View>
+        }
+        ListEmptyComponent={
+          !loading ? (
+            <View style={st.emptyBox}>
+              <Ionicons name="shirt-outline" size={40} color={Colors.textMuted} />
+              <Text style={st.emptyTitle}>Không tìm thấy sản phẩm phù hợp</Text>
+              <Text style={st.emptySub}>
+                Không có thiết kế nào khớp với các bộ lọc bạn đã chọn. Thử đổi danh mục hoặc đặt lại bộ lọc.
+              </Text>
+            </View>
+          ) : (
+            <View style={st.emptyBox}>
+              <ActivityIndicator size="large" color={Colors.champagneDeep} />
+            </View>
+          )
         }
         ListFooterComponent={
           <View style={{ paddingTop: 16, paddingBottom: 80, gap: 12 }}>
@@ -934,5 +956,25 @@ const st = StyleSheet.create({
     fontSize: 13,
     fontFamily: "JakartaSemiBold",
     color: "#FFFFFF",
+  },
+  emptyBox: {
+    paddingVertical: 48,
+    paddingHorizontal: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyTitle: {
+    marginTop: 12,
+    fontSize: 14,
+    fontFamily: "JakartaSemiBold",
+    color: Colors.textPrimary,
+  },
+  emptySub: {
+    marginTop: 6,
+    fontSize: 12,
+    fontFamily: "Jakarta",
+    color: Colors.textMuted,
+    textAlign: "center",
+    lineHeight: 18,
   },
 });

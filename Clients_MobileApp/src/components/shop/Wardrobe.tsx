@@ -1,368 +1,305 @@
-import { memo, useState } from "react";
-import {
-  Dimensions,
-  Image,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
-import { router } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
+import { AppState, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { router, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import QRCode from "react-native-qrcode-svg";
 import { useResource } from "@/hooks/use-resource";
+import { PrivateImage } from "./PrivateImage";
+import { ShopHeader } from "./ShopHeader";
 import { useSession } from "@/lib/session";
-import type { Row } from "@/lib/models";
+import { isPending, statusLabel, type TryOnSession } from "@/lib/try-on";
 import { Colors, Radii, Shadows } from "@/constants/theme";
-import { EditorialImages } from "@/lib/catalog-data";
-import { EmptyState, Sheet } from "@/components/shop/ui";
-import { ShopHeader } from "@/components/shop/ShopHeader";
+import { Button, EmptyState, State } from "./ui";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const CARD_WIDTH = (SCREEN_WIDTH - 48) / 2;
+const PAGE_SIZE = 20;
 
-export interface WardrobeSessionItem {
-  sessionId: string;
-  score: number;
-  itemsSummary: string;
-  fittedImage: any;
-  date: string;
+function scoreTone(score: number) {
+  if (score >= 85) return { text: Colors.statusSuccess, bg: Colors.statusSuccessSubtle };
+  if (score >= 70) return { text: Colors.statusInfo, bg: Colors.statusInfoSubtle };
+  if (score >= 50) return { text: Colors.statusWarning, bg: Colors.statusWarningSubtle };
+  return { text: Colors.statusDanger, bg: Colors.statusDangerSubtle };
 }
 
-const MOCK_WARDROBE: WardrobeSessionItem[] = [
-  {
-    sessionId: "YFS-SES-948201",
-    score: 95,
-    itemsSummary: "Áo Sơ Mi Lụa + Quần Âu Ống Rộng",
-    fittedImage: EditorialImages.shirtModel,
-    date: "14:30 01/11/2026",
-  },
-  {
-    sessionId: "YFS-SES-712390",
-    score: 91,
-    itemsSummary: "Đầm Liền Cổ Blazer Linen",
-    fittedImage: EditorialImages.dress,
-    date: "10:15 28/10/2026",
-  },
-  {
-    sessionId: "YFS-SES-663812",
-    score: 88,
-    itemsSummary: "Áo Dệt Kim Kẻ Sọc + Chân Váy Chữ A",
-    fittedImage: EditorialImages.stripe,
-    date: "16:45 25/10/2026",
-  },
-];
-
-export const Wardrobe = memo(function Wardrobe() {
+export function Wardrobe() {
   const { user } = useSession();
-  const state = useResource<Row[]>(user ? "/try-on/sessions" : null);
+  const [page, setPage] = useState(0);
+  const state = useResource<TryOnSession[]>(user ? "/try-on/sessions?size=" + PAGE_SIZE + "&page=" + page : null);
+  const { reload } = state;
+  const [focused, setFocused] = useState(false);
+  const [foreground, setForeground] = useState(AppState.currentState === "active");
 
-  const [selectedPass, setSelectedPass] = useState<WardrobeSessionItem | null>(null);
+  useFocusEffect(useCallback(() => {
+    setFocused(true);
+    reload();
+    return () => setFocused(false);
+  }, [reload]));
 
-  // If backend returns sessions, map them, otherwise fallback to mock sessions
-  const sessions: WardrobeSessionItem[] =
-    state.data && state.data.length > 0
-      ? state.data.map((r) => ({
-          sessionId: String(r.sessionId || r.operationId || "YFS-SES"),
-          score: Number(r.projectedScore || 92),
-          itemsSummary: String(r.productName || "Set đồ YoFaSo"),
-          fittedImage: EditorialImages.shirtModel,
-          date: r.createdAt
-            ? new Date(String(r.createdAt)).toLocaleDateString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })
-            : "Hôm nay",
-        }))
-      : MOCK_WARDROBE;
+  useEffect(() => {
+    const listener = AppState.addEventListener("change", next => {
+      setForeground(next === "active");
+      if (next === "active" && focused && user) reload();
+    });
+    return () => listener.remove();
+  }, [focused, reload, user]);
+
+  useEffect(() => {
+    if (!user || !focused || !foreground || state.loading || !state.data?.some(item => isPending(item.status))) return;
+    const timer = setTimeout(reload, state.error ? 12000 : 3500);
+    return () => clearTimeout(timer);
+  }, [user, focused, foreground, state.data, state.loading, state.error, reload]);
 
   return (
-    <View style={st.container}>
-      {/* Reusable Shop Header */}
+    <View style={st.page}>
       <ShopHeader
         showLogo
         title="YoFaSo"
         badgeText="Your Fashion, Your Own Soul"
+      />
+
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={st.scrollContent}
       >
-        <View style={st.headerBanner}>
-          <Text style={st.headerTitle}>Tủ đồ Thử VTON</Text>
-          <Text style={st.headerSub}>
-            {sessions.length} set trang phục đã ướm thử cùng Trợ lý Stylist
+        <View style={st.titleBanner}>
+          <View style={st.titleRow}>
+            <Text style={st.sectionTitle}>Tủ đồ VTON</Text>
+            <View style={st.studioPill}>
+              <Text style={st.studioPillText}>AI Studio</Text>
+            </View>
+          </View>
+          <Text style={st.sectionSubtitle}>
+            Lưu trữ các phiên ướm thử & bảng điểm Stylist
           </Text>
         </View>
-      </ShopHeader>
+        {!user ? (
+          <EmptyState
+            title="Đăng nhập để mở tủ đồ"
+            body="Lưu lại toàn bộ kết quả thử đồ AI, so sánh trước sau và nhận gợi ý phối đồ cá nhân."
+            cta="Đăng nhập ngay"
+            onCta={() => router.push("/auth")}
+          />
+        ) : (
+          <>
+            <State loading={!state.data && state.loading} error={state.error} retry={reload} />
 
-      {sessions.length === 0 ? (
-        <EmptyState
-          title="Tủ đồ thử của bạn còn trống"
-          body="Chọn một thiết kế có nhãn AI VTON Ready và ướm thử trên vóc dáng của bạn — kết quả và vé O2O sẽ được lưu ở đây."
-          cta="Khám phá bộ sưu tập ngay"
-          onCta={() => router.replace("/(shop)")}
-          icon={<Ionicons name="shirt-outline" size={38} color={Colors.champagneDeep} />}
-        />
-      ) : (
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={st.gridContent}
-        >
-          <View style={st.cardsGrid}>
-            {sessions.map((ses) => {
-              const isExcellent = ses.score >= 90;
-              return (
-                <Pressable
-                  key={ses.sessionId}
-                  onPress={() => setSelectedPass(ses)}
-                  style={st.sessionCard}
-                >
-                  <View style={st.imageBox}>
-                    <Image source={ses.fittedImage} style={st.cardImg} resizeMode="cover" />
-                    <View style={st.scoreBadgeOverlay}>
-                      <Text
-                        style={[
-                          st.scoreBadgeText,
-                          {
-                            color: isExcellent
-                              ? Colors.statusSuccess
-                              : Colors.statusWarning,
-                          },
-                        ]}
-                      >
-                        {ses.score}đ
-                      </Text>
-                    </View>
-                  </View>
-                  <View style={st.cardBottom}>
-                    <Text style={st.sessionIdText}>{ses.sessionId}</Text>
-                    <Text numberOfLines={1} style={st.itemsSummaryText}>
-                      {ses.itemsSummary}
-                    </Text>
-                    <View style={st.passLinkRow}>
-                      <Text style={st.passLinkText}>Xem vé O2O</Text>
-                      <Ionicons name="arrow-forward" size={12} color={Colors.champagneDeep} />
-                    </View>
-                  </View>
-                </Pressable>
-              );
-            })}
-          </View>
-        </ScrollView>
-      )}
-
-      {/* Digital Fitting Pass Sheet Modal */}
-      <Sheet
-        visible={Boolean(selectedPass)}
-        onClose={() => setSelectedPass(null)}
-        title="Vé Thử Đồ Tại Quầy (Digital Fitting Pass)"
-      >
-        {selectedPass && (
-          <View style={st.ticketWrapper}>
-            <View style={st.ticketTop}>
-              <Text style={st.ticketBrandName}>YoFaSo Atelier</Text>
-              <Text style={st.ticketBadge}>O2O PASS</Text>
-            </View>
-
-            <View style={st.qrBox}>
-              <QRCode
-                value={`YOFASO-O2O|${selectedPass.sessionId}`}
-                size={170}
-                color={Colors.primary}
-                backgroundColor="#FFFFFF"
+            {state.data?.length === 0 && (
+              <EmptyState
+                title="Tủ đồ VTON còn trống"
+                body="Hãy chọn một sản phẩm yêu thích và bấm Thử đồ để xem phối cảnh thực tế."
+                cta="Mở phòng thử đồ"
+                onCta={() => router.push("/try-on")}
               />
+            )}
+
+            <View style={st.grid}>
+              {state.data?.map(item => {
+                const pending = isPending(item.status);
+                const tone = item.score != null ? scoreTone(item.score) : null;
+                return (
+                  <TouchableOpacity
+                    key={item.sessionId}
+                    style={st.card}
+                    activeOpacity={0.86}
+                    onPress={() => router.push({ pathname: "/session/[id]", params: { id: item.sessionId } })}
+                  >
+                    <View style={st.thumbWrapper}>
+                      {item.resultAssetId ? (
+                        <PrivateImage assetId={item.resultAssetId} thumbnail style={st.thumb} resizeMode="cover" />
+                      ) : item.personAssetId ? (
+                        <PrivateImage assetId={item.personAssetId} thumbnail style={st.thumb} resizeMode="cover" />
+                      ) : (
+                        <View style={[st.thumb, st.emptyThumb]}>
+                          <Ionicons name="shirt-outline" size={28} color={Colors.textMuted} />
+                        </View>
+                      )}
+
+                      {pending && (
+                        <View style={st.pendingPill}>
+                          <View style={st.pendingDot} />
+                          <Text style={st.pendingPillText}>
+                            {item.progress && item.progress > 0 ? `${item.progress}%` : "Đang xử lý"}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+
+                    <View style={st.cardBody}>
+                      <View style={st.cardMeta}>
+                        <Text style={st.sessionId} numberOfLines={1}>{item.sessionId}</Text>
+                        {tone && item.score != null ? (
+                          <View style={[st.scoreBadge, { backgroundColor: tone.bg }]}>
+                            <Text style={[st.scoreText, { color: tone.text }]}>{item.score}đ</Text>
+                          </View>
+                        ) : (
+                          <Text style={st.statusText}>{statusLabel(item.status)}</Text>
+                        )}
+                      </View>
+                      <Text style={st.productName} numberOfLines={1}>{item.productName}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
-            <Text style={st.ticketBarcodeText}>{selectedPass.sessionId}</Text>
 
-            <View style={st.dashedLine} />
-
-            <View style={st.ticketDetailsBlock}>
-              <View style={{ flexDirection: "row", gap: 12, alignItems: "center" }}>
-                <Image
-                  source={selectedPass.fittedImage}
-                  style={st.ticketThumb}
-                  resizeMode="cover"
-                />
-                <View style={{ flex: 1 }}>
-                  <Text style={st.ticketSetTitle}>{selectedPass.itemsSummary}</Text>
-                  <Text style={st.ticketScoreHighlight}>
-                    Điểm thẩm mỹ Stylist: {selectedPass.score}/100
-                  </Text>
-                  <Text style={st.ticketDate}>Tạo lúc: {selectedPass.date}</Text>
-                </View>
+            {(page > 0 || state.data?.length === PAGE_SIZE) && (
+              <View style={st.paginationRow}>
+                {page > 0 && <Button secondary title="Trang trước" onPress={() => setPage(page - 1)} style={{ flex: 1 }} />}
+                {state.data?.length === PAGE_SIZE && <Button secondary title="Trang sau" onPress={() => setPage(page + 1)} style={{ flex: 1 }} />}
               </View>
-            </View>
-
-            <Text style={st.ticketNotice}>
-              Đưa mã QR này cho Thu ngân hoặc Nhân viên quầy YoFaSo Shop để lấy đúng set đồ này thử đồ thực tế!
-            </Text>
-          </View>
+            )}
+          </>
         )}
-      </Sheet>
+      </ScrollView>
     </View>
   );
-});
+}
 
 const st = StyleSheet.create({
-  container: {
+  page: {
     flex: 1,
     backgroundColor: Colors.canvas,
   },
-  headerBanner: {
-    marginTop: 6,
-    marginBottom: 4,
+  newTryBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.champagneSubtle,
+    borderWidth: 1,
+    borderColor: "rgba(197, 168, 128, 0.45)",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  headerTitle: {
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 112,
+    gap: 16,
+  },
+  titleBanner: {
+    gap: 4,
+  },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  sectionTitle: {
     fontSize: 22,
     fontFamily: "Editorial",
     color: Colors.primary,
+    letterSpacing: -0.3,
   },
-  headerSub: {
+  studioPill: {
+    backgroundColor: Colors.champagneSubtle,
+    paddingHorizontal: 8,
+    paddingVertical: 2.5,
+    borderRadius: Radii.full,
+    borderWidth: 1,
+    borderColor: "rgba(197, 168, 128, 0.4)",
+  },
+  studioPillText: {
+    fontSize: 10,
+    fontFamily: "Mono",
+    color: Colors.champagneDeep,
+    fontWeight: "700",
+    letterSpacing: 0.3,
+  },
+  sectionSubtitle: {
     fontSize: 12,
     fontFamily: "Jakarta",
     color: Colors.textSecondary,
-    marginTop: 3,
   },
-  gridContent: {
-    padding: 16,
-    paddingBottom: 100,
-  },
-  cardsGrid: {
+  grid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 12,
+    justifyContent: "space-between",
+    rowGap: 14,
   },
-  sessionCard: {
-    width: CARD_WIDTH,
+  card: {
+    width: "48.2%",
     backgroundColor: Colors.surface,
     borderRadius: Radii.lg,
+    overflow: "hidden",
     borderWidth: 1,
     borderColor: Colors.borderHairline,
-    overflow: "hidden",
-    ...Shadows.dock,
+    ...Shadows.sm,
   },
-  imageBox: {
+  thumbWrapper: {
     width: "100%",
-    aspectRatio: 0.85,
+    aspectRatio: 3 / 4,
     backgroundColor: Colors.surfaceMuted,
     position: "relative",
   },
-  cardImg: {
+  thumb: {
     width: "100%",
     height: "100%",
   },
-  scoreBadgeOverlay: {
+  emptyThumb: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pendingPill: {
     position: "absolute",
     top: 8,
-    right: 8,
+    left: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
     backgroundColor: "rgba(255, 255, 255, 0.92)",
-    paddingHorizontal: 7,
-    paddingVertical: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     borderRadius: Radii.full,
     borderWidth: 1,
-    borderColor: "rgba(15, 23, 42, 0.08)",
+    borderColor: "rgba(197, 168, 128, 0.5)",
   },
-  scoreBadgeText: {
+  pendingDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.champagneDeep,
+  },
+  pendingPillText: {
+    fontFamily: "Mono",
+    fontSize: 10,
+    color: Colors.primary,
+  },
+  cardBody: {
+    padding: 10,
+    gap: 4,
+  },
+  cardMeta: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 6,
+  },
+  sessionId: {
+    fontSize: 10,
+    color: Colors.textSecondary,
+    fontFamily: "Mono",
+    flex: 1,
+  },
+  scoreBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: Radii.sm,
+  },
+  scoreText: {
     fontSize: 11,
     fontFamily: "Mono",
-    fontWeight: "700",
   },
-  cardBottom: {
-    padding: 10,
-    gap: 3,
-  },
-  sessionIdText: {
-    fontSize: 9.5,
-    fontFamily: "Mono",
+  statusText: {
+    fontSize: 10,
+    fontFamily: "Jakarta",
     color: Colors.textMuted,
   },
-  itemsSummaryText: {
-    fontSize: 12,
+  productName: {
+    fontSize: 13,
     fontFamily: "JakartaSemiBold",
     color: Colors.primary,
   },
-  passLinkRow: {
+  paginationRow: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    marginTop: 4,
-  },
-  passLinkText: {
-    fontSize: 11,
-    fontFamily: "JakartaSemiBold",
-    color: Colors.champagneDeep,
-  },
-  ticketWrapper: {
-    backgroundColor: Colors.primary,
-    borderRadius: Radii.xl,
-    padding: 20,
-    marginVertical: 8,
-  },
-  ticketTop: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "baseline",
-    marginBottom: 16,
-  },
-  ticketBrandName: {
-    fontSize: 20,
-    fontFamily: "Editorial",
-    color: "#FFFFFF",
-  },
-  ticketBadge: {
-    fontSize: 10,
-    fontFamily: "Mono",
-    color: Colors.champagne,
-    letterSpacing: 2,
-  },
-  qrBox: {
-    backgroundColor: "#FFFFFF",
-    padding: 16,
-    borderRadius: Radii.lg,
-    alignSelf: "center",
-  },
-  ticketBarcodeText: {
-    fontSize: 13,
-    fontFamily: "Mono",
-    color: "#FFFFFF",
-    textAlign: "center",
-    letterSpacing: 2,
-    marginTop: 12,
-  },
-  dashedLine: {
-    height: 1,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.2)",
-    borderStyle: "dashed",
-    marginVertical: 14,
-  },
-  ticketDetailsBlock: {
-    gap: 8,
-  },
-  ticketThumb: {
-    width: 54,
-    height: 68,
-    borderRadius: Radii.md,
-  },
-  ticketSetTitle: {
-    fontSize: 13,
-    fontFamily: "JakartaSemiBold",
-    color: "#FFFFFF",
-  },
-  ticketScoreHighlight: {
-    fontSize: 12,
-    fontFamily: "JakartaSemiBold",
-    color: Colors.statusSuccess,
-    marginTop: 2,
-  },
-  ticketDate: {
-    fontSize: 11,
-    fontFamily: "Mono",
-    color: "rgba(255, 255, 255, 0.65)",
-    marginTop: 2,
-  },
-  ticketNotice: {
-    fontSize: 11.5,
-    fontFamily: "Jakarta",
-    color: Colors.champagne,
-    textAlign: "center",
-    marginTop: 16,
-    lineHeight: 16,
+    gap: 12,
+    marginTop: 8,
   },
 });
-

@@ -385,8 +385,10 @@ export default function ProductDetailScreen() {
     router.push({
       pathname: "/try-on",
       params: {
-        variantId: activeSku,
+        productId: id,
+        variantId: currentVariantByOption?.variantId,
         category: productCategory,
+        gender: p?.gender || (isMen ? "NAM" : "NU"),
       },
     });
   };

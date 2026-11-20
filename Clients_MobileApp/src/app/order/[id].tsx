@@ -15,7 +15,6 @@ import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router
 import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
-import * as MediaLibrary from "expo-media-library/legacy";
 import { api, publicUrl } from "@/lib/api";
 import { useResource } from "@/hooks/use-resource";
 import type { Row } from "@/lib/models";
@@ -76,9 +75,10 @@ export default function OrderDetailScreen() {
         if (response.status !== 200) {
           throw new Error("Không tải được ảnh mã QR.");
         }
+        const MediaLibrary = await import("expo-media-library");
         const { granted } = await MediaLibrary.requestPermissionsAsync(true);
         if (granted) {
-          await MediaLibrary.createAssetAsync(local);
+          await MediaLibrary.Asset.create(local);
           setDownloadNotice("Đã lưu mã QR vào thư viện ảnh!");
           Alert.alert("Thành công", "Đã lưu mã QR thanh toán vào thư viện ảnh của bạn!");
         } else if (await Sharing.isAvailableAsync()) {

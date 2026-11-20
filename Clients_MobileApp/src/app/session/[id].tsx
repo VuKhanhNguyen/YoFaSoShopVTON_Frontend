@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AccessibilityInfo,
+  Alert,
   Animated,
+  AppState,
   Dimensions,
   Image,
-  PanResponder,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -11,880 +14,1333 @@ import {
   Text,
   View,
 } from "react-native";
-import { router, Stack, useLocalSearchParams } from "expo-router";
+import { Stack, router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import * as ImagePicker from "expo-image-picker";
+import { File } from "expo-file-system";
 import { Ionicons } from "@expo/vector-icons";
-import QRCode from "react-native-qrcode-svg";
-import { api, imageSource } from "@/lib/api";
+import { api } from "@/lib/api";
 import { useResource } from "@/hooks/use-resource";
-import type { Row } from "@/lib/models";
-import { Colors, Fonts, Radii, Shadows } from "@/constants/theme";
+import { useSession } from "@/lib/session";
 import {
-  EditorialImages,
-  SAN_PHAM_MOCK,
-  SanPham,
-  formatVND,
-} from "@/lib/catalog-data";
-import {
-  chamDiem,
-  diemTong,
-  goiYBanKem,
-  loiNhanXet,
-  nhanXepHang,
-  xepHang,
-  MonDo,
-} from "@/lib/vton-engine";
-import { Button, Sheet, colors } from "@/components/shop/ui";
+  checkTryOnCompatibility,
+  isComplete,
+  isPending,
+  statusLabel,
+  type TryOnSession,
+} from "@/lib/try-on";
+import { Colors, Radii, Shadows } from "@/constants/theme";
+import { Button, Notice, Sheet, State } from "@/components/shop/ui";
+import { BeforeAfterStage } from "@/components/shop/BeforeAfterStage";
+import { OutfitScoring, type RecommendedTryOnItem } from "@/components/shop/OutfitScoring";
+import { ResultActions, exportResultImage } from "@/components/shop/ResultActions";
+import { PrivateImage } from "@/components/shop/PrivateImage";
+import { FittingPassModal } from "@/components/shop/FittingPassModal";
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
+const SCREEN_WIDTH = Dimensions.get("window").width;
+const STAGE_HEIGHT = 420;
+
+const STAGE_STEPS = [
+  { key: "VALIDATING", label: "Nhận diện tư thế & khung hình", minProgress: 5 },
+  { key: "UPLOADING", label: "Chuẩn hóa ảnh & gửi dữ liệu tới AI", minProgress: 20 },
+  { key: "VTON_RENDER", label: "Ướm trang phục & giữ nếp vải", minProgress: 38 },
+  { key: "SAVING", label: "Tải ảnh sắc nét & lưu vào Tủ đồ", minProgress: 84 },
+];
+
+function stageStepIndex(stage?: string): number {
+  switch (stage) {
+    case "VALIDATING":
+      return 0;
+    case "PREPROCESSING":
+    case "UPLOADING":
+      return 1;
+    case "VTON_RENDER":
+      return 2;
+    case "DOWNLOADING":
+    case "SAVING":
+      return 3;
+    case "COMPLETED":
+      return 4;
+    default:
+      return -1;
+  }
+}
+
+function stageCeiling(stage?: string, status?: string): number {
+  switch (stage) {
+    case "QUEUED":
+      return 4;
+    case "VALIDATING":
+      return 18;
+    case "PREPROCESSING":
+      return 27;
+    case "UPLOADING":
+      return 37;
+    case "VTON_RENDER":
+      return 81;
+    case "DOWNLOADING":
+      return 91;
+    case "SAVING":
+      return 98;
+    default:
+      return status === "PROCESSING" || status === "DANG_RENDER_GPU" ? 81 : 4;
+  }
+}
+
+function stageTitleFallback(stage?: string, status?: string): string {
+  switch (stage) {
+    case "QUEUED":
+      return "Đang xếp hàng chờ xử lý...";
+    case "VALIDATING":
+      return "YOLO26-Pose đang kiểm tra tư thế & khung hình...";
+    case "PREPROCESSING":
+      return "Đang chuẩn hóa ảnh người & trang phục...";
+    case "UPLOADING":
+      return "Đang tải ảnh lên hệ thống AI VTON...";
+    case "VTON_RENDER":
+      return "Hệ thống AI đang ướm trang phục lên cơ thể...";
+    case "DOWNLOADING":
+      return "Đang tải ảnh kết quả chất lượng cao...";
+    case "SAVING":
+      return "Đang hoàn tất & lưu vào Tủ đồ VTON...";
+    default:
+      return status === "PROCESSING" || status === "DANG_RENDER_GPU"
+        ? "Đang xử lý ảnh trên hệ thống AI..."
+        : "Đang xếp hàng chờ xử lý...";
+  }
+}
 
 export default function SessionResultScreen() {
-  const { id, variantId, before } = useLocalSearchParams<{
-    id: string;
-    variantId?: string;
-    before?: string;
-  }>();
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const { user } = useSession();
+  const path = user && id ? "/try-on/sessions/" + encodeURIComponent(id) : null;
+  const state = useResource<TryOnSession>(path);
+  const { reload } = state;
 
-  // Find product info
-  const product =
-    SAN_PHAM_MOCK.find((p) => p.maSanPham === variantId) || SAN_PHAM_MOCK[0];
-  const primaryItem: MonDo = {
-    p: product,
-    b: product.bienThe[0],
-  };
+  const [focused, setFocused] = useState(false);
+  const [foreground, setForeground] = useState(AppState.currentState === "active");
+  const [busy, setBusy] = useState(false);
+  const [replacing, setReplacing] = useState(false);
+  const [actionError, setActionError] = useState("");
+  const [imageError, setImageError] = useState(false);
+  const [imageErrorDetail, setImageErrorDetail] = useState("");
+  const [imageAttempt, setImageAttempt] = useState(0);
 
-  const [secondaryItem, setSecondaryItem] = useState<MonDo | undefined>(undefined);
-  const [splitPos, setSplitPos] = useState(50); // 0 to 100 percentage
-  const [zoom, setZoom] = useState(false);
-  const [scoreSheetExpanded, setScoreSheetExpanded] = useState(true);
-  const [fittingPassOpen, setFittingPassOpen] = useState(false);
-  const [toastMessage, setToastMessage] = useState("");
+  // Modals & Chained Try-On state
+  const [passOpen, setPassOpen] = useState(false);
+  const [zoomOpen, setZoomOpen] = useState(false);
+  const [liveScore, setLiveScore] = useState<
+    { total: number; tier?: string; tierLabel?: string } | undefined
+  >(undefined);
+  const [chainTarget, setChainTarget] = useState<RecommendedTryOnItem | null>(null);
+  const [chainBusy, setChainBusy] = useState(false);
+  const [chainSaveMsg, setChainSaveMsg] = useState("");
 
-  // Photos
-  const beforePhoto = before || Image.resolveAssetSource(EditorialImages.onboard1).uri;
-  // After photo (fitted model image or primary variant model photo)
-  const afterPhoto =
-    primaryItem.b.anhNguoiMau?.[0]
-      ? typeof primaryItem.b.anhNguoiMau[0] === "number"
-        ? Image.resolveAssetSource(primaryItem.b.anhNguoiMau[0]).uri
-        : primaryItem.b.anhNguoiMau[0]
-      : typeof primaryItem.p.hinhAnh === "number"
-      ? Image.resolveAssetSource(primaryItem.p.hinhAnh).uri
-      : primaryItem.p.hinhAnh;
+  // Floating popup toast
+  const [toast, setToast] = useState("");
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Aesthetic Scoring Calculation (40-40-20)
-  const scoreData = chamDiem(primaryItem, secondaryItem);
-  const totalScore = diemTong(scoreData);
-  const rank = xepHang(totalScore);
-  const isHighQuality = totalScore >= 85;
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(""), 3400);
+  }, []);
 
-  // Cross-sell recommendations
-  const suggestions = goiYBanKem(primaryItem, SAN_PHAM_MOCK).filter(
-    (g) => g.p.maSanPham !== secondaryItem?.p.maSanPham
+  useEffect(() => {
+    return () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    setLiveScore(undefined);
+    setChainTarget(null);
+    setChainSaveMsg("");
+  }, [id]);
+
+  // Realtime elapsed timer & smooth GPU-accelerated progress bar
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [displayProgress, setDisplayProgress] = useState(0);
+  const [trackWidth, setTrackWidth] = useState(0);
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const progressAnim = useRef(new Animated.Value(0)).current;
+  const scanAnim = useRef(new Animated.Value(0)).current;
+
+  const session = state.data?.sessionId === id && user ? state.data : undefined;
+  const pending = !!session && isPending(session.status);
+  const serverProgress = Math.max(0, Math.min(100, Number(session?.progress ?? 0)));
+  const currentStage = session?.stage;
+  const currentStatus = session?.status;
+
+  useEffect(() => {
+    if (!pending || (currentStatus === "QUEUED" && serverProgress === 0)) {
+      setDisplayProgress(serverProgress);
+      progressAnim.setValue(serverProgress);
+    }
+  }, [id, pending, currentStatus, serverProgress, progressAnim]);
+
+  useEffect(() => {
+    if (!pending) return;
+    setDisplayProgress((prev) => Math.max(prev, serverProgress));
+  }, [pending, serverProgress]);
+
+  useEffect(() => {
+    if (!pending) return;
+    Animated.timing(progressAnim, {
+      toValue: displayProgress,
+      duration: 420,
+      useNativeDriver: true,
+    }).start();
+  }, [pending, displayProgress, progressAnim]);
+
+  useEffect(() => {
+    if (!pending) return;
+    setNowMs(Date.now());
+    const ticker = setInterval(() => {
+      setNowMs(Date.now());
+      const ceiling = stageCeiling(currentStage, currentStatus);
+      setDisplayProgress((prev) => {
+        const base = Math.max(prev, serverProgress);
+        return base < ceiling ? base + 1 : base;
+      });
+    }, 1000);
+    return () => clearInterval(ticker);
+  }, [pending, currentStage, currentStatus, serverProgress]);
+
+  useEffect(() => {
+    if (!pending || reduceMotion) return;
+    const scanLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(scanAnim, { toValue: 1, duration: 1900, useNativeDriver: true }),
+        Animated.timing(scanAnim, { toValue: 0, duration: 1900, useNativeDriver: true }),
+      ])
+    );
+    scanLoop.start();
+    return () => scanLoop.stop();
+  }, [pending, reduceMotion, scanAnim]);
+
+  useFocusEffect(
+    useCallback(() => {
+      setFocused(true);
+      reload();
+      return () => setFocused(false);
+    }, [reload])
   );
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(""), 2200);
-  };
+  useEffect(() => {
+    const listener = AppState.addEventListener("change", (next) => {
+      setForeground(next === "active");
+      if (next === "active" && focused) reload();
+    });
+    return () => listener.remove();
+  }, [focused, reload]);
 
-  // Drag responder for Before/After split handle
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onPanResponderMove: (_, gestureState) => {
-        const newPos = Math.max(
-          5,
-          Math.min(95, ((gestureState.moveX - 18) / (SCREEN_WIDTH - 36)) * 100)
+  useEffect(() => {
+    if (!path || !pending || !focused || !foreground || state.loading) return;
+    const timer = setTimeout(reload, state.error ? 6000 : 1000);
+    return () => clearTimeout(timer);
+  }, [path, pending, focused, foreground, state.loading, state.error, reload]);
+
+  useEffect(() => {
+    let active = true;
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then((value) => {
+        if (active) setReduceMotion(value);
+      })
+      .catch(() => {});
+    const listener = AccessibilityInfo.addEventListener("reduceMotionChanged", (value) => {
+      setReduceMotion(value);
+    });
+    return () => {
+      active = false;
+      listener.remove();
+    };
+  }, []);
+
+  async function control(action: "cancel" | "retry") {
+    if (!path || busy) return;
+    setBusy(true);
+    setActionError("");
+    try {
+      await api(path + "/" + action, "POST", {});
+      reload();
+    } catch (err) {
+      setActionError((err as Error).message);
+      reload();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Req 2: Upload & validate ảnh mới rồi chạy lại ngay trên cùng mã phiên thử đồ. */
+  async function replacePhotoInSession(camera: boolean) {
+    if (!session || replacing || busy) return;
+    setActionError("");
+    try {
+      if (camera && !(await ImagePicker.requestCameraPermissionsAsync()).granted) {
+        const msg = "Cần cấp quyền máy ảnh để chụp ảnh thử đồ.";
+        setActionError(msg);
+        showToast(msg);
+        return;
+      }
+      const options: ImagePicker.ImagePickerOptions = {
+        mediaTypes: ["images"],
+        quality: 0.95,
+      };
+      const selection = camera
+        ? await ImagePicker.launchCameraAsync(options)
+        : await ImagePicker.launchImageLibraryAsync(options);
+      if (selection.canceled || !selection.assets?.[0]) return;
+
+      setReplacing(true);
+      const picked = selection.assets[0];
+      const form = new FormData();
+      form.append("role", "person");
+      form.append("consent", "true");
+      if (Platform.OS === "web") {
+        form.append(
+          "file",
+          picked.file || (await (await fetch(picked.uri)).blob()),
+          picked.fileName || "person.png"
         );
-        setSplitPos(newPos);
+      } else {
+        form.append(
+          "file",
+          new File(picked.uri) as unknown as Blob,
+          picked.fileName || "person.png"
+        );
+      }
+      const uploaded = await api<{ assetId: string }>("/assets", "POST", form);
+
+      const check = await api<{
+        accepted: boolean;
+        personFrame?: string;
+        warnings?: string[];
+        route?: { personFrame?: string; warnings?: string[] };
+      }>("/ai/persons/validate", "POST", {
+        assetId: uploaded.assetId,
+        variantId: session.variantId,
+      });
+
+      const detectedFrame = check.personFrame || check.route?.personFrame;
+      const compat = checkTryOnCompatibility({
+        targetCategory: session.vtonCategory,
+        frame: detectedFrame,
+      });
+      if (!compat.allowed) {
+        setActionError(compat.reason);
+        showToast(compat.reason);
+        return;
+      }
+      if (!check.accepted) {
+        const reason =
+          check.route?.warnings?.[0] ||
+          check.warnings?.[0] ||
+          "Ảnh chưa đạt kiểm tra YOLO26. Vui lòng chọn ảnh khác rõ người hơn.";
+        setActionError(reason);
+        showToast(reason);
+        return;
+      }
+
+      await api(
+        `/try-on/sessions/${encodeURIComponent(session.sessionId)}/replace-person`,
+        "POST",
+        { personAssetId: uploaded.assetId, consent: true }
+      );
+      setImageError(false);
+      setImageAttempt((n) => n + 1);
+      showToast("Đã cập nhật ảnh mới — phiên thử đồ đang xử lý lại!");
+      reload();
+    } catch (err) {
+      const msg = (err as Error).message || "Không thể đổi ảnh cho phiên thử đồ này.";
+      setActionError(msg);
+      showToast(msg);
+    } finally {
+      setReplacing(false);
+    }
+  }
+
+  /** Req 5: Mở lựa chọn 2 phương án thử tiếp món phối đối ứng & chặn tổ hợp không hợp lệ. */
+  function handleRecommendedTry(item: RecommendedTryOnItem) {
+    if (!session) return;
+    if (session.vtonCategory === "dress" || item.category === "dress") {
+      showToast("Nghiêm cấm thử Đầm liền chung với Áo hoặc Quần/Chân váy.");
+      return;
+    }
+    setChainSaveMsg("");
+    setChainTarget(item);
+  }
+
+  async function handleChainWithResultImage() {
+    if (!session || !chainTarget || chainBusy) return;
+    const compat = checkTryOnCompatibility({
+      targetCategory: chainTarget.category,
+      chainedFromCategory: session.vtonCategory,
+      chainedFromFrame: session.personFrame,
+      shopModelId: session.shopModelId,
+    });
+    if (!compat.allowed) {
+      setChainTarget(null);
+      showToast(compat.reason);
+      return;
+    }
+
+    setChainBusy(true);
+    try {
+      const promoted = await api<{
+        personAssetId: string;
+        sourceSessionId: string;
+        sourceCategory: string;
+        personFrame?: string;
+        productGender?: string;
+      }>(`/try-on/sessions/${encodeURIComponent(session.sessionId)}/promote-result`, "POST", {});
+      const target = chainTarget;
+      setChainTarget(null);
+      router.push({
+        pathname: "/try-on",
+        params: {
+          productId: target.productId,
+          variantId: target.variantId,
+          category: target.category,
+          gender: promoted.productGender || session.productGender,
+          mode: "photo",
+          personAssetId: promoted.personAssetId,
+          chainedFromSessionId: session.sessionId,
+          chainedFromCategory: session.vtonCategory,
+          chainedFromFrame: promoted.personFrame || session.personFrame,
+        },
+      });
+    } catch (err) {
+      const msg = (err as Error).message || "Không thể lấy ảnh kết quả sang phiên mới.";
+      setChainTarget(null);
+      showToast(msg);
+    } finally {
+      setChainBusy(false);
+    }
+  }
+
+  async function handleSaveBeforeManualChain() {
+    if (!resultId || chainBusy) return;
+    setChainBusy(true);
+    setChainSaveMsg("");
+    try {
+      const msg = await exportResultImage(resultId, true);
+      setChainSaveMsg(msg);
+      showToast(msg);
+    } catch (err) {
+      const msg = (err as Error).message || "Không thể lưu ảnh kết quả.";
+      setChainSaveMsg(msg);
+      showToast(msg);
+    } finally {
+      setChainBusy(false);
+    }
+  }
+
+  function handleOpenManualChainSession() {
+    if (!session || !chainTarget) return;
+    const target = chainTarget;
+    setChainTarget(null);
+    router.push({
+      pathname: "/try-on",
+      params: {
+        productId: target.productId,
+        variantId: target.variantId,
+        category: target.category,
+        gender: session.productGender,
+        mode: "photo",
       },
-    })
-  ).current;
+    });
+  }
+
+  const resultId = session && isComplete(session.status) ? session.resultAssetId : undefined;
+  const personId = session?.personAssetId;
+  const error = typeof session?.error === "string" ? session.error : session?.error?.message;
+  const qualityFailed = error === "QUALITY_GATE_FAILED";
+
+  const elapsedSeconds = useMemo(() => {
+    if (!session?.createdAt) return 0;
+    const started = Date.parse(session.createdAt);
+    if (!Number.isFinite(started)) return 0;
+    return Math.max(0, Math.floor((nowMs - started) / 1000));
+  }, [session?.createdAt, nowMs]);
+
+  const fallbackPortrait =
+    imageError && session?.shopModelId
+      ? session.shopModelId === "male"
+        ? require("../../../assets/humanModelVTON/MaleModel.png")
+        : session.shopModelId === "male_upper"
+        ? require("../../../assets/humanModelVTON/MaleModel_UpperBody.png")
+        : session.shopModelId === "female_upper"
+        ? require("../../../assets/humanModelVTON/FemaleModel_UpperBody.png")
+        : require("../../../assets/humanModelVTON/FemaleModel.png")
+      : undefined;
+
+  const onImageError = useCallback((message?: string) => {
+    setImageErrorDetail(message || "");
+    setImageError(true);
+  }, []);
+
+  const chainOption1Compat =
+    session && chainTarget
+      ? checkTryOnCompatibility({
+          targetCategory: chainTarget.category,
+          chainedFromCategory: session.vtonCategory,
+          chainedFromFrame: session.personFrame,
+          shopModelId: session.shopModelId,
+        })
+      : { allowed: true as const };
 
   return (
-    <View style={st.container}>
-      <Stack.Screen options={{ headerShown: false }} />
+    <View style={st.page}>
+      <Stack.Screen
+        options={{
+          headerShown: true,
+          title: pending ? "Đang ướm thử AI" : "Kết quả thử đồ",
+          headerStyle: { backgroundColor: Colors.canvas },
+          headerTintColor: Colors.primary,
+          headerTitleStyle: { fontFamily: "Editorial", fontSize: 19, color: Colors.primary },
+          headerShadowVisible: false,
+          headerRight: () => (
+            <View style={st.headerPill}>
+              <View style={st.headerDot} />
+              <Text style={st.headerPillText}>VTON</Text>
+            </View>
+          ),
+        }}
+      />
 
-      {/* Header Bar */}
-      <View style={st.headerBar}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Đóng kết quả"
-          onPress={() => router.replace("/(shop)")}
-          style={st.iconRoundBtn}
-        >
-          <Ionicons name="close" size={20} color="#FFFFFF" />
-        </Pressable>
-        <View style={{ alignItems: "center" }}>
-          <Text style={st.headerMonoTag}>UC_VTON · RESULT & STYLIST</Text>
-          <Text style={st.headerItemTitle}>
-            {primaryItem.p.tenSanPham.split("(")[0]}
-            {secondaryItem ? ` + ${secondaryItem.p.tenSanPham.split("(")[0]}` : ""}
-          </Text>
+      {!user && (
+        <View style={st.centerPad}>
+          <Button title="Đăng nhập" onPress={() => router.push("/auth")} />
         </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Xem vé thử đồ O2O"
-          onPress={() => setFittingPassOpen(true)}
-          style={st.iconRoundBtn}
-        >
-          <Ionicons name="qr-code-outline" size={19} color={Colors.champagne} />
-        </Pressable>
-      </View>
-
-      {/* Main Split-slider Viewport */}
-      <View style={st.sliderViewport}>
-        {/* Full Image Container */}
-        <View style={st.sliderBox}>
-          {/* AFTER Image (Full background) */}
-          <Image
-            source={{ uri: afterPhoto }}
-            style={[st.imageLayer, zoom && { transform: [{ scale: 1.35 }] }]}
-            resizeMode="cover"
-          />
-
-          {/* BEFORE Image (Clipped with splitPos) */}
-          <View
-            style={[
-              st.clippedBeforeContainer,
-              { width: `${splitPos}%` },
-            ]}
-          >
-            <Image
-              source={{ uri: beforePhoto }}
-              style={[
-                st.imageLayer,
-                { width: SCREEN_WIDTH - 36 },
-                zoom && { transform: [{ scale: 1.35 }] },
-              ]}
-              resizeMode="cover"
-            />
-          </View>
-
-          {/* Split divider vertical line & handle */}
-          <View
-            style={[
-              st.splitDividerLine,
-              { left: `${splitPos}%` },
-            ]}
-          >
-            <View {...panResponder.panHandlers} style={st.splitHandleCircle}>
-              <Text style={st.splitHandleArrow}>‹ ›</Text>
-            </View>
-          </View>
-
-          {/* Badges: TRƯỚC vs SAU · AI */}
-          <View style={st.badgeBefore}>
-            <Text style={st.badgeBeforeText}>TRƯỚC</Text>
-          </View>
-          <View style={st.badgeAfter}>
-            <Text style={st.badgeAfterText}>SAU · AI</Text>
-          </View>
-
-          {/* Floating Action Controls on Right */}
-          <View style={st.floatingTools}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={zoom ? "Thu nhỏ" : "Phóng to chi tiết"}
-              onPress={() => setZoom(!zoom)}
-              style={st.toolCircleBtn}
-            >
-              <Ionicons
-                name={zoom ? "contract-outline" : "expand-outline"}
-                size={18}
-                color="#FFFFFF"
-              />
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Lưu ảnh"
-              onPress={() => showToast("Đã lưu ảnh thử đồ vào thư viện")}
-              style={st.toolCircleBtn}
-            >
-              <Ionicons name="download-outline" size={18} color="#FFFFFF" />
-            </Pressable>
-          </View>
-        </View>
-
-        {/* Expandable Aesthetic Score Bottom Sheet */}
-        <View
-          style={[
-            st.aestheticSheet,
-            !scoreSheetExpanded && { height: 96 },
-          ]}
-        >
-          {/* Sheet drag toggle button */}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={scoreSheetExpanded ? "Thu gọn bảng điểm" : "Mở rộng bảng điểm"}
-            onPress={() => setScoreSheetExpanded(!scoreSheetExpanded)}
-            style={st.sheetToggleBar}
-          >
-            <View style={st.sheetHandle} />
-            <Ionicons
-              name={scoreSheetExpanded ? "chevron-down" : "chevron-up"}
-              size={18}
-              color={Colors.textMuted}
-            />
-          </Pressable>
-
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 28 }}>
-            {/* Score Ring & Overall Rank */}
-            <View style={st.scoreSummaryRow}>
-              <View style={st.scoreRingCircle}>
-                <Text style={st.scoreNumberText}>{totalScore}</Text>
-                <Text style={st.scoreSubText}>/100</Text>
-              </View>
-
-              <View style={{ flex: 1, marginLeft: 16 }}>
-                <Text style={st.scoreIdLabel}>PHIẾU ĐIỂM THẨM MỸ · {id || "YFS-VTON"}</Text>
-                <View
-                  style={[
-                    st.rankBadge,
-                    {
-                      backgroundColor: isHighQuality
-                        ? Colors.statusSuccessSubtle
-                        : Colors.statusWarningSubtle,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      st.rankBadgeText,
-                      {
-                        color: isHighQuality
-                          ? Colors.statusSuccess
-                          : Colors.statusWarning,
-                      },
-                    ]}
-                  >
-                    {nhanXepHang[rank]}
-                  </Text>
-                </View>
-                <Text style={st.formulaText}>
-                  S = 0.4·{scoreData.tiLe} + 0.4·{scoreData.mauSac} + 0.2·{scoreData.hoaTiet}
-                  {scoreData.phat > 0 ? ` − ${scoreData.phat}` : ""}
-                </Text>
-              </View>
-            </View>
-
-            {/* 3 Progress Bars */}
-            <View style={st.progressBarsBlock}>
-              {[
-                { label: "Tỉ lệ vóc dáng (40%)", val: scoreData.tiLe, note: scoreData.ghiChu[0] },
-                { label: "Phối màu bánh xe màu (40%)", val: scoreData.mauSac, note: scoreData.ghiChu[1] },
-                { label: "Cân bằng họa tiết (20%)", val: scoreData.hoaTiet, note: scoreData.ghiChu[2] },
-              ].map((bar, i) => (
-                <View key={i} style={st.progressBarItem}>
-                  <View style={st.progressBarHeader}>
-                    <Text style={st.barLabel}>{bar.label}</Text>
-                    <Text style={st.barValue}>{bar.val}/100</Text>
-                  </View>
-                  <View style={st.barTrack}>
-                    <View
-                      style={[
-                        st.barFill,
-                        {
-                          width: `${bar.val}%`,
-                          backgroundColor:
-                            bar.val >= 85 ? Colors.statusSuccess : Colors.champagne,
-                        },
-                      ]}
-                    />
-                  </View>
-                  <Text style={st.barNoteText}>{bar.note}</Text>
-                </View>
-              ))}
-            </View>
-
-            {/* Stylist Quote Box */}
-            <View style={st.stylistQuoteCard}>
-              <Ionicons name="sparkles" size={17} color={Colors.champagneDeep} style={{ marginTop: 2 }} />
-              <Text style={st.stylistQuoteText}>
-                “{loiNhanXet(totalScore)}”
-                <Text style={st.stylistSignature}> — AI Fashion Stylist</Text>
-              </Text>
-            </View>
-
-            {/* Cross-Sell Recommendations Carousel */}
-            {suggestions.length > 0 && (
-              <View style={st.crossSellSection}>
-                <Text style={st.crossSellTitle}>
-                  Thử thêm {suggestions[0].p.tenSanPham.toLowerCase()} để đạt{" "}
-                  {suggestions[0].diem} điểm!
-                </Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={st.crossSellScroll}
-                >
-                  {suggestions.map((sug) => (
-                    <View key={sug.p.maSanPham} style={st.crossSellCard}>
-                      <Image
-                        source={sug.p.hinhAnh}
-                        style={st.crossSellImg}
-                        resizeMode="cover"
-                      />
-                      <Text numberOfLines={1} style={st.crossSellName}>
-                        {sug.p.tenSanPham}
-                      </Text>
-                      <View style={st.crossSellPriceRow}>
-                        <Text style={st.crossSellPrice}>
-                          {formatVND(sug.p.giaBan)}
-                        </Text>
-                        <Text style={st.crossSellScore}>{sug.diem}đ</Text>
-                      </View>
-                      <Pressable
-                        onPress={() => {
-                          setSecondaryItem(sug);
-                          showToast(`Đã chọn phối cùng ${sug.p.tenSanPham}`);
-                        }}
-                        style={st.tryComboBtn}
-                      >
-                        <Text style={st.tryComboText}>Ướm thử set này</Text>
-                        <Ionicons name="arrow-forward" size={12} color="#FFFFFF" />
-                      </Pressable>
-                    </View>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
-
-            {/* Combo Purchase CTA Buttons */}
-            <View style={st.ctaRow}>
-              <Pressable
-                onPress={() => showToast("Đã thêm sản phẩm chính vào túi đồ")}
-                style={st.singleBuyBtn}
-              >
-                <Text style={st.singleBuyText}>Mua riêng sản phẩm này</Text>
-              </Pressable>
-
-              <Pressable
-                onPress={() => showToast("Đã thêm trọn bộ combo (−5%) vào túi đồ!")}
-                style={st.comboBuyBtn}
-              >
-                <Text style={st.comboBuyText}>Mua trọn bộ combo (−5%)</Text>
-              </Pressable>
-            </View>
-          </ScrollView>
-        </View>
-      </View>
-
-      {/* Toast Notification */}
-      {!!toastMessage && (
-        <View style={st.toastFloatingBox}>
-          <Ionicons name="checkmark-circle" size={18} color={Colors.statusSuccess} />
-          <Text style={st.toastFloatingText}>{toastMessage}</Text>
+      )}
+      {user && !session && (
+        <View style={st.centerPad}>
+          <State loading={state.loading} error={state.error} retry={reload} />
         </View>
       )}
 
-      {/* Digital Fitting Pass Modal (O2O) */}
-      <Sheet
-        visible={fittingPassOpen}
-        onClose={() => setFittingPassOpen(false)}
-        title="Vé thử đồ tại quầy YoFaSo (O2O Pass)"
-      >
-        <View style={st.ticketContainer}>
-          <View style={st.ticketHeader}>
-            <Text style={st.ticketBrand}>YoFaSo Atelier</Text>
-            <Text style={st.ticketTag}>FITTING PASS</Text>
-          </View>
-
-          <View style={st.qrBox}>
-            <QRCode
-              value={`YOFASO-O2O|${id || "SESSION-VTON"}`}
-              size={180}
-              color={Colors.primary}
-              backgroundColor="#FFFFFF"
-            />
-          </View>
-          <Text style={st.ticketCode}>{id || "YFS-ATELIER-2026"}</Text>
-
-          <View style={st.ticketDividerDashed} />
-
-          <View style={st.ticketItemSummary}>
-            <Text style={st.ticketItemTitle}>Set trang phục ướm thử:</Text>
-            <Text style={st.ticketItemLine}>
-              • {primaryItem.p.tenSanPham} ({primaryItem.b.tenMau})
+      {session && (
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={st.scrollContent}>
+          {/* Product Header Summary */}
+          <View style={st.productTitleBlock}>
+            <Text style={st.productEyebrow}>
+              PHIÊN #{session.sessionId} · {statusLabel(session.status).toUpperCase()}
             </Text>
-            {secondaryItem && (
-              <Text style={st.ticketItemLine}>
-                • {secondaryItem.p.tenSanPham} ({secondaryItem.b.tenMau})
-              </Text>
-            )}
-            <Text style={st.ticketScoreHighlight}>
-              Điểm thẩm mỹ Stylist: {totalScore}/100 — {nhanXepHang[rank]}
+            <Text style={st.productTitle} numberOfLines={2}>
+              {session.productName}
             </Text>
           </View>
 
-          <Text style={st.ticketInstruction}>
-            Đưa mã này cho Thu ngân hoặc Nhân viên quầy YoFaSo Shop để lấy đúng set đồ này thử đồ thực tế!
-          </Text>
+          {/* ======================================================== */}
+          {/* 1. REALTIME PROCESSING VIEW (WARM EDITORIAL MINIMALISM)  */}
+          {/* ======================================================== */}
+          {pending && (
+            <>
+              <View style={st.stageCard}>
+                {fallbackPortrait ? (
+                  <Image source={fallbackPortrait} style={st.fillImage} resizeMode="cover" />
+                ) : personId ? (
+                  <PrivateImage
+                    key={personId + ":" + imageAttempt}
+                    assetId={personId}
+                    style={st.fillImage}
+                    resizeMode="cover"
+                    onError={onImageError}
+                  />
+                ) : (
+                  <View style={[st.fillImage, st.placeholderBg]}>
+                    <Ionicons name="person-outline" size={56} color={Colors.textMuted} />
+                  </View>
+                )}
+
+                <View style={st.warmScrim} />
+                <Animated.View
+                  style={[
+                    st.laserBeam,
+                    {
+                      transform: [
+                        {
+                          translateY: scanAnim.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: [18, STAGE_HEIGHT - 24],
+                          }),
+                        },
+                      ],
+                    },
+                  ]}
+                >
+                  <View style={st.laserGlow} />
+                  <View style={st.laserLine} />
+                </Animated.View>
+
+                <View style={st.hudTopLeft}>
+                  <View style={st.hudDot} />
+                  <Text style={st.hudText}>FABRIC SCAN</Text>
+                </View>
+
+                <View style={st.hudTopRight}>
+                  <Text style={st.hudPct}>{displayProgress}%</Text>
+                </View>
+              </View>
+
+              <View style={st.progressCard}>
+                <View style={st.progressHeader}>
+                  <Text style={st.progressStageMsg} numberOfLines={2}>
+                    {session.stageMessage || stageTitleFallback(session.stage, session.status)}
+                  </Text>
+                  <Text style={st.progressPctLarge}>{displayProgress}%</Text>
+                </View>
+
+                <View
+                  style={st.progressTrack}
+                  onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}
+                >
+                  {trackWidth > 0 && (
+                    <Animated.View
+                      style={[
+                        st.progressFill,
+                        {
+                          width: trackWidth,
+                          transform: [
+                            {
+                              translateX: progressAnim.interpolate({
+                                inputRange: [0, 100],
+                                outputRange: [-trackWidth, 0],
+                                extrapolate: "clamp",
+                              }),
+                            },
+                          ],
+                        },
+                      ]}
+                    />
+                  )}
+                </View>
+
+                <View style={st.progressMetaRow}>
+                  <Text style={st.progressMetaText}>Thời gian xử lý: {elapsedSeconds}s</Text>
+                  <Text style={st.progressMetaCode}>{session.stage || session.status}</Text>
+                </View>
+
+                <View style={st.milestoneList}>
+                  {STAGE_STEPS.map((step, idx) => {
+                    const nextMin = STAGE_STEPS[idx + 1]?.minProgress ?? 101;
+                    const activeStageIdx = stageStepIndex(session.stage);
+                    const done = activeStageIdx > idx || serverProgress >= nextMin;
+                    const active = !done && (activeStageIdx === idx || serverProgress >= step.minProgress);
+                    return (
+                      <View key={step.key} style={st.milestoneRow}>
+                        {done ? (
+                          <Ionicons name="checkmark-circle" size={16} color={Colors.statusSuccess} />
+                        ) : active ? (
+                          <View style={st.milestoneActiveDot} />
+                        ) : (
+                          <View style={st.milestonePendingDot} />
+                        )}
+                        <Text
+                          style={[
+                            st.milestoneLabel,
+                            done && st.milestoneDone,
+                            active && st.milestoneActive,
+                          ]}
+                        >
+                          {step.label}
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              </View>
+
+              <View style={st.reassuranceCard}>
+                <Ionicons name="sparkles-outline" size={16} color={Colors.champagneDeep} />
+                <Text style={st.reassuranceText}>
+                  Công nghệ giữ nguyên nếp vải và ánh sáng thực. Bạn có thể rời màn này và mở lại trong Tủ đồ VTON.
+                </Text>
+              </View>
+
+              <View style={st.actionGroup}>
+                <Button title="Về Tủ đồ VTON" secondary onPress={() => router.push("/(shop)/wardrobe")} />
+                {session.status === "QUEUED" && session.jobId && (
+                  <Button title="Hủy yêu cầu" outline disabled={busy} onPress={() => void control("cancel")} />
+                )}
+              </View>
+            </>
+          )}
+
+          {/* ======================================================== */}
+          {/* 2. COMPLETED RESULT VIEW (MODE SWITCHER + BEFORE/AFTER)  */}
+          {/* ======================================================== */}
+          {!pending && resultId && (
+            <>
+              <BeforeAfterStage
+                resultId={resultId}
+                personId={personId}
+                fallbackPortrait={fallbackPortrait}
+                imageAttempt={imageAttempt}
+                stageHeight={STAGE_HEIGHT}
+                onImageError={onImageError}
+                onOpenZoom={() => setZoomOpen(true)}
+                onOpenPass={() => setPassOpen(true)}
+              />
+
+              {imageError && !fallbackPortrait && (
+                <View style={{ gap: 8 }}>
+                  <Notice error>Không tải được ảnh kết quả. {imageErrorDetail}</Notice>
+                  <Button
+                    secondary
+                    title="Tải lại ảnh"
+                    onPress={() => {
+                      setImageError(false);
+                      setImageAttempt((n) => n + 1);
+                    }}
+                  />
+                </View>
+              )}
+
+              <ResultActions assetId={resultId} />
+
+              {!session.simulated && !imageError && (
+                <OutfitScoring
+                  sessionId={id || session.sessionId}
+                  variantId={session.variantId}
+                  category={session.vtonCategory}
+                  shopModelId={session.shopModelId}
+                  initialScore={session.score}
+                  initialAdvice={session.advice}
+                  initialProportion={session.proportionScore}
+                  initialColor={session.colorScore}
+                  initialPattern={session.patternScore}
+                  initialPenalty={session.penaltyScore}
+                  initialTier={session.tier}
+                  initialTierLabel={session.tierLabel}
+                  initialProportionRule={session.proportionRule}
+                  initialProportionNote={session.proportionNote}
+                  singleItemPreview={session.singleItemPreview}
+                  onScoreUpdated={setLiveScore}
+                  onTry={handleRecommendedTry}
+                  onSingleBuy={() =>
+                    void (async () => {
+                      try {
+                        await api("/cart/items", "PUT", { variantId: session.variantId, quantity: 1 });
+                        Alert.alert("Đã thêm", `${session.productName} đã vào túi đồ của bạn.`);
+                      } catch (e) {
+                        Alert.alert("Lỗi", (e as Error).message);
+                      }
+                    })()
+                  }
+                  onComboBuy={(secondVariantId) =>
+                    void (async () => {
+                      try {
+                        await api("/cart/items", "PUT", { variantId: session.variantId, quantity: 1 });
+                        if (secondVariantId && secondVariantId !== session.variantId) {
+                          await api("/cart/items", "PUT", { variantId: secondVariantId, quantity: 1 });
+                          Alert.alert("Đã thêm combo", "Đã thêm cả 2 món phối vào túi đồ với ưu đãi -5%.");
+                        } else {
+                          Alert.alert(
+                            "Đã thêm",
+                            `${session.productName} đã vào túi đồ. Hãy chọn thêm món phối để tạo combo.`
+                          );
+                        }
+                      } catch (e) {
+                        Alert.alert("Lỗi", (e as Error).message);
+                      }
+                    })()
+                  }
+                />
+              )}
+
+              {/* Req 4: Luxury Boarding-Pass QR Fitting Pass */}
+              <FittingPassModal
+                visible={passOpen}
+                onClose={() => setPassOpen(false)}
+                session={session}
+                liveScore={liveScore}
+              />
+
+              {/* Req 5: 2-Option Chained Try-On Sheet */}
+              <Sheet
+                visible={!!chainTarget}
+                onClose={() => !chainBusy && setChainTarget(null)}
+                title="Thử tiếp món phối đề xuất"
+              >
+                {chainTarget && (
+                  <View style={st.chainSheetBody}>
+                    <View style={st.chainHeaderPill}>
+                      <Ionicons name="sparkles-outline" size={16} color={Colors.champagneDeep} />
+                      <Text style={st.chainHeaderText} numberOfLines={2}>
+                        Món phối tiếp theo: <Text style={{ fontFamily: "JakartaSemiBold" }}>{chainTarget.name}</Text>
+                      </Text>
+                    </View>
+
+                    {/* Option 1: Carry VTON Result Directly */}
+                    <View style={st.chainOptionCard}>
+                      <View style={st.chainOptionTitleRow}>
+                        <View style={st.chainBadgePrimary}>
+                          <Text style={st.chainBadgePrimaryText}>PHƯƠNG ÁN 1</Text>
+                        </View>
+                        <Text style={st.chainOptionHeading}>Dùng ngay ảnh kết quả VTON này</Text>
+                      </View>
+                      <Text style={st.chainOptionDesc}>
+                        Hệ thống tự động mang ảnh kết quả vừa thử sang phiên mới để ướm thử tiếp{" "}
+                        {chainTarget.name} (bạn vẫn có thể đổi ảnh khác bất cứ lúc nào).
+                      </Text>
+                      <Button
+                        title={
+                          chainBusy
+                            ? "Đang chuẩn bị ảnh kết quả..."
+                            : "Lấy ảnh kết quả sang thử tiếp"
+                        }
+                        icon={<Ionicons name="layers-outline" size={16} color={Colors.champagne} />}
+                        disabled={chainBusy}
+                        style={!chainOption1Compat.allowed ? { opacity: 0.65 } : undefined}
+                        onPress={() => void handleChainWithResultImage()}
+                      />
+                    </View>
+
+                    {/* Option 2: Download Result & Upload Manually */}
+                    <View style={st.chainOptionCard}>
+                      <View style={st.chainOptionTitleRow}>
+                        <View style={st.chainBadgeSecondary}>
+                          <Text style={st.chainBadgeSecondaryText}>PHƯƠNG ÁN 2</Text>
+                        </View>
+                        <Text style={st.chainOptionHeading}>Tải ảnh về & tự tải lên ở phiên mới</Text>
+                      </View>
+                      <Text style={st.chainOptionDesc}>
+                        Lưu ảnh kết quả về máy (phiên hiện tại vẫn giữ nguyên không bị tắt), sau đó mở phiên mới để bạn tự chọn ảnh tải lên.
+                      </Text>
+                      <Button
+                        title={chainBusy ? "Đang lưu ảnh..." : "1. Lưu ảnh kết quả về máy"}
+                        secondary
+                        icon={<Ionicons name="download-outline" size={16} color={Colors.primary} />}
+                        disabled={chainBusy}
+                        onPress={() => void handleSaveBeforeManualChain()}
+                      />
+                      {!!chainSaveMsg && <Notice>{chainSaveMsg}</Notice>}
+                      <Button
+                        title="2. Mở phiên mới để tự tải ảnh lên"
+                        outline
+                        icon={<Ionicons name="cloud-upload-outline" size={16} color={Colors.primary} />}
+                        disabled={chainBusy}
+                        onPress={handleOpenManualChainSession}
+                      />
+                    </View>
+                  </View>
+                )}
+              </Sheet>
+
+              <Modal visible={zoomOpen} transparent animationType="fade" onRequestClose={() => setZoomOpen(false)}>
+                <View style={st.zoomOverlay}>
+                  <Pressable style={st.zoomCloseBtn} onPress={() => setZoomOpen(false)}>
+                    <Ionicons name="close" size={22} color={Colors.primary} />
+                  </Pressable>
+                  <PrivateImage
+                    assetId={resultId}
+                    style={{ width: SCREEN_WIDTH - 24, height: SCREEN_WIDTH * 1.35 }}
+                    resizeMode="contain"
+                  />
+                </View>
+              </Modal>
+            </>
+          )}
+
+          {/* ======================================================== */}
+          {/* 3. ERROR OR FAILED STATE + REQ 2 IN-PLACE PHOTO REUPLOAD */}
+          {/* ======================================================== */}
+          {!pending && !resultId && (
+            <View style={{ gap: 12 }}>
+              {(actionError || state.error || error) && (
+                <Notice error>
+                  {actionError ||
+                    state.error ||
+                    (qualityFailed
+                      ? "Ảnh thử chưa đạt kiểm tra chất lượng. Bạn có thể đổi ảnh mới ngay tại phiên này."
+                      : error)}
+                </Notice>
+              )}
+
+              {/* Req 2: Re-upload a new photo in the exact same session without creating a new PhienThuDoAo */}
+              <View style={st.replaceCard}>
+                <View style={st.replaceHeader}>
+                  <Ionicons name="refresh-circle-outline" size={20} color={Colors.champagneDeep} />
+                  <Text style={st.replaceTitle}>Đổi ảnh mới ngay trong phiên #{session.sessionId}</Text>
+                </View>
+                <Text style={st.replaceSub}>
+                  Không cần tạo phiên thử đồ mới. Chọn lại ảnh rõ người, đủ sáng để hệ thống kiểm tra YOLO26 và thử lại trực tiếp.
+                </Text>
+                <View style={st.replaceBtnRow}>
+                  <Pressable
+                    disabled={replacing || busy}
+                    onPress={() => void replacePhotoInSession(false)}
+                    style={[st.replacePickBtn, (replacing || busy) && { opacity: 0.5 }]}
+                  >
+                    <Ionicons name="images-outline" size={17} color={Colors.primary} />
+                    <Text style={st.replacePickText}>
+                      {replacing ? "Đang tải..." : "Chọn ảnh thư viện"}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    disabled={replacing || busy}
+                    onPress={() => void replacePhotoInSession(true)}
+                    style={[st.replacePickBtn, (replacing || busy) && { opacity: 0.5 }]}
+                  >
+                    <Ionicons name="camera-outline" size={17} color={Colors.primary} />
+                    <Text style={st.replacePickText}>Chụp ảnh mới</Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              {((session.status === "FAILED" && session.retryable && !!session.jobId) ||
+                session.status === "SYNC_FAILED") && (
+                <Button title="Thử lại với ảnh hiện tại" disabled={busy || replacing} onPress={() => void control("retry")} />
+              )}
+              <Button
+                title="Đổi trang phục hoặc tạo phiên mới"
+                secondary
+                disabled={busy || replacing}
+                onPress={() =>
+                  router.push({
+                    pathname: "/try-on",
+                    params: {
+                      productId: session.productId,
+                      variantId: session.variantId,
+                      category: session.vtonCategory,
+                      gender: session.productGender,
+                      shopModelId: session.shopModelId,
+                      seed: qualityFailed ? String(Math.floor(Math.random() * 999999999)) : undefined,
+                      personAssetId: session.shopModelId ? undefined : session.personAssetId,
+                    },
+                  })
+                }
+              />
+              <Button title="Về Tủ đồ VTON" outline onPress={() => router.push("/(shop)/wardrobe")} />
+            </View>
+          )}
+        </ScrollView>
+      )}
+
+      {/* Floating Blocking / Feedback Toast */}
+      {!!toast && (
+        <View style={st.toastPopup} pointerEvents="none">
+          <Ionicons name="alert-circle" size={18} color="#FDE68A" />
+          <Text style={st.toastPopupText}>{toast}</Text>
         </View>
-      </Sheet>
+      )}
     </View>
   );
 }
 
 const st = StyleSheet.create({
-  container: {
+  page: {
     flex: 1,
-    backgroundColor: Colors.primary,
+    backgroundColor: Colors.canvas,
   },
-  headerBar: {
+  centerPad: {
+    padding: 20,
+  },
+  headerPill: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingTop: Platform.OS === "ios" ? 50 : 36,
-    paddingHorizontal: 18,
-    paddingBottom: 12,
+    gap: 5,
+    backgroundColor: Colors.champagneSubtle,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: Radii.full,
+    borderWidth: 1,
+    borderColor: "rgba(197, 168, 128, 0.45)",
   },
-  iconRoundBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(255, 255, 255, 0.15)",
-    alignItems: "center",
-    justifyContent: "center",
+  headerDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.champagneDeep,
   },
-  headerMonoTag: {
-    fontSize: 9.5,
+  headerPillText: {
     fontFamily: "Mono",
-    color: Colors.champagne,
-    letterSpacing: 1.2,
+    fontSize: 10,
+    color: Colors.champagneDeep,
+    letterSpacing: 0.6,
   },
-  headerItemTitle: {
-    fontSize: 12,
-    fontFamily: "JakartaSemiBold",
-    color: "#FFFFFF",
-    marginTop: 2,
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 48,
+    gap: 16,
   },
-  sliderViewport: {
-    flex: 1,
-    position: "relative",
+  productTitleBlock: {
+    gap: 3,
   },
-  sliderBox: {
-    marginHorizontal: 18,
-    height: SCREEN_HEIGHT * 0.46,
+  productEyebrow: {
+    fontFamily: "Mono",
+    fontSize: 11,
+    color: Colors.champagneDeep,
+    letterSpacing: 0.5,
+  },
+  productTitle: {
+    fontFamily: "Editorial",
+    fontSize: 22,
+    color: Colors.primary,
+    lineHeight: 28,
+  },
+  stageCard: {
+    height: STAGE_HEIGHT,
+    backgroundColor: Colors.surface,
     borderRadius: Radii.xl,
     overflow: "hidden",
     position: "relative",
-    backgroundColor: "rgba(255, 255, 255, 0.05)",
-  },
-  imageLayer: {
-    height: "100%",
-    position: "absolute",
-    left: 0,
-    top: 0,
-    right: 0,
-    bottom: 0,
-  },
-  clippedBeforeContainer: {
-    position: "absolute",
-    left: 0,
-    top: 0,
-    bottom: 0,
-    overflow: "hidden",
-    zIndex: 2,
-  },
-  splitDividerLine: {
-    position: "absolute",
-    top: 0,
-    bottom: 0,
-    width: 2,
-    backgroundColor: "rgba(255, 255, 255, 0.95)",
-    zIndex: 5,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  splitHandleCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "rgba(255, 255, 255, 0.85)",
-    borderWidth: 1.5,
-    borderColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
-    ...Shadows.dock,
-  },
-  splitHandleArrow: {
-    fontSize: 14,
-    fontFamily: "JakartaSemiBold",
-    color: Colors.primary,
-  },
-  badgeBefore: {
-    position: "absolute",
-    top: 12,
-    left: 12,
-    backgroundColor: "rgba(15, 23, 42, 0.65)",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: Radii.full,
-    zIndex: 3,
-  },
-  badgeBeforeText: {
-    fontSize: 9.5,
-    fontFamily: "Mono",
-    color: "#FFFFFF",
-    letterSpacing: 0.5,
-  },
-  badgeAfter: {
-    position: "absolute",
-    top: 12,
-    right: 56,
-    backgroundColor: Colors.champagne,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: Radii.full,
-    zIndex: 3,
-  },
-  badgeAfterText: {
-    fontSize: 9.5,
-    fontFamily: "Mono",
-    color: Colors.primary,
-    letterSpacing: 0.5,
-  },
-  floatingTools: {
-    position: "absolute",
-    top: 12,
-    right: 12,
-    gap: 8,
-    zIndex: 6,
-  },
-  toolCircleBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(15, 23, 42, 0.55)",
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.25)",
+    borderColor: Colors.borderHairline,
+    ...Shadows.md,
+  },
+  fillImage: {
+    width: "100%",
+    height: "100%",
+  },
+  placeholderBg: {
+    backgroundColor: Colors.surfaceMuted,
     alignItems: "center",
     justifyContent: "center",
-    ...Shadows.dock,
   },
-  aestheticSheet: {
+  warmScrim: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: "rgba(250, 250, 249, 0.14)",
+  },
+  laserBeam: {
     position: "absolute",
     left: 0,
     right: 0,
-    bottom: 0,
-    height: SCREEN_HEIGHT * 0.44,
-    backgroundColor: "rgba(255, 255, 255, 0.96)",
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    ...Shadows.sheet,
-  },
-  sheetToggleBar: {
+    height: 18,
     alignItems: "center",
-    paddingVertical: 6,
+    justifyContent: "center",
+    zIndex: 10,
   },
-  sheetHandle: {
-    width: 38,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: Colors.borderHairline,
-    marginBottom: 4,
+  laserGlow: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    height: 14,
+    backgroundColor: "rgba(197, 168, 128, 0.3)",
   },
-  scoreSummaryRow: {
+  laserLine: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    height: 2,
+    backgroundColor: Colors.champagne,
+  },
+  hudTopLeft: {
+    position: "absolute",
+    top: 14,
+    left: 14,
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 6,
-  },
-  scoreRingCircle: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    borderWidth: 5,
-    borderColor: Colors.champagne,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: Colors.champagneSubtle,
-  },
-  scoreNumberText: {
-    fontSize: 22,
-    fontFamily: "Mono",
-    fontWeight: "700",
-    color: Colors.primary,
-    lineHeight: 24,
-  },
-  scoreSubText: {
-    fontSize: 9,
-    fontFamily: "Mono",
-    color: Colors.textMuted,
-  },
-  scoreIdLabel: {
-    fontSize: 10,
-    fontFamily: "Mono",
-    color: Colors.textMuted,
-    letterSpacing: 0.8,
-  },
-  rankBadge: {
-    alignSelf: "flex-start",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    gap: 6,
+    backgroundColor: "rgba(255, 255, 255, 0.92)",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     borderRadius: Radii.full,
-    marginTop: 4,
-    marginBottom: 4,
+    borderWidth: 1,
+    borderColor: "rgba(197, 168, 128, 0.45)",
   },
-  rankBadgeText: {
-    fontSize: 10,
-    fontFamily: "JakartaSemiBold",
+  hudDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.champagneDeep,
   },
-  formulaText: {
-    fontSize: 10,
+  hudText: {
     fontFamily: "Mono",
-    color: Colors.textMuted,
+    fontSize: 10,
+    color: Colors.primary,
+    letterSpacing: 0.5,
   },
-  progressBarsBlock: {
-    marginTop: 16,
-    gap: 10,
+  hudTopRight: {
+    position: "absolute",
+    top: 14,
+    right: 14,
+    backgroundColor: "rgba(255, 255, 255, 0.94)",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: Radii.full,
+    borderWidth: 1,
+    borderColor: Colors.borderHairline,
   },
-  progressBarItem: {
-    gap: 3,
+  hudPct: {
+    fontFamily: "Mono",
+    fontSize: 11,
+    color: Colors.champagneDeep,
   },
-  progressBarHeader: {
+  progressCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radii.lg,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: Colors.borderHairline,
+    gap: 12,
+    ...Shadows.sm,
+  },
+  progressHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
   },
-  barLabel: {
-    fontSize: 11.5,
+  progressStageMsg: {
+    flex: 1,
+    fontFamily: "JakartaSemiBold",
+    fontSize: 14,
+    color: Colors.primary,
+    lineHeight: 20,
+  },
+  progressPctLarge: {
+    fontFamily: "Mono",
+    fontSize: 20,
+    color: Colors.champagneDeep,
+  },
+  progressTrack: {
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: Colors.surfaceMuted,
+    overflow: "hidden",
+  },
+  progressFill: {
+    height: "100%",
+    backgroundColor: Colors.champagne,
+    borderRadius: 4,
+  },
+  progressMetaRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  progressMetaText: {
+    fontFamily: "Mono",
+    fontSize: 11,
+    color: Colors.textSecondary,
+  },
+  progressMetaCode: {
+    fontFamily: "Mono",
+    fontSize: 10,
+    color: Colors.textMuted,
+  },
+  milestoneList: {
+    gap: 10,
+    paddingTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.borderHairline,
+  },
+  milestoneRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  milestoneActiveDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginHorizontal: 3,
+    backgroundColor: Colors.champagne,
+  },
+  milestonePendingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginHorizontal: 4,
+    backgroundColor: Colors.borderHairline,
+  },
+  milestoneLabel: {
+    flex: 1,
+    fontFamily: "Jakarta",
+    fontSize: 13,
+    color: Colors.textMuted,
+  },
+  milestoneDone: {
+    color: Colors.textSecondary,
+  },
+  milestoneActive: {
     fontFamily: "JakartaSemiBold",
     color: Colors.primary,
   },
-  barValue: {
-    fontSize: 11,
-    fontFamily: "Mono",
-    color: Colors.textSecondary,
-  },
-  barTrack: {
-    height: 6,
-    backgroundColor: Colors.surfaceMuted,
-    borderRadius: 3,
-    overflow: "hidden",
-  },
-  barFill: {
-    height: "100%",
-    borderRadius: 3,
-  },
-  barNoteText: {
-    fontSize: 11,
-    fontFamily: "Jakarta",
-    color: Colors.textSecondary,
-  },
-  stylistQuoteCard: {
+  reassuranceCard: {
     flexDirection: "row",
     alignItems: "flex-start",
     gap: 8,
     backgroundColor: Colors.champagneSubtle,
-    borderWidth: 1,
-    borderColor: "rgba(197, 168, 128, 0.4)",
     borderRadius: Radii.lg,
-    padding: 12,
-    marginTop: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "rgba(197, 168, 128, 0.35)",
   },
-  stylistQuoteText: {
+  reassuranceText: {
     flex: 1,
-    fontSize: 12.5,
     fontFamily: "Jakarta",
+    fontSize: 12,
     color: Colors.primary,
     lineHeight: 18,
-    fontStyle: "italic",
   },
-  stylistSignature: {
-    fontStyle: "normal",
-    fontFamily: "JakartaSemiBold",
-    color: Colors.champagneDeep,
+  actionGroup: {
+    gap: 8,
   },
-  crossSellSection: {
-    marginTop: 18,
-  },
-  crossSellTitle: {
-    fontSize: 13,
-    fontFamily: "JakartaSemiBold",
-    color: Colors.primary,
-  },
-  crossSellScroll: {
-    gap: 12,
-    marginTop: 10,
-    paddingRight: 10,
-  },
-  crossSellCard: {
-    width: 140,
-    borderRadius: Radii.lg,
-    borderWidth: 1,
-    borderColor: Colors.borderHairline,
+  replaceCard: {
     backgroundColor: Colors.surface,
-    padding: 8,
-    ...Shadows.dock,
-  },
-  crossSellImg: {
-    width: "100%",
-    aspectRatio: 0.8,
-    borderRadius: Radii.md,
-  },
-  crossSellName: {
-    fontSize: 11,
-    fontFamily: "JakartaSemiBold",
-    color: Colors.primary,
-    marginTop: 6,
-  },
-  crossSellPriceRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: 3,
-  },
-  crossSellPrice: {
-    fontSize: 10.5,
-    fontFamily: "Mono",
-    color: Colors.textSecondary,
-  },
-  crossSellScore: {
-    fontSize: 10.5,
-    fontFamily: "Mono",
-    fontWeight: "700",
-    color: Colors.statusSuccess,
-  },
-  tryComboBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 4,
-    backgroundColor: Colors.primary,
-    borderRadius: Radii.sm,
-    paddingVertical: 6,
-    marginTop: 8,
-  },
-  tryComboText: {
-    fontSize: 10,
-    fontFamily: "JakartaSemiBold",
-    color: "#FFFFFF",
-  },
-  ctaRow: {
-    flexDirection: "row",
+    borderRadius: Radii.lg,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "rgba(197, 168, 128, 0.55)",
     gap: 10,
-    marginTop: 20,
-    marginBottom: 10,
+    ...Shadows.sm,
   },
-  singleBuyBtn: {
-    flex: 2,
-    height: 48,
-    borderRadius: Radii.md,
-    borderWidth: 1.5,
-    borderColor: Colors.primary,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  singleBuyText: {
-    fontSize: 11.5,
-    fontFamily: "JakartaSemiBold",
-    color: Colors.primary,
-  },
-  comboBuyBtn: {
-    flex: 3,
-    height: 48,
-    borderRadius: Radii.md,
-    backgroundColor: Colors.primary,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  comboBuyText: {
-    fontSize: 11.5,
-    fontFamily: "JakartaSemiBold",
-    color: "#FFFFFF",
-  },
-  toastFloatingBox: {
-    position: "absolute",
-    top: 50,
-    alignSelf: "center",
+  replaceHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    backgroundColor: "rgba(255, 255, 255, 0.94)",
-    borderWidth: 1,
-    borderColor: Colors.borderHairline,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: Radii.full,
-    zIndex: 99,
-    ...Shadows.toast,
   },
-  toastFloatingText: {
-    fontSize: 13,
-    fontFamily: "JakartaSemiBold",
+  replaceTitle: {
+    flex: 1,
+    fontFamily: "Editorial",
+    fontSize: 16,
     color: Colors.primary,
   },
-  ticketContainer: {
-    backgroundColor: Colors.primary,
-    borderRadius: Radii.xl,
-    padding: 20,
-    marginVertical: 10,
+  replaceSub: {
+    fontFamily: "Jakarta",
+    fontSize: 12.5,
+    color: Colors.textSecondary,
+    lineHeight: 18,
   },
-  ticketHeader: {
+  replaceBtnRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "baseline",
-    marginBottom: 16,
+    gap: 10,
+    marginTop: 2,
   },
-  ticketBrand: {
-    fontSize: 20,
-    fontFamily: "Editorial",
-    color: "#FFFFFF",
-  },
-  ticketTag: {
-    fontSize: 10,
-    fontFamily: "Mono",
-    color: Colors.champagne,
-    letterSpacing: 2,
-  },
-  qrBox: {
-    backgroundColor: "#FFFFFF",
-    padding: 16,
-    borderRadius: Radii.lg,
-    alignSelf: "center",
-  },
-  ticketCode: {
-    fontSize: 14,
-    fontFamily: "Mono",
-    color: "#FFFFFF",
-    textAlign: "center",
-    letterSpacing: 2,
-    marginTop: 12,
-  },
-  ticketDividerDashed: {
-    height: 1,
+  replacePickBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    paddingVertical: 12,
+    borderRadius: Radii.md,
+    backgroundColor: Colors.champagneSubtle,
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.2)",
-    borderStyle: "dashed",
-    marginVertical: 16,
+    borderColor: Colors.champagne,
   },
-  ticketItemSummary: {
-    gap: 6,
-  },
-  ticketItemTitle: {
-    fontSize: 12,
+  replacePickText: {
     fontFamily: "JakartaSemiBold",
-    color: Colors.champagne,
+    fontSize: 12.5,
+    color: Colors.primary,
   },
-  ticketItemLine: {
-    fontSize: 12,
+  chainSheetBody: {
+    gap: 14,
+    paddingBottom: 16,
+  },
+  chainHeaderPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: Colors.champagneSubtle,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: Radii.md,
+    borderWidth: 1,
+    borderColor: "rgba(197, 168, 128, 0.35)",
+  },
+  chainHeaderText: {
+    flex: 1,
     fontFamily: "Jakarta",
+    fontSize: 13,
+    color: Colors.primary,
+    lineHeight: 18,
+  },
+  chainOptionCard: {
+    backgroundColor: Colors.canvas,
+    borderRadius: Radii.lg,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: Colors.borderHairline,
+    gap: 8,
+  },
+  chainOptionTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  chainBadgePrimary: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: Radii.full,
+  },
+  chainBadgePrimaryText: {
+    fontFamily: "Mono",
+    fontSize: 9.5,
+    color: Colors.champagne,
+    letterSpacing: 0.5,
+  },
+  chainBadgeSecondary: {
+    backgroundColor: Colors.surfaceMuted,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: Radii.full,
+    borderWidth: 1,
+    borderColor: Colors.borderHairline,
+  },
+  chainBadgeSecondaryText: {
+    fontFamily: "Mono",
+    fontSize: 9.5,
+    color: Colors.textSecondary,
+    letterSpacing: 0.5,
+  },
+  chainOptionHeading: {
+    fontFamily: "JakartaSemiBold",
+    fontSize: 14,
+    color: Colors.primary,
+  },
+  chainOptionDesc: {
+    fontFamily: "Jakarta",
+    fontSize: 12,
+    color: Colors.textSecondary,
+    lineHeight: 17,
+  },
+  zoomOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(15, 23, 42, 0.9)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  zoomCloseBtn: {
+    position: "absolute",
+    top: 48,
+    right: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 30,
+  },
+  toastPopup: {
+    position: "absolute",
+    top: 14,
+    left: 16,
+    right: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#0F172A",
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderRadius: Radii.lg,
+    borderWidth: 1,
+    borderColor: "rgba(197, 168, 128, 0.45)",
+    zIndex: 999,
+    ...Shadows.toast,
+  },
+  toastPopupText: {
+    flex: 1,
+    fontFamily: "JakartaSemiBold",
+    fontSize: 12.5,
     color: "#FFFFFF",
-  },
-  ticketScoreHighlight: {
-    fontSize: 12,
-    fontFamily: "JakartaSemiBold",
-    color: Colors.statusSuccess,
-    marginTop: 4,
-  },
-  ticketInstruction: {
-    fontSize: 11,
-    fontFamily: "Jakarta",
-    color: Colors.champagne,
-    textAlign: "center",
-    marginTop: 16,
-    lineHeight: 16,
+    lineHeight: 17,
   },
 });
