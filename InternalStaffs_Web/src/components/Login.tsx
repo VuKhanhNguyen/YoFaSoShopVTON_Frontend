@@ -253,7 +253,7 @@ export function Login() {
             </h1>
 
             <p className="mt-4 max-w-xl text-sm leading-relaxed text-white/80 sm:text-base">
-              Nền tảng điều hành bán lẻ thời trang thông minh tích hợp công nghệ OOTDiffusion AI, tối ưu hóa toàn diện chu trình vận hành từ quầy thu ngân POS, quản lý kho bãi đến giao vận shipper.
+              Nền tảng điều hành bán lẻ thời trang thông minh tích hợp công nghệ Thử đồ ảo AI (VTON), tối ưu hóa toàn diện chu trình vận hành từ quầy thu ngân POS, quản lý kho bãi đến giao vận shipper.
             </p>
 
             {/* 4 Feature Bento Pills */}
@@ -273,8 +273,8 @@ export function Login() {
                   <Cpu className="h-4 w-4" />
                 </span>
                 <div className="min-w-0">
-                  <p className="truncate text-xs font-semibold text-white">Thử đồ ảo AI OOTDiffusion</p>
-                  <p className="truncate font-mono text-[11px] text-white/60">Xử lý GPU High-Fidelity</p>
+                  <p className="truncate text-xs font-semibold text-white">Thử đồ ảo AI FASHN v1.6</p>
+                  <p className="truncate font-mono text-[11px] text-white/60">Cloud VTON High-Fidelity</p>
                 </div>
               </div>
 

@@ -30,9 +30,28 @@ export function O2O({
   const [error, setError] = useState("");
   const [resolvedItems, setResolvedItems] = useState<BienThe[]>([]);
 
+  const extractSessionId = (raw: string): string => {
+    const trimmed = raw.trim();
+    if (trimmed.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && typeof parsed.sessionId === "string" && parsed.sessionId.trim()) {
+          return parsed.sessionId.trim().toUpperCase();
+        }
+      } catch {}
+    }
+    if (trimmed.toUpperCase().startsWith("YOFASO-O2O|")) {
+      return trimmed.split("|")[1]?.trim().toUpperCase() || "";
+    }
+    return trimmed.toUpperCase();
+  };
+
   const lookup = async () => {
-    const cleanSession = sessionId.trim().toUpperCase();
+    const cleanSession = extractSessionId(sessionId);
     const cleanPhone = phone.trim().replace(/\D/g, "");
+    if (cleanSession && cleanSession !== sessionId.trim().toUpperCase()) {
+      setSessionId(cleanSession);
+    }
     if (!cleanSession || !cleanPhone) {
       setError("Vui lòng nhập cả mã phiên thử đồ (VD: TD00000001) và số điện thoại khách.");
       return;
@@ -45,6 +64,7 @@ export function O2O({
       const res = await api<{
         sessionId: string;
         variantId: string;
+        pairedItem?: { variantId?: string };
         status: string;
         total: number;
         advice: string;
@@ -53,8 +73,16 @@ export function O2O({
 
       if (res && res.sessionId) {
         setData(res);
-        // Resolve variants from database
-        const variantIds = [res.variantId, ...(res.recommendations || []).map((r) => r.variantId)];
+        // Resolve variants from database (include paired item from chained session A -> B if present)
+        const variantIds = Array.from(
+          new Set(
+            [
+              res.pairedItem?.variantId,
+              res.variantId,
+              ...(res.recommendations || []).map((r) => r.variantId),
+            ].filter((v): v is string => Boolean(v))
+          )
+        );
         const items: BienThe[] = [];
         for (const vid of variantIds) {
           try {

@@ -312,7 +312,7 @@ export function AiMaskInspectorDialog({
                 3. Agnostic Mask (Vùng thay đồ)
               </span>
               <Badge tone="neutral" className="text-[10px]">
-                OOTDiffusion
+                SAM 2.1 · VTON
               </Badge>
             </div>
             <div className="admin-checkerboard relative flex h-64 items-center justify-center overflow-hidden rounded-md border border-border">
