@@ -31,6 +31,13 @@ import { Colors, Radii, Shadows } from "@/constants/theme";
 import { Button, Notice, State } from "@/components/shop/ui";
 import { PrivateImage } from "@/components/shop/PrivateImage";
 import { CatalogPickerModal } from "@/components/shop/CatalogPickerModal";
+import { AnimatedToast, SlidingTabs } from "@/components/shop/MotionPrimitives";
+import { SmartImage } from "@/components/shop/Skeleton";
+
+const TRYON_MODE_OPTIONS = [
+  { id: "shop" as const, label: "Mẫu của shop", icon: "person-outline" as const },
+  { id: "photo" as const, label: "Ảnh của tôi", icon: "camera-outline" as const },
+];
 
 const portraits = {
   female: require("../../assets/humanModelVTON/FemaleModel.png"),
@@ -369,32 +376,13 @@ export default function TryOnScreen() {
         contentContainerStyle={st.scrollContent}
       >
         {/* Segmented Mode Control */}
-        <View style={st.segmentedBar}>
-          <Pressable
-            disabled={busy}
-            onPress={() => handleModeChange("shop")}
-            style={[st.segmentItem, mode === "shop" && st.segmentActive]}
-          >
-            <Ionicons
-              name="person-outline"
-              size={15}
-              color={mode === "shop" ? Colors.primary : Colors.textSecondary}
-            />
-            <Text style={[st.segmentText, mode === "shop" && st.segmentTextActive]}>Mẫu của shop</Text>
-          </Pressable>
-          <Pressable
-            disabled={busy}
-            onPress={() => handleModeChange("photo")}
-            style={[st.segmentItem, mode === "photo" && st.segmentActive]}
-          >
-            <Ionicons
-              name="camera-outline"
-              size={15}
-              color={mode === "photo" ? Colors.primary : Colors.textSecondary}
-            />
-            <Text style={[st.segmentText, mode === "photo" && st.segmentTextActive]}>Ảnh của tôi</Text>
-          </Pressable>
-        </View>
+        <SlidingTabs
+          options={TRYON_MODE_OPTIONS}
+          value={mode}
+          onChange={handleModeChange}
+          disabled={busy}
+          variant="surface"
+        />
 
         {/* Portrait / Model Stage */}
         {mode === "shop" ? (
@@ -623,13 +611,13 @@ export default function TryOnScreen() {
         {product && (
           <View style={st.editorialCard}>
             <View style={st.selectedProductHeader}>
-              {activeThumbUrl ? (
-                <Image
-                  source={{ uri: publicUrl(activeThumbUrl) }}
-                  style={st.selectedProductThumb}
-                  resizeMode="cover"
-                />
-              ) : null}
+              <SmartImage
+                source={activeThumbUrl ? publicUrl(activeThumbUrl) : null}
+                style={st.selectedProductThumb}
+                contentFit="cover"
+                borderRadius={Radii.md}
+                iconSize={20}
+              />
               <View style={{ flex: 1, gap: 4 }}>
                 <Text style={st.selectedLabel}>TRANG PHỤC ĐANG CHỌN</Text>
                 <Text style={st.selectedTitle} numberOfLines={2}>{product.name}</Text>
@@ -723,7 +711,8 @@ export default function TryOnScreen() {
               : "Tạo ảnh thử đồ AI"
           }
           icon={<Ionicons name="sparkles" size={16} color={Colors.champagne} />}
-          disabled={busy || !variant || (mode === "photo" && !before)}
+          loading={busy}
+          disabled={!variant || (mode === "photo" && !before)}
           onPress={() => void submit()}
         />
 
@@ -762,12 +751,7 @@ export default function TryOnScreen() {
       />
 
       {/* Floating Blocking Toast */}
-      {!!toast && (
-        <View style={st.toastPopup} pointerEvents="none">
-          <Ionicons name="alert-circle" size={18} color="#FDE68A" />
-          <Text style={st.toastPopupText}>{toast}</Text>
-        </View>
-      )}
+      <AnimatedToast message={toast} tone="warning" offset={24} />
     </View>
   );
 }

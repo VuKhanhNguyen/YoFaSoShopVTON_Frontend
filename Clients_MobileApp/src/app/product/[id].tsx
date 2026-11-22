@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Image as ExpoImage } from "expo-image";
 import {
   Dimensions,
-  Image,
   Platform,
   Pressable,
   ScrollView,
@@ -13,22 +11,26 @@ import {
 } from "react-native";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import Animated, {
+  LinearTransition,
+  ZoomIn,
+  useReducedMotion,
+} from "react-native-reanimated";
 import { api, publicUrl } from "@/lib/api";
 import { useResource } from "@/hooks/use-resource";
 import { useSession } from "@/lib/session";
-import { money, type Product, type Review, type Row, type Variant } from "@/lib/models";
+import { type Product, type Review, type Row } from "@/lib/models";
 import { Colors, Fonts, Radii, Shadows } from "@/constants/theme";
 import {
-  EditorialImages,
   SAN_PHAM_MOCK,
-  SanPham,
   formatVND,
   tonKho,
   vtonHint,
-  KICH_CO,
-  KichCo,
 } from "@/lib/catalog-data";
-import { Button, Notice, Sheet, colors } from "@/components/shop/ui";
+import { Sheet } from "@/components/shop/ui";
+import { CartActionButton } from "@/components/shop/ShopHeader";
+import { ScalePressable } from "@/components/shop/MotionPrimitives";
+import { ProductDetailSkeleton, SmartImage } from "@/components/shop/Skeleton";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -394,11 +396,33 @@ export default function ProductDetailScreen() {
   };
 
   // Reviews data directly from database (no fake fallback)
+  const reducedMotion = useReducedMotion();
   const reviews: Review[] = reviewsState.data ?? [];
   const rawRating = Number(p?.avgRating);
   const avgStars = !isNaN(rawRating) && rawRating > 0 ? rawRating.toFixed(1) : "0.0";
   const reviewCount = p?.reviewCount ?? reviews.length;
   const soldCount = p?.soldCount ?? 0;
+
+  if (state.loading && !state.data) {
+    return (
+      <View style={st.container}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <ProductDetailSkeleton />
+        <View style={st.topFloatingBar}>
+          <ScalePressable
+            accessibilityRole="button"
+            accessibilityLabel="Quay lại"
+            activeScale={0.9}
+            hitSlop={6}
+            onPress={() => router.back()}
+            style={st.floatingCircleBtn}
+          >
+            <Ionicons name="chevron-back" size={20} color={Colors.primary} />
+          </ScalePressable>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={st.container}>
@@ -420,12 +444,12 @@ export default function ProductDetailScreen() {
           >
             {gallerySlides.map((slide, i) => (
               <View key={i} style={st.imageSlide}>
-                <ExpoImage
-                  source={typeof slide.uri === "number" ? slide.uri : { uri: slide.uri }}
+                <SmartImage
+                  source={slide.uri}
                   style={st.slideImage}
                   contentFit="cover"
-                  transition={200}
-                  cachePolicy="memory-disk"
+                  priority={i === 0 ? "high" : "normal"}
+                  iconSize={36}
                 />
               </View>
             ))}
@@ -433,36 +457,33 @@ export default function ProductDetailScreen() {
 
           {/* Top Floating Glass Action Bar */}
           <View style={st.topFloatingBar}>
-            <Pressable
+            <ScalePressable
               accessibilityRole="button"
               accessibilityLabel="Quay lại"
+              activeScale={0.9}
+              hitSlop={6}
               onPress={() => router.back()}
               style={st.floatingCircleBtn}
             >
               <Ionicons name="chevron-back" size={20} color={Colors.primary} />
-            </Pressable>
+            </ScalePressable>
             <View style={{ flexDirection: "row", gap: 8 }}>
-              <Pressable
+              <ScalePressable
                 accessibilityRole="button"
                 accessibilityLabel="Chia sẻ"
+                activeScale={0.9}
+                hitSlop={6}
                 onPress={handleShare}
                 style={st.floatingCircleBtn}
               >
                 <Ionicons name="share-outline" size={19} color={Colors.primary} />
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Túi đồ"
+              </ScalePressable>
+              <CartActionButton
+                count={cartCount}
                 onPress={() => router.push("/cart")}
-                style={st.floatingCircleBtn}
-              >
-                <Ionicons name="bag-handle-outline" size={19} color={Colors.primary} />
-                {cartCount > 0 && (
-                  <View style={st.cartCounter}>
-                    <Text style={st.cartCounterText}>{cartCount}</Text>
-                  </View>
-                )}
-              </Pressable>
+                buttonStyle={st.floatingCircleBtn}
+                iconSize={19}
+              />
             </View>
           </View>
 
@@ -475,8 +496,9 @@ export default function ProductDetailScreen() {
           {/* Pagination Indicators */}
           <View style={st.paginationRow}>
             {gallerySlides.map((_, i) => (
-              <View
+              <Animated.View
                 key={i}
+                layout={reducedMotion ? undefined : LinearTransition.springify().damping(18).stiffness(280)}
                 style={[
                   st.paginationDot,
                   i === activeSlide && st.paginationDotActive,
@@ -560,8 +582,10 @@ export default function ProductDetailScreen() {
               {colorOptions.map((c, i) => {
                 const on = i === selectedColorIndex;
                 return (
-                  <Pressable
+                  <ScalePressable
                     key={`${c.hex}-${i}`}
+                    activeScale={0.88}
+                    hitSlop={4}
                     onPress={() => handleSelectColor(i)}
                     style={[
                       st.swatchRing,
@@ -575,7 +599,7 @@ export default function ProductDetailScreen() {
                         c.hex.split(",")[0].trim().toLowerCase() === "#ffffff" && { borderWidth: 1, borderColor: "#CBD5E1" },
                       ]}
                     />
-                  </Pressable>
+                  </ScalePressable>
                 );
               })}
             </ScrollView>
@@ -598,8 +622,9 @@ export default function ProductDetailScreen() {
                 const on = selectedSize === s;
                 const available = isSizeAvailable(s);
                 return (
-                  <Pressable
+                  <ScalePressable
                     key={s}
+                    activeScale={0.93}
                     disabled={!available}
                     onPress={() => available && setSelectedSize(s)}
                     style={[
@@ -618,7 +643,7 @@ export default function ProductDetailScreen() {
                       {s}
                     </Text>
                     {!available && <View style={st.sizePillSlash} />}
-                  </Pressable>
+                  </ScalePressable>
                 );
               })}
             </View>
@@ -649,7 +674,10 @@ export default function ProductDetailScreen() {
 
           {/* Description & Expandable Details */}
           {productDesc && (
-            <View style={st.descBlock}>
+            <Animated.View
+              layout={reducedMotion ? undefined : LinearTransition.duration(200)}
+              style={st.descBlock}
+            >
               <Text style={st.sectionHeaderLabel}>Mô tả chi tiết</Text>
               <Text
                 numberOfLines={descExpanded ? undefined : 3}
@@ -680,7 +708,7 @@ export default function ProductDetailScreen() {
                   color={Colors.champagneDeep}
                 />
               </Pressable>
-            </View>
+            </Animated.View>
           )}
 
           {/* Customer Reviews Area (Requirement 5) */}
@@ -796,29 +824,36 @@ export default function ProductDetailScreen() {
 
       {/* Floating Bottom Action Dock */}
       <View style={st.actionDock}>
-        <Pressable
+        <ScalePressable
           accessibilityRole="button"
           accessibilityLabel="Thêm vào giỏ hàng"
+          activeScale={0.9}
           disabled={isSoldOut || busy}
           onPress={handleAddToCart}
-          style={st.addToCartBtn}
+          style={[st.addToCartBtn, cartSuccess && { borderColor: Colors.statusSuccess }]}
         >
           {cartSuccess ? (
-            <Ionicons name="checkmark" size={22} color={Colors.statusSuccess} />
+            <Animated.View
+              key="check"
+              entering={reducedMotion ? undefined : ZoomIn.springify().damping(14).stiffness(300)}
+            >
+              <Ionicons name="checkmark" size={22} color={Colors.statusSuccess} />
+            </Animated.View>
           ) : (
             <Ionicons name="bag-add-outline" size={22} color={Colors.primary} />
           )}
-        </Pressable>
+        </ScalePressable>
 
-        <Pressable
+        <ScalePressable
           accessibilityRole="button"
           accessibilityLabel="Ướm thử vào tôi"
+          activeScale={0.97}
           onPress={handleTryOn}
           style={st.tryOnCtaBtn}
         >
           <Ionicons name="shirt" size={17} color={Colors.champagne} />
           <Text style={st.tryOnCtaText}>ƯỚM THỬ VÀO TÔI</Text>
-        </Pressable>
+        </ScalePressable>
       </View>
 
       {/* Multi-Tab Size Guide Modal Sheet (Requirement 3) */}
@@ -1412,7 +1447,7 @@ const st = StyleSheet.create({
   },
   verifiedText: {
     fontSize: 10,
-    fontFamily: "JakartaMedium",
+    fontFamily: "JakartaSemiBold",
     color: Colors.statusSuccess,
   },
   reviewStarsRow: {
@@ -1519,7 +1554,7 @@ const st = StyleSheet.create({
   },
   sizeGuideTabBtnText: {
     fontSize: 11.5,
-    fontFamily: "JakartaMedium",
+    fontFamily: "Jakarta",
     color: Colors.textSecondary,
   },
   sizeGuideTabBtnTextActive: {

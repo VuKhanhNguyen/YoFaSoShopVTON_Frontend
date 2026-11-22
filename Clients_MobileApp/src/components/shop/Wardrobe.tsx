@@ -1,7 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
-import { AppState, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { memo, useCallback, useEffect, useState } from "react";
+import { AppState, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import Animated, {
+  Easing,
+  cancelAnimation,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from "react-native-reanimated";
 import { useResource } from "@/hooks/use-resource";
 import { PrivateImage } from "./PrivateImage";
 import { ShopHeader } from "./ShopHeader";
@@ -9,8 +19,37 @@ import { useSession } from "@/lib/session";
 import { isPending, statusLabel, type TryOnSession } from "@/lib/try-on";
 import { Colors, Radii, Shadows } from "@/constants/theme";
 import { Button, EmptyState, State } from "./ui";
+import { ScalePressable } from "./MotionPrimitives";
 
 const PAGE_SIZE = 20;
+
+const PendingPulseDot = memo(function PendingPulseDot({ active }: { active: boolean }) {
+  const reducedMotion = useReducedMotion();
+  const opacity = useSharedValue(1);
+
+  useEffect(() => {
+    if (!active || reducedMotion) {
+      cancelAnimation(opacity);
+      opacity.value = 1;
+      return;
+    }
+    opacity.value = withRepeat(
+      withSequence(
+        withTiming(0.32, { duration: 650, easing: Easing.inOut(Easing.sin) }),
+        withTiming(1, { duration: 650, easing: Easing.inOut(Easing.sin) })
+      ),
+      -1,
+      false
+    );
+    return () => cancelAnimation(opacity);
+  }, [active, reducedMotion, opacity]);
+
+  const animStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+  }));
+
+  return <Animated.View style={[st.pendingDot, animStyle]} />;
+});
 
 function scoreTone(score: number) {
   if (score >= 85) return { text: Colors.statusSuccess, bg: Colors.statusSuccessSubtle };
@@ -79,7 +118,13 @@ export function Wardrobe() {
           />
         ) : (
           <>
-            <State loading={!state.data && state.loading} error={state.error} retry={reload} />
+            <State
+              loading={!state.data && state.loading}
+              error={state.error}
+              retry={reload}
+              variant="grid"
+              skeletonCount={4}
+            />
 
             {state.data?.length === 0 && (
               <EmptyState
@@ -95,10 +140,10 @@ export function Wardrobe() {
                 const pending = isPending(item.status);
                 const tone = item.score != null ? scoreTone(item.score) : null;
                 return (
-                  <TouchableOpacity
+                  <ScalePressable
                     key={item.sessionId}
                     style={st.card}
-                    activeOpacity={0.86}
+                    activeScale={0.97}
                     onPress={() => router.push({ pathname: "/session/[id]", params: { id: item.sessionId } })}
                   >
                     <View style={st.thumbWrapper}>
@@ -114,7 +159,7 @@ export function Wardrobe() {
 
                       {pending && (
                         <View style={st.pendingPill}>
-                          <View style={st.pendingDot} />
+                          <PendingPulseDot active={focused && foreground} />
                           <Text style={st.pendingPillText}>
                             {item.progress && item.progress > 0 ? `${item.progress}%` : "Đang xử lý"}
                           </Text>
@@ -135,7 +180,7 @@ export function Wardrobe() {
                       </View>
                       <Text style={st.productName} numberOfLines={1}>{item.productName}</Text>
                     </View>
-                  </TouchableOpacity>
+                  </ScalePressable>
                 );
               })}
             </View>

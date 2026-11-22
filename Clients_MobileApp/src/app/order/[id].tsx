@@ -18,9 +18,11 @@ import * as Sharing from "expo-sharing";
 import { api, publicUrl } from "@/lib/api";
 import { useResource } from "@/hooks/use-resource";
 import type { Row } from "@/lib/models";
-import { Colors, Fonts, Radii, Shadows } from "@/constants/theme";
-import { EditorialImages, formatVND } from "@/lib/catalog-data";
-import { Button, Notice, Sheet, colors } from "@/components/shop/ui";
+import { Colors, Radii, Shadows } from "@/constants/theme";
+import { formatVND } from "@/lib/catalog-data";
+import { Button, Notice, Sheet } from "@/components/shop/ui";
+import { AnimatedToast } from "@/components/shop/MotionPrimitives";
+import { ListCardSkeleton, SmartImage } from "@/components/shop/Skeleton";
 
 const ORDER_STEPS: { code: string; label: string; sub?: string }[] = [
   { code: "CHO_XAC_NHAN", label: "Chờ xác nhận đơn hàng" },
@@ -187,6 +189,10 @@ export default function OrderDetailScreen() {
           />
         }
       >
+        {state.loading && !state.data ? (
+          <ListCardSkeleton variant="cards" count={3} />
+        ) : (
+          <>
         {/* Status Stepper Timeline */}
         <View style={st.card}>
           <Text style={st.cardTitle}>Hành trình đơn hàng</Text>
@@ -300,19 +306,13 @@ export default function OrderDetailScreen() {
                 },
               ]}
             >
-              {item.coverUrl ? (
-                <Image
-                  source={{ uri: publicUrl(String(item.coverUrl)) }}
-                  style={st.itemThumb}
-                  resizeMode="cover"
-                />
-              ) : (
-                <Image
-                  source={EditorialImages.shirt}
-                  style={st.itemThumb}
-                  resizeMode="cover"
-                />
-              )}
+              <SmartImage
+                source={item.coverUrl ? publicUrl(String(item.coverUrl)) : null}
+                style={st.itemThumb}
+                contentFit="cover"
+                borderRadius={Radii.md}
+                iconSize={22}
+              />
               <View style={{ flex: 1 }}>
                 <Text style={st.itemName} numberOfLines={2}>
                   {String(item.productName || "Sản phẩm YoFaSo")}
@@ -415,6 +415,8 @@ export default function OrderDetailScreen() {
           >
             <Text style={st.cancelBtnText}>HỦY ĐƠN HÀNG</Text>
           </Pressable>
+        )}
+          </>
         )}
       </ScrollView>
 
@@ -678,12 +680,7 @@ export default function OrderDetailScreen() {
       </Sheet>
 
       {/* Toast Feedback */}
-      {!!toast && (
-        <View style={st.toastPopup}>
-          <Ionicons name="checkmark-circle" size={17} color={Colors.statusSuccess} />
-          <Text style={st.toastPopupText}>{toast}</Text>
-        </View>
-      )}
+      <AnimatedToast message={toast} tone="success" offset={24} />
     </View>
   );
 }

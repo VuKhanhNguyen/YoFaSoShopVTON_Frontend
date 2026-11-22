@@ -20,6 +20,13 @@ import { useResource } from "@/hooks/use-resource";
 import type { Row } from "@/lib/models";
 import { RequireAccount } from "@/components/shop/RequireAccount";
 import { SelectField } from "@/components/shop/SelectField";
+import { ScalePressable, SlidingTabs } from "@/components/shop/MotionPrimitives";
+import { ListCardSkeleton } from "@/components/shop/Skeleton";
+
+const ADDRESS_MODE_OPTIONS = [
+  { id: "new" as const, label: "Địa chỉ mới", icon: "sparkles" as const },
+  { id: "legacy" as const, label: "Địa chỉ cũ", icon: "time-outline" as const },
+];
 
 type AddressMode = "new" | "legacy";
 
@@ -391,7 +398,9 @@ function AddressesContent() {
 
         {/* Address Cards List */}
         <View style={st.cardList}>
-          {addresses.length === 0 ? (
+          {state.loading && !state.data ? (
+            <ListCardSkeleton variant="rows" count={2} />
+          ) : addresses.length === 0 ? (
             <View
               style={{
                 backgroundColor: Colors.surface,
@@ -483,13 +492,13 @@ function AddressesContent() {
         </View>
 
         {/* Add Address CTA */}
-        <Pressable
-          style={({ pressed }) => [st.addAddressBtn, pressed && { opacity: 0.85 }]}
+        <ScalePressable
+          style={st.addAddressBtn}
           onPress={handleOpenAdd}
         >
           <Ionicons name="add-circle-outline" size={20} color={Colors.canvas} />
           <Text style={st.addAddressBtnText}>Thêm địa chỉ mới</Text>
-        </Pressable>
+        </ScalePressable>
       </ScrollView>
 
       {/* Add / Edit Address Modal */}
@@ -550,35 +559,12 @@ function AddressesContent() {
             {/* Dual Mode Switch */}
             <View style={st.modeSection}>
               <Text style={st.inputLabel}>Phương thức chọn khu vực</Text>
-              <View style={st.modeTabsContainer}>
-                <Pressable
-                  onPress={() => setMode("new")}
-                  style={[st.modeTab, mode === "new" && st.modeTabActive]}
-                >
-                  <Ionicons
-                    name="sparkles"
-                    size={13}
-                    color={mode === "new" ? Colors.primary : Colors.muted}
-                  />
-                  <Text style={[st.modeTabText, mode === "new" && st.modeTabTextActive]}>
-                    Địa chỉ mới
-                  </Text>
-                </Pressable>
-
-                <Pressable
-                  onPress={() => setMode("legacy")}
-                  style={[st.modeTab, mode === "legacy" && st.modeTabActive]}
-                >
-                  <Ionicons
-                    name="time-outline"
-                    size={13}
-                    color={mode === "legacy" ? Colors.primary : Colors.muted}
-                  />
-                  <Text style={[st.modeTabText, mode === "legacy" && st.modeTabTextActive]}>
-                    Địa chỉ cũ
-                  </Text>
-                </Pressable>
-              </View>
+              <SlidingTabs
+                options={ADDRESS_MODE_OPTIONS}
+                value={mode}
+                onChange={setMode}
+                variant="surface"
+              />
             </View>
 
             {/* MODE 1: ĐỊA CHỈ MỚI (TỈNH -> PHƯỜNG/XÃ TRỰC THUỘC) */}

@@ -1,6 +1,14 @@
 import { useEffect, useState } from "react";
-import { Alert, Image, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import Svg, { Circle } from "react-native-svg";
+import Animated, {
+  Easing,
+  FadeInDown,
+  useAnimatedProps,
+  useReducedMotion,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
 import { api, publicUrl } from "@/lib/api";
 import { formatVND } from "@/lib/catalog-data";
@@ -9,6 +17,11 @@ import type { Page, Product, Row } from "@/lib/models";
 import { Colors, Radii, Shadows } from "@/constants/theme";
 import { SelectField } from "./SelectField";
 import { Button, Field, Notice, State } from "./ui";
+import { AnimatedProgressBar, ScalePressable } from "./MotionPrimitives";
+import { SmartImage } from "./Skeleton";
+
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+const SCORE_RING_CIRCUMFERENCE = 2 * Math.PI * 38;
 
 export type RecommendedTryOnItem = {
   productId: string;
@@ -201,6 +214,25 @@ export function OutfitScoring({
   const comboTargetVariantId = second || (suggestions[0]?.variantId ? String(suggestions[0].variantId) : undefined);
   const ringStroke = visual.color;
 
+  const reducedMotion = useReducedMotion();
+  const ringProgress = useSharedValue(reducedMotion ? Math.min(100, Math.max(0, total)) / 100 : 0);
+
+  useEffect(() => {
+    const target = Math.min(100, Math.max(0, total)) / 100;
+    if (reducedMotion) {
+      ringProgress.value = target;
+    } else {
+      ringProgress.value = withTiming(target, {
+        duration: 680,
+        easing: Easing.out(Easing.cubic),
+      });
+    }
+  }, [total, reducedMotion, ringProgress]);
+
+  const animatedRingProps = useAnimatedProps(() => ({
+    strokeDashoffset: SCORE_RING_CIRCUMFERENCE * (1 - ringProgress.value),
+  }));
+
   return (
     <View style={st.container}>
       {hasFullScore ? (
@@ -210,15 +242,15 @@ export function OutfitScoring({
             <View style={st.ringWrap}>
               <Svg width={74} height={74} viewBox="0 0 100 100">
                 <Circle cx="50" cy="50" r={38} stroke={Colors.borderHairline} strokeWidth="7" fill="none" />
-                <Circle
+                <AnimatedCircle
                   cx="50"
                   cy="50"
                   r={38}
                   stroke={ringStroke}
                   strokeWidth="7"
                   strokeLinecap="round"
-                  strokeDasharray={2 * Math.PI * 38}
-                  strokeDashoffset={2 * Math.PI * 38 * (1 - Math.min(100, Math.max(0, total)) / 100)}
+                  strokeDasharray={SCORE_RING_CIRCUMFERENCE}
+                  animatedProps={animatedRingProps}
                   fill="none"
                   transform="rotate(-90 50 50)"
                 />
@@ -245,18 +277,21 @@ export function OutfitScoring({
               weight="40%"
               value={proportion}
               note={breakdownNotes.proportion}
+              delayMs={0}
             />
             <BreakdownRow
               label="Phối màu bánh xe màu"
               weight="40%"
               value={color}
               note={breakdownNotes.color}
+              delayMs={80}
             />
             <BreakdownRow
               label="Cân bằng họa tiết"
               weight="20%"
               value={pattern}
               note={breakdownNotes.pattern}
+              delayMs={160}
             />
 
             <View style={st.penaltyRow}>
@@ -330,13 +365,13 @@ export function OutfitScoring({
                 return (
                   <View key={String(r.recommendationId || r.variantId)} style={st.suggestionCard}>
                     <View style={st.cardImageWrap}>
-                      {resolvedUri ? (
-                        <Image source={{ uri: resolvedUri }} style={st.cardImage} resizeMode="cover" />
-                      ) : (
-                        <View style={[st.cardImage, st.imagePlaceholder]}>
-                          <Ionicons name="shirt-outline" size={28} color={Colors.textMuted} />
-                        </View>
-                      )}
+                      <SmartImage
+                        source={resolvedUri || null}
+                        style={st.cardImage}
+                        contentFit="cover"
+                        borderRadius={Radii.md}
+                        iconSize={26}
+                      />
                       <View style={st.projectedBadge}>
                         <Text style={st.projectedBadgeText}>{String(r.projectedScore)}đ</Text>
                       </View>
@@ -345,13 +380,14 @@ export function OutfitScoring({
                     <Text style={st.cardName} numberOfLines={1}>{String(r.name || r.variantId)}</Text>
                     <Text style={st.cardPrice}>{formatVND(r.price as number | string)}</Text>
 
-                    <Pressable
+                    <ScalePressable
                       style={st.trySetBtn}
+                      activeScale={0.95}
                       onPress={() => handleTrySuggestion(r)}
                     >
                       <Text style={st.trySetBtnText}>Ướm thử set</Text>
                       <Ionicons name="arrow-forward" size={12} color="#FFFFFF" />
-                    </Pressable>
+                    </ScalePressable>
 
                     <View style={st.quickActionsRow}>
                       <Pressable
@@ -393,14 +429,14 @@ export function OutfitScoring({
 
       {/* Dual CTA Buttons */}
       <View style={st.dualCtaRow}>
-        <Pressable style={st.singleBtn} onPress={onSingleBuy}>
+        <ScalePressable style={st.singleBtn} onPress={onSingleBuy}>
           <Text style={st.singleBtnTitle}>Mua riêng món này</Text>
-        </Pressable>
+        </ScalePressable>
 
-        <Pressable style={st.comboBtn} onPress={() => onComboBuy?.(comboTargetVariantId)}>
+        <ScalePressable style={st.comboBtn} onPress={() => onComboBuy?.(comboTargetVariantId)}>
           <Text style={st.comboBtnTitle}>Mua combo (-5%)</Text>
           <Text style={st.comboBtnSub}>Ưu đãi trọn bộ</Text>
-        </Pressable>
+        </ScalePressable>
       </View>
 
       {/* Trust Badges */}
@@ -427,7 +463,10 @@ export function OutfitScoring({
       </Pressable>
 
       {showManualPicker && (
-        <View style={st.manualSection}>
+        <Animated.View
+          entering={reducedMotion ? undefined : FadeInDown.duration(180)}
+          style={st.manualSection}
+        >
           <Notice>
             Chọn thêm quần/chân váy nếu món chính là áo, hoặc chọn áo nếu món chính là quần.
           </Notice>
@@ -512,7 +551,7 @@ export function OutfitScoring({
             <Button
               title="Tìm thêm gợi ý phối mới"
               secondary
-              disabled={busy}
+              loading={busy}
               onPress={() =>
                 void task(async () =>
                   setSuggestions(
@@ -525,7 +564,7 @@ export function OutfitScoring({
               }
             />
           )}
-        </View>
+        </Animated.View>
       )}
     </View>
   );
@@ -536,11 +575,13 @@ function BreakdownRow({
   weight,
   value,
   note,
+  delayMs = 0,
 }: {
   label: string;
   weight: string;
   value: number;
   note: string;
+  delayMs?: number;
 }) {
   const barColor =
     value >= 85 ? Colors.statusSuccess : value >= 70 ? Colors.champagneDeep : Colors.statusWarning;
@@ -552,9 +593,14 @@ function BreakdownRow({
         </Text>
         <Text style={st.barScore}>{value}/100</Text>
       </View>
-      <View style={st.barTrack}>
-        <View style={[st.barFill, { width: `${Math.min(100, Math.max(0, value))}%`, backgroundColor: barColor }]} />
-      </View>
+      <AnimatedProgressBar
+        percent={value}
+        fillColor={barColor}
+        trackColor={Colors.surfaceMuted}
+        height={6}
+        borderRadius={3}
+        delayMs={delayMs}
+      />
       <Text style={st.barNote}>{note}</Text>
     </View>
   );

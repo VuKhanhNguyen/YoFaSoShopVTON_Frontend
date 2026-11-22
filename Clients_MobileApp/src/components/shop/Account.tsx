@@ -22,6 +22,12 @@ import { Colors, Fonts, Radii, Shadows } from "@/constants/theme";
 import { formatMembershipBadge, formatMembershipRank, formatVND, getUserVouchers, type UserWalletVoucherItem } from "@/lib/catalog-data";
 import { ShopHeader } from "@/components/shop/ShopHeader";
 import { Sheet } from "@/components/shop/ui";
+import {
+  AnimatedProgressBar,
+  AnimatedToast,
+  ScalePressable,
+  SlidingTabs,
+} from "@/components/shop/MotionPrimitives";
 
 export const Account = memo(function Account() {
   const { user, setUser, signOut } = useSession();
@@ -304,19 +310,17 @@ export const Account = memo(function Account() {
                 ≈ {(Number(user.loyaltyPoints || 0) * 100).toLocaleString("vi-VN")}đ giảm giá trực tiếp
               </Text>
 
-              <View style={st.tierProgressTrack}>
-                <View
-                  style={[
-                    st.tierProgressFill,
-                    {
-                      width: `${Math.min(
-                        100,
-                        Math.max(10, ((Number(user.loyaltyPoints || 0) % 1000) / 1000) * 100)
-                      )}%`,
-                    },
-                  ]}
-                />
-              </View>
+              <AnimatedProgressBar
+                percent={Math.min(
+                  100,
+                  Math.max(10, ((Number(user.loyaltyPoints || 0) % 1000) / 1000) * 100)
+                )}
+                fillColor={Colors.champagne}
+                trackColor="rgba(255, 255, 255, 0.15)"
+                height={5}
+                borderRadius={2.5}
+                style={{ marginTop: 14 }}
+              />
               <View style={st.tierProgressLabelsRow}>
                 <Text style={st.tierProgressLeft}>
                   {Number(user.loyaltyPoints || 0).toLocaleString("vi-VN")} điểm
@@ -344,7 +348,7 @@ export const Account = memo(function Account() {
                   { icon: "star-outline" as const, label: "Chờ đánh giá", count: 0 },
                   { icon: "repeat-outline" as const, label: "Đổi trả / Hủy", count: 0 },
                 ].map((s, idx) => (
-                  <Pressable key={idx} onPress={() => router.push("/orders")} style={st.statusIconItem}>
+                  <ScalePressable key={idx} activeScale={0.92} onPress={() => router.push("/orders")} style={st.statusIconItem}>
                     <View style={st.statusIconCircle}>
                       <Ionicons name={s.icon} size={18} color={Colors.primary} />
                       {s.count > 0 && (
@@ -354,7 +358,7 @@ export const Account = memo(function Account() {
                       )}
                     </View>
                     <Text style={st.statusLabelText}>{s.label}</Text>
-                  </Pressable>
+                  </ScalePressable>
                 ))}
               </View>
             </View>
@@ -383,14 +387,14 @@ export const Account = memo(function Account() {
                     action: showSoon,
                   },
                 ].map((m, i) => (
-                  <Pressable key={i} onPress={m.action} style={[st.menuRow, i > 0 && st.menuRowDivider]}>
+                  <ScalePressable key={i} activeScale={0.98} onPress={m.action} style={[st.menuRow, i > 0 && st.menuRowDivider]}>
                     <Ionicons name={m.icon} size={20} color={Colors.champagneDeep} />
                     <View style={{ flex: 1 }}>
                       <Text style={st.menuRowTitle}>{m.title}</Text>
                       <Text style={st.menuRowSub}>{m.sub}</Text>
                     </View>
                     <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
-                  </Pressable>
+                  </ScalePressable>
                 ))}
               </View>
             </View>
@@ -424,20 +428,20 @@ export const Account = memo(function Account() {
                     action: showSoon,
                   },
                 ].map((m, i) => (
-                  <Pressable key={i} onPress={m.action} style={[st.menuRow, i > 0 && st.menuRowDivider]}>
+                  <ScalePressable key={i} activeScale={0.98} onPress={m.action} style={[st.menuRow, i > 0 && st.menuRowDivider]}>
                     <Ionicons name={m.icon} size={20} color={Colors.primary} />
                     <View style={{ flex: 1 }}>
                       <Text style={st.menuRowTitle}>{m.title}</Text>
                       <Text style={st.menuRowSub}>{m.sub}</Text>
                     </View>
                     <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
-                  </Pressable>
+                  </ScalePressable>
                 ))}
               </View>
             </View>
 
             {/* Logout CTA */}
-            <Pressable
+            <ScalePressable
               accessibilityRole="button"
               accessibilityLabel="Đăng xuất tài khoản"
               onPress={async () => {
@@ -448,7 +452,7 @@ export const Account = memo(function Account() {
             >
               <Ionicons name="log-out-outline" size={18} color={Colors.statusDanger} />
               <Text style={st.logoutText}>ĐĂNG XUẤT TÀI KHOẢN</Text>
-            </Pressable>
+            </ScalePressable>
           </>
         ) : (
           /* ================= GUEST (KHÁCH VÃNG LAI) VIEW ================= */
@@ -579,26 +583,17 @@ export const Account = memo(function Account() {
         onClose={() => setVoucherSheetOpen(false)}
         title="Kho Voucher & Mã Khuyến Mãi"
         headerExtra={
-          <View style={st.voucherSheetTabsRow}>
-            {[
+          <SlidingTabs
+            options={[
               { id: "ALL" as const, label: `Tất cả (${userVouchers.length})` },
               { id: "READY" as const, label: `Sẵn sàng (${readyVouchers.length})` },
               { id: "USED" as const, label: `Đã dùng (${usedVouchers.length})` },
-            ].map((tab) => {
-              const active = voucherTab === tab.id;
-              return (
-                <Pressable
-                  key={tab.id}
-                  onPress={() => setVoucherTab(tab.id)}
-                  style={[st.voucherSheetTab, active && st.voucherSheetTabActive]}
-                >
-                  <Text style={[st.voucherSheetTabText, active && st.voucherSheetTabTextActive]}>
-                    {tab.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+            ]}
+            value={voucherTab}
+            onChange={setVoucherTab}
+            variant="obsidian"
+            textStyle={{ fontSize: 11.5 }}
+          />
         }
         scrollable={false}
       >
@@ -755,12 +750,7 @@ export const Account = memo(function Account() {
       </Sheet>
 
       {/* Toast Feedback */}
-      {!!toast && (
-        <View style={st.toastPopup}>
-          <Ionicons name="information-circle" size={17} color={Colors.champagneDeep} />
-          <Text style={st.toastPopupText}>{toast}</Text>
-        </View>
-      )}
+      <AnimatedToast message={toast} tone="info" position="top" offset={52} />
     </View>
   );
 });
@@ -1314,7 +1304,7 @@ const st = StyleSheet.create({
   },
   voucherWalletDiscount: {
     fontSize: 12,
-    fontFamily: "JakartaBold",
+    fontFamily: "JakartaSemiBold",
     color: Colors.champagneDeep,
   },
   voucherWalletCondition: {
@@ -1335,7 +1325,7 @@ const st = StyleSheet.create({
   },
   voucherUsedOrderText: {
     fontSize: 9.5,
-    fontFamily: "JakartaMedium",
+    fontFamily: "JakartaSemiBold",
     color: Colors.champagneDeep,
     marginTop: 2,
   },
@@ -1359,7 +1349,7 @@ const st = StyleSheet.create({
   },
   shopeeText: {
     fontSize: 9.5,
-    fontFamily: "JakartaMedium",
+    fontFamily: "Jakarta",
     color: Colors.textMuted,
   },
   voucherWalletRight: {

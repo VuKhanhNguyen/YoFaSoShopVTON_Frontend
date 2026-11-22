@@ -1,9 +1,6 @@
-import { memo, useState } from "react";
-import { Image as ExpoImage } from "expo-image";
+import { memo } from "react";
 import {
   Dimensions,
-
-  Pressable,
   StyleProp,
   StyleSheet,
   Text,
@@ -12,9 +9,11 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors, Radii, Shadows } from "@/constants/theme";
-import { EditorialImages, formatVND } from "@/lib/catalog-data";
+import { formatVND } from "@/lib/catalog-data";
 import { publicUrl } from "@/lib/api";
 import type { Product } from "@/lib/models";
+import { ScalePressable } from "./MotionPrimitives";
+import { SmartImage } from "./Skeleton";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 export const CARD_WIDTH = (SCREEN_WIDTH - 48) / 2;
@@ -51,7 +50,7 @@ export interface UnifiedProduct {
 }
 
 export function mapApiProduct(p: Product, idx: number = 0): UnifiedProduct {
-  const img = p.coverUrl ? publicUrl(p.coverUrl) : EditorialImages.shirt;
+  const img = p.coverUrl ? publicUrl(p.coverUrl) : null;
   const representativeSku =
     p.sku ||
     (p.variants && p.variants[0]?.sku) ||
@@ -100,8 +99,10 @@ export function mapApiProduct(p: Product, idx: number = 0): UnifiedProduct {
 export interface ProductCardProps {
   item: UnifiedProduct;
   index?: number;
-  onOpen: () => void;
-  onTry: () => void;
+  onOpen?: () => void;
+  onTry?: () => void;
+  onOpenItem?: (item: UnifiedProduct) => void;
+  onTryItem?: (item: UnifiedProduct) => void;
   /** Bật hiệu ứng so le (stagger) 18px cho cột bên phải theo phong cách Editorial. Mặc định: true */
   stagger?: boolean;
   /** Độ rộng tùy biến của card (mặc định theo CARD_WIDTH) */
@@ -114,24 +115,31 @@ export const ProductCard = memo(function ProductCard({
   index = 0,
   onOpen,
   onTry,
+  onOpenItem,
+  onTryItem,
   stagger = true,
   width,
   style,
 }: ProductCardProps) {
-  const [imgError, setImgError] = useState(false);
   const isRightCol = index % 2 === 1;
   const cardW = width ?? CARD_WIDTH;
-  const imageSource = imgError
-    ? EditorialImages.shirt
-    : typeof item.image === "number"
-    ? item.image
-    : { uri: item.image };
+
+  const handleOpen = () => {
+    if (onOpenItem) onOpenItem(item);
+    else onOpen?.();
+  };
+
+  const handleTry = () => {
+    if (onTryItem) onTryItem(item);
+    else onTry?.();
+  };
 
   return (
-    <Pressable
+    <ScalePressable
       accessibilityRole="button"
       accessibilityLabel={`Xem ${item.name}`}
-      onPress={onOpen}
+      activeScale={0.97}
+      onPress={handleOpen}
       style={[
         st.cardWrapper,
         { width: cardW },
@@ -140,14 +148,13 @@ export const ProductCard = memo(function ProductCard({
       ]}
     >
       <View style={[st.imageContainer, { width: cardW, height: cardW * 1.35 }]}>
-        <ExpoImage
-          source={imageSource}
+        <SmartImage
+          source={item.image}
           style={st.cardImage}
           contentFit="cover"
-          transition={200}
-          cachePolicy="memory-disk"
+          borderRadius={Radii.lg}
           priority="high"
-          onError={() => setImgError(true)}
+          iconSize={26}
         />
 
         {/* VTON Badge */}
@@ -164,18 +171,20 @@ export const ProductCard = memo(function ProductCard({
         ) : null}
 
         {/* Overlay Try-On Pill */}
-        <Pressable
+        <ScalePressable
           accessibilityRole="button"
           accessibilityLabel="Ướm thử AI"
+          activeScale={0.92}
+          hitSlop={6}
           onPress={(e) => {
             e.stopPropagation();
-            onTry();
+            handleTry();
           }}
           style={st.overlayTryPill}
         >
           <Ionicons name="sparkles" size={10} color={Colors.primary} />
           <Text style={st.overlayTryText}>Ướm thử AI</Text>
-        </Pressable>
+        </ScalePressable>
       </View>
 
       {/* Info Section */}
@@ -238,7 +247,7 @@ export const ProductCard = memo(function ProductCard({
           )}
         </View>
       </View>
-    </Pressable>
+    </ScalePressable>
   );
 });
 
@@ -389,7 +398,7 @@ const st = StyleSheet.create({
   },
   cardPrice: {
     fontSize: 13.5,
-    fontFamily: "JakartaBold",
+    fontFamily: "JakartaSemiBold",
     color: Colors.primary,
   },
   cardOldPrice: {

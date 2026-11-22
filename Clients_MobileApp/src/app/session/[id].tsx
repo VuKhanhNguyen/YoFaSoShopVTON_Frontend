@@ -35,6 +35,7 @@ import { OutfitScoring, type RecommendedTryOnItem } from "@/components/shop/Outf
 import { ResultActions, exportResultImage } from "@/components/shop/ResultActions";
 import { PrivateImage } from "@/components/shop/PrivateImage";
 import { FittingPassModal } from "@/components/shop/FittingPassModal";
+import { AnimatedToast } from "@/components/shop/MotionPrimitives";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 const STAGE_HEIGHT = 420;
@@ -661,7 +662,7 @@ export default function SessionResultScreen() {
               <View style={st.actionGroup}>
                 <Button title="Về Tủ đồ VTON" secondary onPress={() => router.push("/(shop)/wardrobe")} />
                 {session.status === "QUEUED" && session.jobId && (
-                  <Button title="Hủy yêu cầu" outline disabled={busy} onPress={() => void control("cancel")} />
+                  <Button title="Hủy yêu cầu" outline loading={busy} disabled={busy} onPress={() => void control("cancel")} />
                 )}
               </View>
             </>
@@ -791,6 +792,7 @@ export default function SessionResultScreen() {
                             : "Lấy ảnh kết quả sang thử tiếp"
                         }
                         icon={<Ionicons name="layers-outline" size={16} color={Colors.champagne} />}
+                        loading={chainBusy}
                         disabled={chainBusy}
                         style={!chainOption1Compat.allowed ? { opacity: 0.65 } : undefined}
                         onPress={() => void handleChainWithResultImage()}
@@ -812,6 +814,7 @@ export default function SessionResultScreen() {
                         title={chainBusy ? "Đang lưu ảnh..." : "1. Lưu ảnh kết quả về máy"}
                         secondary
                         icon={<Ionicons name="download-outline" size={16} color={Colors.primary} />}
+                        loading={chainBusy}
                         disabled={chainBusy}
                         onPress={() => void handleSaveBeforeManualChain()}
                       />
@@ -891,7 +894,7 @@ export default function SessionResultScreen() {
 
               {((session.status === "FAILED" && session.retryable && !!session.jobId) ||
                 session.status === "SYNC_FAILED") && (
-                <Button title="Thử lại với ảnh hiện tại" disabled={busy || replacing} onPress={() => void control("retry")} />
+                <Button title="Thử lại với ảnh hiện tại" loading={busy} disabled={busy || replacing} onPress={() => void control("retry")} />
               )}
               <Button
                 title="Đổi trang phục hoặc tạo phiên mới"
@@ -919,12 +922,7 @@ export default function SessionResultScreen() {
       )}
 
       {/* Floating Blocking / Feedback Toast */}
-      {!!toast && (
-        <View style={st.toastPopup} pointerEvents="none">
-          <Ionicons name="alert-circle" size={18} color="#FDE68A" />
-          <Text style={st.toastPopupText}>{toast}</Text>
-        </View>
-      )}
+      <AnimatedToast message={toast} tone="warning" position="top" offset={14} />
     </View>
   );
 }

@@ -1,10 +1,8 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
-  Animated,
   Dimensions,
   Image,
   KeyboardAvoidingView,
-  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -16,16 +14,31 @@ import {
 import { router, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withSpring,
+} from "react-native-reanimated";
 import { useSession } from "@/lib/session";
 import { api, login } from "@/lib/api";
-import { Colors, Fonts, Radii, Shadows, Spacing } from "@/constants/theme";
+import { Colors, Fonts, Radii, Shadows } from "@/constants/theme";
 import { EditorialImages } from "@/lib/catalog-data";
 import { Button, Notice, PasswordMeter } from "@/components/shop/ui";
 import { DatePickerField } from "@/components/shop/DatePickerField";
+import { SPRING_SOFT, SlidingTabs } from "@/components/shop/MotionPrimitives";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 const DRAWER_MIN_HEIGHT = Math.round(SCREEN_HEIGHT * 0.64);
 const DRAWER_MAX_HEIGHT = Math.round(SCREEN_HEIGHT * 0.93);
+const COLLAPSED_OFFSET = Math.max(0, DRAWER_MAX_HEIGHT - DRAWER_MIN_HEIGHT);
+
+const AUTH_TAB_OPTIONS = [
+  { id: "login" as const, label: "Đăng nhập" },
+  { id: "register" as const, label: "Tạo tài khoản" },
+];
 
 // Regex kiểm tra họ và tên chỉ chứa chữ cái và khoảng trắng (hỗ trợ Unicode tiếng Việt)
 const VIETNAMESE_NAME_REGEX = /^[\p{L}\s]+$/u;
@@ -98,57 +111,46 @@ export default function AuthScreen() {
   const [loading, setLoading] = useState(false);
   const [generalError, setGeneralError] = useState("");
 
-  // Drawer Height Animated Value (Clamped between DRAWER_MIN_HEIGHT and DRAWER_MAX_HEIGHT)
-  const drawerHeight = useRef(new Animated.Value(DRAWER_MIN_HEIGHT)).current;
-  const currentHeight = useRef(DRAWER_MIN_HEIGHT);
+  // GPU UI-thread drawer translateY (0 = expanded, COLLAPSED_OFFSET = collapsed)
+  const reducedMotion = useReducedMotion();
+  const drawerTranslateY = useSharedValue(COLLAPSED_OFFSET);
+  const startTranslateY = useSharedValue(COLLAPSED_OFFSET);
   const [isExpanded, setIsExpanded] = useState(false);
 
-  // Spring drawer helper
-  const animateDrawer = (toHeight: number) => {
-    Animated.spring(drawerHeight, {
-      toValue: toHeight,
-      friction: 8,
-      tension: 65,
-      useNativeDriver: false,
-    }).start();
+  const animateDrawerTo = (expanded: boolean) => {
+    const target = expanded ? 0 : COLLAPSED_OFFSET;
+    drawerTranslateY.set(reducedMotion ? target : withSpring(target, SPRING_SOFT));
+    setIsExpanded(expanded);
   };
 
-  // PanResponder cho thanh kéo ngăn kéo
-  const panResponder = useMemo(
+  const drawerPanGesture = useMemo(
     () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dy) > 4,
-        onPanResponderMove: (_, gesture) => {
-          const target = currentHeight.current - gesture.dy;
-          if (target < DRAWER_MIN_HEIGHT) {
-            drawerHeight.setValue(DRAWER_MIN_HEIGHT);
-          } else if (target > DRAWER_MAX_HEIGHT) {
-            drawerHeight.setValue(DRAWER_MAX_HEIGHT);
-          } else {
-            drawerHeight.setValue(target);
-          }
-        },
-        onPanResponderRelease: (_, gesture) => {
-          if (gesture.dy < -35 || gesture.vy < -0.4) {
-            animateDrawer(DRAWER_MAX_HEIGHT);
-            setIsExpanded(true);
-            currentHeight.current = DRAWER_MAX_HEIGHT;
-          } else if (gesture.dy > 35 || gesture.vy > 0.4) {
-            animateDrawer(DRAWER_MIN_HEIGHT);
-            setIsExpanded(false);
-            currentHeight.current = DRAWER_MIN_HEIGHT;
-          } else {
-            const mid = (DRAWER_MIN_HEIGHT + DRAWER_MAX_HEIGHT) / 2;
-            const target = currentHeight.current > mid ? DRAWER_MAX_HEIGHT : DRAWER_MIN_HEIGHT;
-            animateDrawer(target);
-            setIsExpanded(target === DRAWER_MAX_HEIGHT);
-            currentHeight.current = target;
-          }
-        },
-      }),
-    []
+      Gesture.Pan()
+        .activeOffsetY([-4, 4])
+        .onBegin(() => {
+          startTranslateY.set(drawerTranslateY.get());
+        })
+        .onUpdate((e) => {
+          const next = startTranslateY.get() + e.translationY;
+          drawerTranslateY.set(Math.max(0, Math.min(COLLAPSED_OFFSET, next)));
+        })
+        .onEnd((e) => {
+          const shouldExpand =
+            e.translationY < -35 ||
+            e.velocityY < -400 ||
+            (Math.abs(e.translationY) <= 35 &&
+              Math.abs(e.velocityY) <= 400 &&
+              drawerTranslateY.get() < COLLAPSED_OFFSET / 2);
+          const target = shouldExpand ? 0 : COLLAPSED_OFFSET;
+          drawerTranslateY.set(withSpring(target, SPRING_SOFT));
+          runOnJS(setIsExpanded)(shouldExpand);
+        }),
+    [drawerTranslateY, startTranslateY]
   );
+
+  const drawerAnimStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: drawerTranslateY.value }],
+  }));
 
   // Chuyển tab Đăng nhập / Đăng ký
   const handleSelectTab = (selectedTab: "login" | "register") => {
@@ -158,9 +160,7 @@ export default function AuthScreen() {
     setRegErrors({});
     setIsForgotMode(false);
     if (selectedTab === "register") {
-      animateDrawer(DRAWER_MAX_HEIGHT);
-      setIsExpanded(true);
-      currentHeight.current = DRAWER_MAX_HEIGHT;
+      animateDrawerTo(true);
     }
   };
 
@@ -396,30 +396,34 @@ export default function AuthScreen() {
         />
       </View>
 
-      {/* Drawer kéo vuốt */}
+      {/* Drawer kéo vuốt GPU UI-thread */}
       <View style={st.drawerOverlay}>
         <Animated.View
           style={[
             st.drawerContainer,
-            {
-              height: drawerHeight,
-            },
+            { height: DRAWER_MAX_HEIGHT },
+            drawerAnimStyle,
           ]}
         >
-          {/* Thanh vuốt ngăn kéo có PanResponder */}
-          <View {...panResponder.panHandlers} style={st.drawerHeaderArea}>
-            <View style={st.sheetHandle} />
-            <View style={st.dragIndicatorRow}>
-              <Ionicons
-                name={isExpanded ? "chevron-down" : "chevron-up"}
-                size={14}
-                color={Colors.textMuted}
-              />
-              <Text style={st.dragHintText}>
-                {isExpanded ? "Vuốt xuống để thu gọn" : "Vuốt lên để xem đầy đủ"}
-              </Text>
-            </View>
-          </View>
+          {/* Thanh vuốt ngăn kéo có RNGH Gesture.Pan */}
+          <GestureDetector gesture={drawerPanGesture}>
+            <Pressable
+              onPress={() => animateDrawerTo(!isExpanded)}
+              style={st.drawerHeaderArea}
+            >
+              <View style={st.sheetHandle} />
+              <View style={st.dragIndicatorRow}>
+                <Ionicons
+                  name={isExpanded ? "chevron-down" : "chevron-up"}
+                  size={14}
+                  color={Colors.textMuted}
+                />
+                <Text style={st.dragHintText}>
+                  {isExpanded ? "Vuốt xuống để thu gọn" : "Vuốt lên để xem đầy đủ"}
+                </Text>
+              </View>
+            </Pressable>
+          </GestureDetector>
 
           <KeyboardAvoidingView
             behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -515,7 +519,7 @@ export default function AuthScreen() {
 
                       <Button
                         title={loading ? "Đang gửi mã..." : "GỬI MÃ XÁC MINH OTP"}
-                        disabled={loading}
+                        loading={loading}
                         onPress={handleForgotSendOtp}
                         style={{ height: 50, marginTop: 8 }}
                       />
@@ -640,7 +644,7 @@ export default function AuthScreen() {
 
                       <Button
                         title={loading ? "Đang cập nhật..." : "XÁC NHẬN ĐỔI MẬT KHẨU"}
-                        disabled={loading}
+                        loading={loading}
                         onPress={handleForgotResetPassword}
                         style={{ height: 50, marginTop: 8 }}
                       />
@@ -658,24 +662,14 @@ export default function AuthScreen() {
                 /* Form Đăng nhập & Đăng ký chính */
                 <View style={st.formCard}>
                   {/* Segmented Login / Register Switch */}
-                  <View style={st.segmentedContainer}>
-                    <Pressable
-                      onPress={() => handleSelectTab("login")}
-                      style={[st.segmentBtn, tab === "login" && st.segmentBtnActive]}
-                    >
-                      <Text style={[st.segmentText, tab === "login" && st.segmentTextActive]}>
-                        Đăng nhập
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => handleSelectTab("register")}
-                      style={[st.segmentBtn, tab === "register" && st.segmentBtnActive]}
-                    >
-                      <Text style={[st.segmentText, tab === "register" && st.segmentTextActive]}>
-                        Tạo tài khoản
-                      </Text>
-                    </Pressable>
-                  </View>
+                  <SlidingTabs
+                    options={AUTH_TAB_OPTIONS}
+                    value={tab}
+                    onChange={handleSelectTab}
+                    variant="obsidian"
+                    containerStyle={{ marginBottom: 10 }}
+                    textStyle={{ fontSize: 13 }}
+                  />
 
                   {tab === "login" ? (
                     /* ===== 1. FORM ĐĂNG NHẬP ===== */
@@ -773,7 +767,7 @@ export default function AuthScreen() {
 
                       <Button
                         title={loading ? "Đang xác thực..." : "ĐĂNG NHẬP VÀO YOFASO"}
-                        disabled={loading}
+                        loading={loading}
                         onPress={handleLoginSubmit}
                         style={{ height: 52, marginTop: 10 }}
                       />
@@ -1098,7 +1092,7 @@ export default function AuthScreen() {
 
                       <Button
                         title={loading ? "Đang tạo tài khoản..." : "TẠO TÀI KHOẢN YOFASO"}
-                        disabled={loading}
+                        loading={loading}
                         onPress={handleRegisterSubmit}
                         style={{ height: 52, marginTop: 10 }}
                       />

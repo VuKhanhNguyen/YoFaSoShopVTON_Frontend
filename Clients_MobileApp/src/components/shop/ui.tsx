@@ -21,7 +21,18 @@ import {
   type TextStyle,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import Reanimated, {
+  Easing as ReEasing,
+  cancelAnimation,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from "react-native-reanimated";
 import { Colors, Fonts, Radii, Shadows, Spacing } from "@/constants/theme";
+import { ScalePressable } from "./MotionPrimitives";
+import { ListCardSkeleton } from "./Skeleton";
 
 export const colors = {
   canvas: Colors.canvas,
@@ -83,6 +94,7 @@ export function Button({
   outline,
   danger,
   disabled,
+  loading = false,
   icon,
   style,
   textStyle,
@@ -94,29 +106,70 @@ export function Button({
   outline?: boolean;
   danger?: boolean;
   disabled?: boolean;
+  loading?: boolean;
   icon?: ReactNode;
   style?: ViewStyle;
   textStyle?: TextStyle;
 }) {
+  const reducedMotion = useReducedMotion();
+  const [btnWidth, setBtnWidth] = useState(0);
+  const shimmerX = useSharedValue(-1);
+
+  useEffect(() => {
+    if (!loading || reducedMotion || btnWidth <= 0) {
+      cancelAnimation(shimmerX);
+      shimmerX.value = -1;
+      return;
+    }
+    shimmerX.value = -1;
+    shimmerX.value = withRepeat(
+      withTiming(1, { duration: 1150, easing: ReEasing.inOut(ReEasing.quad) }),
+      -1,
+      false
+    );
+    return () => cancelAnimation(shimmerX);
+  }, [loading, reducedMotion, btnWidth, shimmerX]);
+
+  const sweepStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: shimmerX.value * Math.max(120, btnWidth) },
+      { skewX: "-18deg" },
+    ],
+  }));
+
+  const isDisabled = disabled || loading;
+
   return (
-    <Pressable
+    <ScalePressable
       accessibilityRole="button"
-      accessibilityState={{ disabled }}
+      accessibilityState={{ disabled: isDisabled, busy: loading }}
       onPress={onPress}
-      disabled={disabled}
-      style={({ pressed }) => [
+      disabled={isDisabled}
+      activeScale={0.975}
+      onLayout={(e) => {
+        const w = e.nativeEvent.layout.width;
+        if (w > 0 && Math.abs(w - btnWidth) > 1) setBtnWidth(w);
+      }}
+      style={[
         s.button,
         secondary && s.buttonSecondary,
         accent && s.buttonAccent,
         outline && s.buttonOutline,
         danger && s.buttonDanger,
+        { overflow: "hidden", opacity: loading ? 0.82 : disabled ? 0.42 : 1 },
         style,
-        {
-          opacity: disabled ? 0.4 : pressed ? 0.85 : 1,
-          transform: [{ scale: pressed ? 0.985 : 1 }],
-        },
       ]}
     >
+      {loading && !reducedMotion && btnWidth > 0 && (
+        <Reanimated.View
+          pointerEvents="none"
+          style={[
+            s.buttonShimmerBand,
+            secondary || outline ? s.buttonShimmerDark : s.buttonShimmerLight,
+            sweepStyle,
+          ]}
+        />
+      )}
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 }}>
         {icon}
         <Text
@@ -132,7 +185,7 @@ export function Button({
           {title}
         </Text>
       </View>
-    </Pressable>
+    </ScalePressable>
   );
 }
 
@@ -619,27 +672,20 @@ export function State({
   error,
   empty,
   retry,
+  variant = "rows",
+  skeletonCount = 3,
 }: {
   loading?: boolean;
   error?: string;
   empty?: boolean;
   retry?: () => void;
+  variant?: "cards" | "rows" | "grid";
+  skeletonCount?: number;
 }) {
   if (loading)
     return (
-      <View accessibilityLabel="Đang tải" style={{ gap: 14, padding: 20 }}>
-        {[1, 2, 3].map((i) => (
-          <View
-            key={i}
-            style={{
-              height: 72,
-              backgroundColor: colors.surfaceMuted,
-              borderRadius: 14,
-              borderWidth: 1,
-              borderColor: colors.border,
-            }}
-          />
-        ))}
+      <View accessibilityLabel="Đang tải" style={{ paddingVertical: 8 }}>
+        <ListCardSkeleton variant={variant} count={skeletonCount} />
       </View>
     );
 
@@ -696,6 +742,19 @@ export const s = StyleSheet.create({
     fontFamily: "JakartaSemiBold",
     fontSize: 15,
     letterSpacing: -0.2,
+  },
+  buttonShimmerBand: {
+    position: "absolute",
+    top: -10,
+    bottom: -10,
+    width: 72,
+    transform: [{ skewX: "-18deg" }],
+  },
+  buttonShimmerLight: {
+    backgroundColor: "rgba(255, 255, 255, 0.16)",
+  },
+  buttonShimmerDark: {
+    backgroundColor: "rgba(15, 23, 42, 0.06)",
   },
   field: { gap: 6, marginVertical: 6 },
   label: {

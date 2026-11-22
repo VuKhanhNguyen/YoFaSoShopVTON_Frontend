@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  Image,
   Platform,
   Pressable,
   RefreshControl,
@@ -16,9 +15,11 @@ import { api, publicUrl } from "@/lib/api";
 import { useResource } from "@/hooks/use-resource";
 import { useSession } from "@/lib/session";
 import type { Row } from "@/lib/models";
-import { Colors, Fonts, Radii, Shadows } from "@/constants/theme";
-import { EditorialImages, formatVND, isVoucherInUseOrUsed } from "@/lib/catalog-data";
-import { Button, EmptyState, Notice, Sheet, colors } from "@/components/shop/ui";
+import { Colors, Radii, Shadows } from "@/constants/theme";
+import { formatVND, isVoucherInUseOrUsed } from "@/lib/catalog-data";
+import { Button, EmptyState, Sheet } from "@/components/shop/ui";
+import { AnimatedToast, ScalePressable } from "@/components/shop/MotionPrimitives";
+import { ListCardSkeleton, SmartImage } from "@/components/shop/Skeleton";
 
 interface LocalCartItem {
   variantId: string;
@@ -30,26 +31,7 @@ interface LocalCartItem {
   image: any;
 }
 
-const MOCK_CART_ITEMS: LocalCartItem[] = [
-  {
-    variantId: "SP00000001",
-    name: "Áo Sơ Mi Lụa Dáng Rộng Cổ V (Relaxed Silk)",
-    colorName: "Trắng ngà",
-    size: "M",
-    unitPrice: 450000,
-    quantity: 1,
-    image: EditorialImages.shirt,
-  },
-  {
-    variantId: "SP00000002",
-    name: "Quần Âu Ống Rộng Xếp Ly Cạp Cao (High-Rise)",
-    colorName: "Xanh rêu",
-    size: "M",
-    unitPrice: 1150000,
-    quantity: 1,
-    image: EditorialImages.pants,
-  },
-];
+const MOCK_CART_ITEMS: LocalCartItem[] = [];
 
 export default function CartScreen() {
   const { user } = useSession();
@@ -123,8 +105,9 @@ export default function CartScreen() {
     size: String(r.size || "M"),
     unitPrice: Number(r.unitPrice || 0),
     quantity: Number(r.quantity || 1),
-    image: r.coverUrl ? { uri: publicUrl(r.coverUrl) } : (r.image || EditorialImages.shirt),
+    image: r.coverUrl ? publicUrl(r.coverUrl) : (r.image ?? null),
   }));
+  const isInitialLoading = Boolean(user && state.loading && !state.data);
 
   const subtotal = cartItems.reduce(
     (acc, item) => acc + item.unitPrice * item.quantity,
@@ -191,7 +174,11 @@ export default function CartScreen() {
         }}
       />
 
-      {cartItems.length === 0 ? (
+      {isInitialLoading ? (
+        <View style={{ padding: 18 }}>
+          <ListCardSkeleton variant="rows" count={3} />
+        </View>
+      ) : cartItems.length === 0 ? (
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ flexGrow: 1 }}
@@ -231,7 +218,13 @@ export default function CartScreen() {
           <View style={st.itemsList}>
             {cartItems.map((item) => (
               <View key={item.variantId} style={st.itemCard}>
-                <Image source={item.image} style={st.itemImage} resizeMode="cover" />
+                <SmartImage
+                  source={item.image}
+                  style={st.itemImage}
+                  contentFit="cover"
+                  borderRadius={Radii.md}
+                  iconSize={22}
+                />
                 <View style={st.itemInfo}>
                   <Text numberOfLines={2} style={st.itemName}>
                     {item.name}
@@ -405,7 +398,7 @@ export default function CartScreen() {
             <Text style={st.dockSubLabel}>Tổng cộng:</Text>
             <Text style={st.dockTotalAmount}>{formatVND(total)}</Text>
           </View>
-          <Pressable
+          <ScalePressable
             accessibilityRole="button"
             accessibilityLabel="Tiến hành đặt hàng"
             onPress={handleCheckout}
@@ -415,7 +408,7 @@ export default function CartScreen() {
               {paymentMethod === "COD" ? "ĐẶT HÀNG (COD)" : "THANH TOÁN VIETQR"}
             </Text>
             <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
-          </Pressable>
+          </ScalePressable>
         </View>
       )}
 
@@ -556,12 +549,7 @@ export default function CartScreen() {
       </Sheet>
 
       {/* Toast Feedback */}
-      {!!toast && (
-        <View style={st.toastPopup}>
-          <Ionicons name="checkmark-circle" size={17} color={Colors.statusSuccess} />
-          <Text style={st.toastPopupText}>{toast}</Text>
-        </View>
-      )}
+      <AnimatedToast message={toast} tone="success" offset={96} />
     </View>
   );
 }

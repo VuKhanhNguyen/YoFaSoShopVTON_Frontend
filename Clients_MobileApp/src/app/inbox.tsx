@@ -1,7 +1,6 @@
 import { useCallback, useState } from "react";
 import {
   FlatList,
-  Pressable,
   RefreshControl,
   StyleSheet,
   Text,
@@ -21,6 +20,8 @@ import {
   timeAgo,
 } from "@/lib/orders-data";
 import { EmptyState } from "@/components/shop/ui";
+import { ScalePressable } from "@/components/shop/MotionPrimitives";
+import { ListCardSkeleton } from "@/components/shop/Skeleton";
 
 const TABS: { id: "all" | LoaiThongBao; label: string }[] = [
   { id: "all", label: "Tất cả" },
@@ -129,12 +130,9 @@ export default function InboxScreen() {
     ({ item }: { item: ThongBao }) => {
       const cfg = renderIcon(item.loai);
       return (
-        <Pressable
-          style={({ pressed }) => [
-            st.itemRow,
-            !item.daDoc && st.itemRowUnread,
-            pressed && { opacity: 0.8 },
-          ]}
+        <ScalePressable
+          activeScale={0.985}
+          style={[st.itemRow, !item.daDoc && st.itemRowUnread]}
           onPress={() => handleOpenNotification(item)}
         >
           <View style={[st.iconCircle, { backgroundColor: cfg.bg }]}>
@@ -155,7 +153,7 @@ export default function InboxScreen() {
             </Text>
             <Text style={st.itemTime}>{timeAgo(item.time)}</Text>
           </View>
-        </Pressable>
+        </ScalePressable>
       );
     },
     []
@@ -174,12 +172,11 @@ export default function InboxScreen() {
           headerTintColor: Colors.primary,
           headerStyle: { backgroundColor: Colors.canvas },
           headerRight: () => (
-            <Pressable
+            <ScalePressable
+              activeScale={0.9}
+              hitSlop={6}
               onPress={handleMarkAllRead}
-              style={({ pressed }) => [
-                st.headerActionBtn,
-                pressed && { opacity: 0.6 },
-              ]}
+              style={st.headerActionBtn}
               accessibilityLabel="Đánh dấu đã đọc tất cả"
             >
               <Ionicons
@@ -187,7 +184,7 @@ export default function InboxScreen() {
                 size={24}
                 color={Colors.primary}
               />
-            </Pressable>
+            </ScalePressable>
           ),
         }}
       />
@@ -197,8 +194,9 @@ export default function InboxScreen() {
         {TABS.map((tab) => {
           const active = activeTab === tab.id;
           return (
-            <Pressable
+            <ScalePressable
               key={tab.id}
+              activeScale={0.95}
               style={[st.tabChip, active && st.tabChipActive]}
               onPress={() => setActiveTab(tab.id)}
             >
@@ -207,7 +205,7 @@ export default function InboxScreen() {
               >
                 {tab.label}
               </Text>
-            </Pressable>
+            </ScalePressable>
           );
         })}
       </View>
@@ -222,7 +220,7 @@ export default function InboxScreen() {
       </View>
 
       <FlatList
-        data={filtered}
+        data={user && apiResource.loading && !apiResource.data ? [] : filtered}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
         contentContainerStyle={st.listContent}
@@ -236,12 +234,16 @@ export default function InboxScreen() {
           />
         }
         ListEmptyComponent={
-          <EmptyState
-            title="Hộp thư đang trống"
-            body="Thông báo về đơn hàng, kết quả ướm thử AI và các ưu đãi thành viên sẽ hiển thị tại đây."
-            cta="Khám phá ngay"
-            onCta={() => router.replace("/(shop)")}
-          />
+          user && apiResource.loading && !apiResource.data ? (
+            <ListCardSkeleton variant="rows" count={4} />
+          ) : (
+            <EmptyState
+              title="Hộp thư đang trống"
+              body="Thông báo về đơn hàng, kết quả ướm thử AI và các ưu đãi thành viên sẽ hiển thị tại đây."
+              cta="Khám phá ngay"
+              onCta={() => router.replace("/(shop)")}
+            />
+          )
         }
       />
     </View>

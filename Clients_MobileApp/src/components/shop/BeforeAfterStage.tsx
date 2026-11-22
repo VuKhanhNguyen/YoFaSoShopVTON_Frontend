@@ -1,17 +1,23 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
-  Animated,
   Image,
-  PanResponder,
-  Pressable,
   StyleSheet,
   Text,
   View,
   type ImageSourcePropType,
 } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, {
+  FadeIn,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withSpring,
+} from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors, Radii, Shadows } from "@/constants/theme";
 import { PrivateImage } from "./PrivateImage";
+import { SPRING_SNAPPY, ScalePressable, SlidingTabs } from "./MotionPrimitives";
 
 type CompareMode = "after" | "before" | "split" | "side";
 
@@ -26,11 +32,11 @@ type Props = {
   onOpenPass: () => void;
 };
 
-const MODES: { key: CompareMode; label: string }[] = [
-  { key: "after", label: "Sau · AI" },
-  { key: "before", label: "Trước" },
-  { key: "side", label: "Cạnh nhau" },
-  { key: "split", label: "Kéo so sánh" },
+const MODE_OPTIONS = [
+  { id: "after" as const, label: "Sau · AI" },
+  { id: "before" as const, label: "Trước" },
+  { id: "side" as const, label: "Cạnh nhau" },
+  { id: "split" as const, label: "Kéo so sánh" },
 ];
 
 export function BeforeAfterStage({
@@ -43,57 +49,62 @@ export function BeforeAfterStage({
   onOpenZoom,
   onOpenPass,
 }: Props) {
+  const reducedMotion = useReducedMotion();
   const [mode, setMode] = useState<CompareMode>("after");
   const [stageWidth, setStageWidth] = useState(320);
 
-  // Use Animated.Value for 60fps drag without re-rendering parent screen or images
-  const ratioRef = useRef(0.5);
-  const startRatioRef = useRef(0.5);
-  const widthRef = useRef(320);
-  const ratioAnim = useRef(new Animated.Value(0.5)).current;
+  // 100% UI-thread Reanimated + RNGH drag (pure GPU translateX clipping, zero layout reflow)
+  const ratio = useSharedValue(0.5);
+  const startRatio = useSharedValue(0.5);
+  const stageW = useSharedValue(320);
 
-  const setRatio = (next: number) => {
-    const clamped = Math.max(0.05, Math.min(0.95, next));
-    ratioRef.current = clamped;
-    ratioAnim.setValue(clamped);
-  };
-
-  // Dedicated PanResponder on the handle uses gestureState.dx -> never jumps to 0 on touch
-  const handlePan = useMemo(
+  const panGesture = useMemo(
     () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onPanResponderTerminationRequest: () => false,
-        onPanResponderGrant: () => {
-          startRatioRef.current = ratioRef.current;
-        },
-        onPanResponderMove: (_, gs) => {
-          const w = Math.max(1, widthRef.current);
-          setRatio(startRatioRef.current + gs.dx / w);
-        },
-      }),
-    []
+      Gesture.Pan()
+        .activeOffsetX([-6, 6])
+        .failOffsetY([-12, 12])
+        .onBegin(() => {
+          startRatio.set(ratio.get());
+        })
+        .onUpdate((e) => {
+          const w = Math.max(1, stageW.get());
+          const next = startRatio.get() + e.translationX / w;
+          ratio.set(Math.max(0.05, Math.min(0.95, next)));
+        }),
+    [ratio, startRatio, stageW]
   );
 
-  // Horizontal swipe anywhere on split stage also moves smoothly without blocking vertical scroll
-  const stagePan = useMemo(
+  const handleGesture = useMemo(
     () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => false,
-        onMoveShouldSetPanResponder: (_, gs) =>
-          Math.abs(gs.dx) > 8 && Math.abs(gs.dx) > Math.abs(gs.dy) * 1.4,
-        onPanResponderTerminationRequest: () => false,
-        onPanResponderGrant: () => {
-          startRatioRef.current = ratioRef.current;
-        },
-        onPanResponderMove: (_, gs) => {
-          const w = Math.max(1, widthRef.current);
-          setRatio(startRatioRef.current + gs.dx / w);
-        },
-      }),
-    []
+      Gesture.Pan()
+        .onBegin(() => {
+          startRatio.set(ratio.get());
+        })
+        .onUpdate((e) => {
+          const w = Math.max(1, stageW.get());
+          const next = startRatio.get() + e.translationX / w;
+          ratio.set(Math.max(0.05, Math.min(0.95, next)));
+        }),
+    [ratio, startRatio, stageW]
   );
+
+  const clipOuterStyle = useAnimatedStyle(() => {
+    const shift = -(1 - ratio.value) * stageW.value;
+    return {
+      transform: [{ translateX: shift }],
+    };
+  });
+
+  const clipInnerStyle = useAnimatedStyle(() => {
+    const shift = (1 - ratio.value) * stageW.value;
+    return {
+      transform: [{ translateX: shift }],
+    };
+  });
+
+  const dividerStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: ratio.value * stageW.value - 1 }],
+  }));
 
   const renderBeforeImage = (style: object) =>
     fallbackPortrait ? (
@@ -119,66 +130,61 @@ export function BeforeAfterStage({
     />
   );
 
-  const clipWidth = ratioAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, stageWidth],
-  });
-  const dividerLeft = ratioAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [-1, stageWidth - 1],
-  });
-
   return (
     <View style={st.wrapper}>
-      {/* Mode Switcher Bar — keeps images separate unless user picks split compare */}
-      <View style={st.modeBar} accessibilityRole="tablist">
-        {MODES.map((item) => {
-          const active = mode === item.key;
-          return (
-            <Pressable
-              key={item.key}
-              accessibilityRole="tab"
-              accessibilityState={{ selected: active }}
-              onPress={() => {
-                setMode(item.key);
-                if (item.key === "split") setRatio(0.5);
-              }}
-              style={[st.modePill, active && st.modePillActive]}
-            >
-              <Text style={[st.modeText, active && st.modeTextActive]}>{item.label}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
+      {/* Mode Switcher Bar — GPU sliding pill */}
+      <SlidingTabs
+        options={MODE_OPTIONS}
+        value={mode}
+        onChange={(next) => {
+          setMode(next);
+          if (next === "split") {
+            ratio.set(reducedMotion ? 0.5 : withSpring(0.5, SPRING_SNAPPY));
+          }
+        }}
+        variant="surface"
+        textStyle={st.modeText}
+      />
 
       <View
         style={[st.stageCard, { height: stageHeight }]}
         onLayout={(e) => {
           const w = e.nativeEvent.layout.width;
-          widthRef.current = w;
-          setStageWidth(w);
+          if (w > 0) {
+            stageW.set(w);
+            setStageWidth(w);
+          }
         }}
       >
         {mode === "after" && (
-          <View style={st.opaqueCanvas}>
+          <Animated.View
+            entering={reducedMotion ? undefined : FadeIn.duration(180)}
+            style={st.opaqueCanvas}
+          >
             {renderAfterImage(st.fillImage)}
             <View style={st.badgeAfter}>
               <Text style={st.badgeAfterTxt}>SAU · AI</Text>
             </View>
-          </View>
+          </Animated.View>
         )}
 
         {mode === "before" && (
-          <View style={st.opaqueCanvas}>
+          <Animated.View
+            entering={reducedMotion ? undefined : FadeIn.duration(180)}
+            style={st.opaqueCanvas}
+          >
             {renderBeforeImage(st.fillImage)}
             <View style={st.badgeBefore}>
               <Text style={st.badgeBeforeTxt}>TRƯỚC</Text>
             </View>
-          </View>
+          </Animated.View>
         )}
 
         {mode === "side" && (
-          <View style={st.sideBySideRow}>
+          <Animated.View
+            entering={reducedMotion ? undefined : FadeIn.duration(180)}
+            style={st.sideBySideRow}
+          >
             <View style={st.sideCol}>
               {renderBeforeImage(st.fillImage)}
               <View style={st.sideLabelWrap}>
@@ -192,54 +198,62 @@ export function BeforeAfterStage({
                 <Text style={st.badgeAfterTxt}>SAU · AI</Text>
               </View>
             </View>
-          </View>
+          </Animated.View>
         )}
 
         {mode === "split" && (
-          <View style={st.opaqueCanvas} {...stagePan.panHandlers}>
-            {/* Base layer: After AI on solid white canvas */}
-            <View style={st.opaqueLayer}>{renderAfterImage(st.fillImage)}</View>
+          <GestureDetector gesture={panGesture}>
+            <View style={st.opaqueCanvas}>
+              {/* Base layer: After AI on solid white canvas */}
+              <View style={st.opaqueLayer}>{renderAfterImage(st.fillImage)}</View>
 
-            {/* Clipped top layer: Before on solid white canvas (prevents transparent PNG bleed-through) */}
-            <Animated.View style={[st.clipWrap, { width: clipWidth }]}>
-              <View style={[st.opaqueLayer, { width: stageWidth }]}>
-                {renderBeforeImage([st.fillImage, { width: stageWidth }])}
+              {/* GPU-clipped top layer using inverse translateX (zero width layout thrash) */}
+              <Animated.View style={[st.clipWrap, { width: stageWidth }, clipOuterStyle]}>
+                <Animated.View style={[st.opaqueLayer, { width: stageWidth }, clipInnerStyle]}>
+                  {renderBeforeImage([st.fillImage, { width: stageWidth }])}
+                </Animated.View>
+              </Animated.View>
+
+              <View style={st.badgeBefore}>
+                <Text style={st.badgeBeforeTxt}>TRƯỚC</Text>
               </View>
-            </Animated.View>
-
-            <View style={st.badgeBefore}>
-              <Text style={st.badgeBeforeTxt}>TRƯỚC</Text>
-            </View>
-            <View style={st.badgeAfterSplit}>
-              <Text style={st.badgeAfterTxt}>SAU · AI</Text>
-            </View>
-
-            <Animated.View style={[st.sliderDivider, { left: dividerLeft }]}>
-              <View style={st.sliderHitArea} {...handlePan.panHandlers}>
-                <View style={st.sliderHandle}>
-                  <Text style={st.sliderHandleText}>‹ ›</Text>
-                </View>
+              <View style={st.badgeAfterSplit}>
+                <Text style={st.badgeAfterTxt}>SAU · AI</Text>
               </View>
-            </Animated.View>
-          </View>
+
+              <Animated.View style={[st.sliderDivider, dividerStyle]}>
+                <GestureDetector gesture={handleGesture}>
+                  <View style={st.sliderHitArea}>
+                    <View style={st.sliderHandle}>
+                      <Text style={st.sliderHandleText}>‹ ›</Text>
+                    </View>
+                  </View>
+                </GestureDetector>
+              </Animated.View>
+            </View>
+          </GestureDetector>
         )}
 
         <View style={st.sideActions}>
-          <Pressable
+          <ScalePressable
             style={st.sideBtn}
+            activeScale={0.9}
+            hitSlop={4}
             onPress={onOpenZoom}
             accessibilityLabel="Phóng to ảnh"
           >
             <Ionicons name="expand-outline" size={18} color={Colors.primary} />
-          </Pressable>
+          </ScalePressable>
 
-          <Pressable
+          <ScalePressable
             style={st.sideBtn}
+            activeScale={0.9}
+            hitSlop={4}
             onPress={onOpenPass}
             accessibilityLabel="Mã QR vé thử đồ"
           >
             <Ionicons name="qr-code-outline" size={18} color={Colors.primary} />
-          </Pressable>
+          </ScalePressable>
         </View>
       </View>
     </View>
@@ -390,6 +404,7 @@ const st = StyleSheet.create({
   },
   sliderDivider: {
     position: "absolute",
+    left: 0,
     top: 0,
     bottom: 0,
     width: 2,

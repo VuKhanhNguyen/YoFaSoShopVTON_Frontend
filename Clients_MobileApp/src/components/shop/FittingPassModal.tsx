@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import {
   Clipboard,
   Dimensions,
-  Image,
   Modal,
   Platform,
   Pressable,
@@ -14,6 +13,7 @@ import {
 import QRCode from "react-native-qrcode-svg";
 import Svg, { Circle, Line } from "react-native-svg";
 import { Ionicons } from "@expo/vector-icons";
+import Animated, { ZoomIn, useReducedMotion } from "react-native-reanimated";
 import { publicUrl } from "@/lib/api";
 import {
   buildFittingPassQrPayload,
@@ -21,6 +21,7 @@ import {
   type TryOnSession,
 } from "@/lib/try-on";
 import { Colors, Radii, Shadows } from "@/constants/theme";
+import { SmartImage } from "./Skeleton";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 const TICKET_WIDTH = Math.min(SCREEN_WIDTH - 28, 372);
@@ -66,11 +67,10 @@ export function FittingPassModal({
   session,
   liveScore,
 }: FittingPassModalProps) {
+  const reducedMotion = useReducedMotion();
   const [copied, setCopied] = useState(false);
-  const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    setFailedImages({});
     setCopied(false);
   }, [session.sessionId, visible]);
 
@@ -204,7 +204,10 @@ export function FittingPassModal({
           showsVerticalScrollIndicator={false}
           bounces={false}
         >
-          <View style={st.ticket}>
+          <Animated.View
+            entering={reducedMotion ? undefined : ZoomIn.duration(220)}
+            style={st.ticket}
+          >
             {/* Top Brand Header */}
             <View style={st.topHeader}>
               <View>
@@ -291,7 +294,6 @@ export function FittingPassModal({
                 const isLightSwatch =
                   item.colorHex.toLowerCase() === "#ffffff" ||
                   item.colorHex.toLowerCase() === "#fff";
-                const showImage = Boolean(item.imageUrl) && !failedImages[item.key];
 
                 return (
                   <View
@@ -302,20 +304,12 @@ export function FittingPassModal({
                     ]}
                   >
                     <View style={[st.productThumbWrap, { width: thumbW, height: thumbH }]}>
-                      {showImage ? (
-                        <Image
-                          source={{ uri: item.imageUrl }}
-                          style={{ width: thumbW, height: thumbH }}
-                          resizeMode="cover"
-                          onError={() =>
-                            setFailedImages((prev) => ({ ...prev, [item.key]: true }))
-                          }
-                        />
-                      ) : (
-                        <View style={st.productThumbPlaceholder}>
-                          <Ionicons name="shirt-outline" size={22} color={Colors.textMuted} />
-                        </View>
-                      )}
+                      <SmartImage
+                        source={item.imageUrl || null}
+                        style={{ width: thumbW, height: thumbH }}
+                        contentFit="cover"
+                        iconSize={20}
+                      />
                       <View style={st.sizeOverlayBadge}>
                         <Text style={st.sizeOverlayText}>Size {item.size}</Text>
                       </View>
@@ -364,7 +358,7 @@ export function FittingPassModal({
                 {isMultiItem ? "trọn bộ 2 món" : "set đồ"} chuẩn bị sẵn trong phòng thử thực tế.
               </Text>
             </View>
-          </View>
+          </Animated.View>
         </ScrollView>
       </View>
     </Modal>

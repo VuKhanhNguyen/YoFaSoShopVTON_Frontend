@@ -1,7 +1,6 @@
 import { useCallback, useState } from "react";
 import {
   FlatList,
-  Image,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -14,7 +13,6 @@ import { Colors, Fonts, Radii, Shadows, Spacing } from "@/constants/theme";
 import { formatVND } from "@/lib/catalog-data";
 import {
   DonHang,
-  LUONG_TRANG_THAI,
   nhanTrangThai,
   TrangThaiDonHang,
 } from "@/lib/orders-data";
@@ -23,6 +21,8 @@ import { useSession } from "@/lib/session";
 import type { Row } from "@/lib/models";
 import { publicUrl } from "@/lib/api";
 import { EmptyState } from "@/components/shop/ui";
+import { ScalePressable } from "@/components/shop/MotionPrimitives";
+import { ListCardSkeleton, SmartImage } from "@/components/shop/Skeleton";
 
 const TABS: { id: "all" | TrangThaiDonHang; label: string }[] = [
   { id: "all", label: "Tất cả" },
@@ -133,16 +133,13 @@ export default function OrdersScreen() {
         <View style={st.itemsContainer}>
           {item.lines.slice(0, 2).map((line, idx) => (
             <View key={line.id || idx} style={st.productRow}>
-              {line.hinhAnh ? (
-                <Image
-                  source={typeof line.hinhAnh === "string" ? { uri: line.hinhAnh } : line.hinhAnh}
-                  style={st.productThumb}
-                />
-              ) : (
-                <View style={[st.productThumb, st.productThumbPlaceholder]}>
-                  <Ionicons name="shirt-outline" size={20} color={Colors.muted} />
-                </View>
-              )}
+              <SmartImage
+                source={line.hinhAnh ?? null}
+                style={st.productThumb}
+                contentFit="cover"
+                borderRadius={Radii.sm}
+                iconSize={18}
+              />
               <View style={st.productInfo}>
                 <Text style={st.productName} numberOfLines={1}>
                   {line.tenSanPham}
@@ -177,8 +174,9 @@ export default function OrdersScreen() {
           </View>
 
           <View style={st.actionRow}>
-            <Pressable
-              style={({ pressed }) => [st.detailBtn, pressed && { opacity: 0.8 }]}
+            <ScalePressable
+              style={st.detailBtn}
+              activeScale={0.94}
               onPress={() =>
                 router.push({
                   pathname: "/order/[id]",
@@ -188,7 +186,7 @@ export default function OrdersScreen() {
             >
               <Text style={st.detailBtnText}>Chi tiết đơn</Text>
               <Ionicons name="chevron-forward" size={14} color={Colors.primary} />
-            </Pressable>
+            </ScalePressable>
           </View>
         </View>
       </View>
@@ -250,12 +248,16 @@ export default function OrdersScreen() {
           />
         }
         ListEmptyComponent={
-          <EmptyState
-            title="Chưa có đơn hàng nào"
-            body="Những bộ trang phục bạn đã đặt sẽ xuất hiện tại đây cùng lộ trình giao nhận theo thời gian thực."
-            cta="Khám phá bộ sưu tập"
-            onCta={() => router.replace("/(shop)")}
-          />
+          user && apiResource.loading && !apiResource.data ? (
+            <ListCardSkeleton variant="cards" count={3} />
+          ) : (
+            <EmptyState
+              title="Chưa có đơn hàng nào"
+              body="Những bộ trang phục bạn đã đặt sẽ xuất hiện tại đây cùng lộ trình giao nhận theo thời gian thực."
+              cta="Khám phá bộ sưu tập"
+              onCta={() => router.replace("/(shop)")}
+            />
+          )
         }
       />
     </View>

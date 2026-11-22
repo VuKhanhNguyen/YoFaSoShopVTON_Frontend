@@ -19,9 +19,10 @@ import * as Sharing from "expo-sharing";
 import { api, publicUrl, requestKey } from "@/lib/api";
 import { useResource } from "@/hooks/use-resource";
 import { money, type Row } from "@/lib/models";
-import { Colors, Fonts, Radii, Shadows } from "@/constants/theme";
-import { EditorialImages, formatVND } from "@/lib/catalog-data";
-import { Button, Notice, Sheet, colors } from "@/components/shop/ui";
+import { Colors, Radii, Shadows } from "@/constants/theme";
+import { formatVND } from "@/lib/catalog-data";
+import { Button, Notice, Sheet } from "@/components/shop/ui";
+import { ListCardSkeleton, SmartImage } from "@/components/shop/Skeleton";
 
 export default function CheckoutScreen() {
   const cart = useResource<Row[]>("/cart");
@@ -283,7 +284,9 @@ export default function CheckoutScreen() {
             </Pressable>
           </View>
 
-          {addressList.length === 0 ? (
+          {addresses.loading && !addresses.data ? (
+            <ListCardSkeleton variant="rows" count={1} />
+          ) : addressList.length === 0 ? (
             <Pressable
               onPress={() => router.push("/addresses")}
               style={[
@@ -350,7 +353,9 @@ export default function CheckoutScreen() {
         <View style={st.sectionBlock}>
           <Text style={st.sectionTitle}>Kiện hàng ({cartItems.length} món)</Text>
           <View style={st.orderPreviewBox}>
-            {cartItems.length === 0 ? (
+            {cart.loading && !cart.data ? (
+              <ListCardSkeleton variant="rows" count={2} />
+            ) : cartItems.length === 0 ? (
               <Text style={{ fontSize: 13, color: Colors.textMuted, fontStyle: "italic" }}>
                 Chưa có sản phẩm nào trong túi đồ.
               </Text>
@@ -368,19 +373,13 @@ export default function CheckoutScreen() {
                     },
                   ]}
                 >
-                  {item.coverUrl ? (
-                    <Image
-                      source={{ uri: publicUrl(String(item.coverUrl)) }}
-                      style={st.previewThumb}
-                      resizeMode="cover"
-                    />
-                  ) : (
-                    <Image
-                      source={EditorialImages.shirt}
-                      style={st.previewThumb}
-                      resizeMode="cover"
-                    />
-                  )}
+                  <SmartImage
+                    source={item.coverUrl ? publicUrl(String(item.coverUrl)) : null}
+                    style={st.previewThumb}
+                    contentFit="cover"
+                    borderRadius={Radii.md}
+                    iconSize={20}
+                  />
                   <View style={{ flex: 1 }}>
                     <Text style={st.previewName} numberOfLines={1}>
                       {String(item.productName || "Sản phẩm YoFaSo")}
@@ -468,7 +467,7 @@ export default function CheckoutScreen() {
               ? "XÁC NHẬN ĐẶT HÀNG (COD)"
               : "QUÉT MÃ VIETQR THANH TOÁN"
           }
-          disabled={busy}
+          loading={busy}
           onPress={handlePlaceOrder}
           style={{ height: 54, marginTop: 10 }}
         />

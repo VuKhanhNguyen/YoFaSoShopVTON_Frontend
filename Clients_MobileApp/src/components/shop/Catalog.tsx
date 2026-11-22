@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useState } from "react";
 import {
-  ActivityIndicator,
   FlatList,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -19,6 +19,8 @@ import { SAN_PHAM_MOCK } from "@/lib/catalog-data";
 import { Sheet } from "./ui";
 import { ShirtIcon, PantsSkirtIcon, DressIcon } from "./FashionIcons";
 import { ShopHeader } from "./ShopHeader";
+import { ScalePressable, SlidingTabs } from "./MotionPrimitives";
+import { ProductGridSkeleton } from "./Skeleton";
 import {
   ProductCard,
   CARD_WIDTH,
@@ -26,6 +28,12 @@ import {
   mapApiProduct,
   type UnifiedProduct,
 } from "./ProductCard";
+
+const GENDER_FILTER_TABS = [
+  { id: "all", label: "Tất cả đồ" },
+  { id: "NU", label: "Thời trang Nữ" },
+  { id: "NAM", label: "Thời trang Nam" },
+] as const;
 
 export { ProductCard, CARD_WIDTH, type UnifiedProduct };
 
@@ -255,14 +263,14 @@ export const Catalog = memo(function Catalog({
     fetchProducts(0, true);
   };
 
-  const handleOpenProduct = (item: UnifiedProduct) => {
+  const handleOpenProduct = useCallback((item: UnifiedProduct) => {
     router.push({
       pathname: "/product/[id]",
       params: { id: item.id },
     });
-  };
+  }, []);
 
-  const handleTryOnProduct = (item: UnifiedProduct) => {
+  const handleTryOnProduct = useCallback((item: UnifiedProduct) => {
     router.push({
       pathname: "/try-on",
       params: {
@@ -271,17 +279,22 @@ export const Catalog = memo(function Catalog({
         gender: item.gender,
       },
     });
-  };
+  }, []);
 
   const renderCatalogItem = useCallback(
     ({ item, index }: { item: UnifiedProduct; index: number }) => (
       <ProductCard
         item={item}
         index={index}
-        onOpen={() => handleOpenProduct(item)}
-        onTry={() => handleTryOnProduct(item)}
+        onOpenItem={handleOpenProduct}
+        onTryItem={handleTryOnProduct}
       />
     ),
+    [handleOpenProduct, handleTryOnProduct]
+  );
+
+  const keyExtractor = useCallback(
+    (item: UnifiedProduct, idx: number) => `${item.id}-${item.sku}-${idx}`,
     []
   );
 
@@ -314,9 +327,10 @@ export const Catalog = memo(function Catalog({
             ) : null}
           </View>
 
-          <Pressable
+          <ScalePressable
             accessibilityRole="button"
             accessibilityLabel="Bộ lọc nâng cao"
+            activeScale={0.92}
             onPress={() => setFilterSheetVisible(true)}
             style={[
               st.filterToggleBtn,
@@ -341,30 +355,22 @@ export const Catalog = memo(function Catalog({
                   : Colors.primary
               }
             />
-          </Pressable>
+          </ScalePressable>
         </View>
 
         {/* Gender Selection Tabs (All / Nữ / Nam) */}
-        <View style={st.genderFilterRow}>
-          {[
-            { id: "all", label: "Tất cả đồ" },
-            { id: "NU", label: "Thời trang Nữ" },
-            { id: "NAM", label: "Thời trang Nam" },
-          ].map((g) => {
-            const on = selectedGender === g.id;
-            return (
-              <Pressable
-                key={g.id}
-                onPress={() => setSelectedGender(g.id)}
-                style={[st.genderPill, on && st.genderPillActive]}
-              >
-                <Text style={[st.genderPillText, on && st.genderPillTextActive]}>
-                  {g.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        <SlidingTabs
+          options={GENDER_FILTER_TABS}
+          value={
+            selectedGender === "NU" || selectedGender === "NAM"
+              ? selectedGender
+              : "all"
+          }
+          onChange={setSelectedGender}
+          variant="surface"
+          containerStyle={st.genderFilterRow}
+          textStyle={st.genderSlidingText}
+        />
 
         {/* 3 Silhouette VTON Category Selector Cards */}
         <View style={st.catCardsRow}>
@@ -375,8 +381,9 @@ export const Catalog = memo(function Catalog({
           ].map((c) => {
             const on = selectedCategory === c.id;
             return (
-              <Pressable
+              <ScalePressable
                 key={c.id}
+                activeScale={0.95}
                 onPress={() => setSelectedCategory(on ? "all" : c.id)}
                 style={[st.catCard, on && st.catCardActive]}
               >
@@ -390,7 +397,7 @@ export const Catalog = memo(function Catalog({
                 >
                   {c.en}
                 </Text>
-              </Pressable>
+              </ScalePressable>
             );
           })}
         </View>
@@ -398,8 +405,8 @@ export const Catalog = memo(function Catalog({
 
       {/* Main FlatList Feed with 2-Column Grid */}
       <FlatList
-        data={items}
-        keyExtractor={(item, idx) => `${item.id}-${item.sku}-${idx}`}
+        data={loading && items.length === 0 ? [] : items}
+        keyExtractor={keyExtractor}
         numColumns={2}
         columnWrapperStyle={st.columnWrapper}
         renderItem={renderCatalogItem}
@@ -407,6 +414,10 @@ export const Catalog = memo(function Catalog({
         contentContainerStyle={st.feedContent}
         onEndReached={handleLoadMore}
         onEndReachedThreshold={0.5}
+        windowSize={5}
+        maxToRenderPerBatch={8}
+        initialNumToRender={6}
+        removeClippedSubviews={Platform.OS === "android"}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -448,7 +459,8 @@ export const Catalog = memo(function Catalog({
               </Text>
             </View>
 
-            <Pressable
+            <ScalePressable
+              activeScale={0.94}
               onPress={() => setFilterSheetVisible(true)}
               style={st.sortChip}
             >
@@ -462,7 +474,7 @@ export const Catalog = memo(function Catalog({
                   ? "Giá tăng"
                   : "Giá giảm"}
               </Text>
-            </Pressable>
+            </ScalePressable>
           </View>
         }
         ListEmptyComponent={
@@ -475,19 +487,12 @@ export const Catalog = memo(function Catalog({
               </Text>
             </View>
           ) : (
-            <View style={st.emptyBox}>
-              <ActivityIndicator size="large" color={Colors.champagneDeep} />
-            </View>
+            <ProductGridSkeleton count={6} stagger />
           )
         }
         ListFooterComponent={
-          <View style={{ paddingTop: 16, paddingBottom: 80, gap: 12 }}>
-            {loadingMore && (
-              <View style={st.loadingMoreBox}>
-                <ActivityIndicator size="small" color={Colors.champagneDeep} />
-                <Text style={st.loadingMoreText}>Đang tải thêm sản phẩm...</Text>
-              </View>
-            )}
+          <View style={{ paddingTop: 12, paddingBottom: 96, gap: 12 }}>
+            {loadingMore && <ProductGridSkeleton count={2} stagger={false} />}
 
             {!hasMore && items.length > 0 && (
               <Text style={st.endOfListText}>
@@ -729,27 +734,14 @@ const st = StyleSheet.create({
     borderColor: Colors.primary,
   },
   genderFilterRow: {
-    flexDirection: "row",
-    gap: 8,
     marginBottom: 8,
   },
-  genderPill: {
-    flex: 1,
-    paddingVertical: 7,
-    borderRadius: Radii.full,
-    borderWidth: 1,
-    borderColor: Colors.borderHairline,
-    backgroundColor: Colors.surface,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  genderPillActive: {
-    backgroundColor: Colors.champagneSubtle,
-    borderColor: Colors.champagneDeep,
+  genderSlidingText: {
+    fontSize: 11.5,
   },
   genderPillText: {
     fontSize: 11.5,
-    fontFamily: "JakartaMedium",
+    fontFamily: "Jakarta",
     color: Colors.textSecondary,
   },
   genderPillTextActive: {
@@ -830,7 +822,7 @@ const st = StyleSheet.create({
   },
   sortChipText: {
     fontSize: 11,
-    fontFamily: "JakartaMedium",
+    fontFamily: "JakartaSemiBold",
     color: Colors.primary,
   },
   loadingMoreBox: {
@@ -882,7 +874,7 @@ const st = StyleSheet.create({
   },
   sheetOptionChipText: {
     fontSize: 11.5,
-    fontFamily: "JakartaMedium",
+    fontFamily: "Jakarta",
     color: Colors.textSecondary,
   },
   sheetOptionChipTextActive: {

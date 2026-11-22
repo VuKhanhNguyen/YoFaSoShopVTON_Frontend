@@ -1,13 +1,18 @@
 import { useEffect, useState } from "react";
-import { Image, type ImageProps } from "react-native";
+import { StyleSheet, View, type ImageProps, type StyleProp, type ViewStyle } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
+import Animated, { FadeIn, useReducedMotion } from "react-native-reanimated";
+import { Ionicons } from "@expo/vector-icons";
 import { api, imageSource, requestKey } from "@/lib/api";
+import { Colors } from "@/constants/theme";
+import { SkeletonBox } from "./Skeleton";
 
-export function PrivateImage({ assetId, thumbnail, onError, ...props }: Omit<ImageProps, "source" | "onError"> & {
+export function PrivateImage({ assetId, thumbnail, onError, style, ...props }: Omit<ImageProps, "source" | "onError"> & {
   assetId: string;
   thumbnail?: boolean;
   onError?: (message?: string) => void;
 }) {
+  const reducedMotion = useReducedMotion();
   const [loaded, setLoaded] = useState<{ assetId: string; uri?: string; error?: string }>();
   useEffect(() => {
     let active = true;
@@ -38,6 +43,35 @@ export function PrivateImage({ assetId, thumbnail, onError, ...props }: Omit<Ima
   useEffect(() => {
     if (current?.error) onError?.(current.error);
   }, [current, onError]);
-  return current?.uri ? <Image {...props} onError={() => onError?.("Thiết bị không giải mã được ảnh.")}
-    source={{ uri: current.uri }} /> : null;
+
+  if (current?.uri) {
+    return (
+      <Animated.Image
+        {...props}
+        style={style}
+        entering={reducedMotion ? undefined : FadeIn.duration(220)}
+        onError={() => onError?.("Thiết bị không giải mã được ảnh.")}
+        source={{ uri: current.uri }}
+      />
+    );
+  }
+
+  if (current?.error) {
+    return (
+      <View style={[style as StyleProp<ViewStyle>, st.errorPlaceholder]}>
+        <SkeletonBox style={StyleSheet.absoluteFill} borderRadius={0} staticOnly />
+        <Ionicons name="image-outline" size={24} color={Colors.textMuted} />
+      </View>
+    );
+  }
+
+  return <SkeletonBox style={style as StyleProp<ViewStyle>} borderRadius={0} />;
 }
+
+const st = StyleSheet.create({
+  errorPlaceholder: {
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+});

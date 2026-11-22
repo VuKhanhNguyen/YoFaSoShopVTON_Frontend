@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   FlatList,
   Modal,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -21,6 +21,8 @@ import {
 } from "@/lib/try-on";
 import { Colors, Radii, Shadows } from "@/constants/theme";
 import { ShirtIcon, PantsSkirtIcon, DressIcon } from "./FashionIcons";
+import { AnimatedToast, ScalePressable } from "./MotionPrimitives";
+import { ProductGridSkeleton } from "./Skeleton";
 import {
   COLOR_PALETTE,
   ProductCard,
@@ -226,8 +228,8 @@ export function CatalogPickerModal({
             item={item}
             index={index}
             stagger={false}
-            onOpen={() => handlePickProduct(item)}
-            onTry={() => handlePickProduct(item)}
+            onOpenItem={handlePickProduct}
+            onTryItem={handlePickProduct}
           />
           {isSelected && (
             <View style={st.selectedTag}>
@@ -239,6 +241,11 @@ export function CatalogPickerModal({
       );
     },
     [selectedProductId, handlePickProduct]
+  );
+
+  const keyExtractor = useCallback(
+    (item: UnifiedProduct, idx: number) => `${item.id}-${item.sku}-${idx}`,
+    []
   );
 
   return (
@@ -349,8 +356,8 @@ export function CatalogPickerModal({
 
         {/* 2-Column Product Grid matching Catalog.tsx */}
         <FlatList
-          data={items}
-          keyExtractor={(item, idx) => `${item.id}-${item.sku}-${idx}`}
+          data={loading && items.length === 0 ? [] : items}
+          keyExtractor={keyExtractor}
           numColumns={2}
           columnWrapperStyle={st.columnWrapper}
           renderItem={renderItem}
@@ -358,6 +365,10 @@ export function CatalogPickerModal({
           contentContainerStyle={st.feedContent}
           onEndReached={handleLoadMore}
           onEndReachedThreshold={0.5}
+          windowSize={5}
+          maxToRenderPerBatch={8}
+          initialNumToRender={6}
+          removeClippedSubviews={Platform.OS === "android"}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -391,7 +402,7 @@ export function CatalogPickerModal({
                 </Text>
               </View>
 
-              <Pressable onPress={() => setFilterOpen(true)} style={st.sortChip}>
+              <ScalePressable activeScale={0.94} onPress={() => setFilterOpen(true)} style={st.sortChip}>
                 <Ionicons name="swap-vertical" size={13} color={Colors.primary} />
                 <Text style={st.sortChipText}>
                   {sortOption === "newest"
@@ -402,14 +413,12 @@ export function CatalogPickerModal({
                     ? "Giá tăng"
                     : "Giá giảm"}
                 </Text>
-              </Pressable>
+              </ScalePressable>
             </View>
           }
           ListEmptyComponent={
             loading ? (
-              <View style={st.emptyBox}>
-                <ActivityIndicator size="large" color={Colors.champagneDeep} />
-              </View>
+              <ProductGridSkeleton count={6} stagger={false} />
             ) : (
               <View style={st.emptyBox}>
                 <Ionicons name="shirt-outline" size={40} color={Colors.textMuted} />
@@ -422,12 +431,7 @@ export function CatalogPickerModal({
           }
           ListFooterComponent={
             <View style={{ paddingTop: 12, paddingBottom: 40 }}>
-              {loadingMore && (
-                <View style={st.loadingMoreBox}>
-                  <ActivityIndicator size="small" color={Colors.champagneDeep} />
-                  <Text style={st.loadingMoreText}>Đang tải thêm sản phẩm...</Text>
-                </View>
-              )}
+              {loadingMore && <ProductGridSkeleton count={2} stagger={false} />}
               {!hasMore && items.length > 0 && (
                 <Text style={st.endOfListText}>
                   — Đã tải toàn bộ {totalCount} thiết kế —
@@ -564,12 +568,7 @@ export function CatalogPickerModal({
         )}
 
         {/* Blocking Toast Feedback inside Modal */}
-        {!!toast && (
-          <View style={st.toastPopup} pointerEvents="none">
-            <Ionicons name="alert-circle" size={18} color="#FDE68A" />
-            <Text style={st.toastPopupText}>{toast}</Text>
-          </View>
-        )}
+        <AnimatedToast message={toast} tone="warning" offset={24} />
       </SafeAreaView>
     </Modal>
   );

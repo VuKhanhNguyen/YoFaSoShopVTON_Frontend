@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
-import { Image, type ImageProps } from "react-native";
+import { Image, StyleSheet, View, type ImageProps, type StyleProp, type ViewStyle } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { imageSource } from "@/lib/api";
+import { Colors } from "@/constants/theme";
+import { SkeletonBox } from "./Skeleton";
 
-export function PrivateImage({ assetId, thumbnail, onError, ...props }: Omit<ImageProps, "source" | "onError"> & {
+export function PrivateImage({ assetId, thumbnail, onError, style, ...props }: Omit<ImageProps, "source" | "onError"> & {
   assetId: string;
   thumbnail?: boolean;
   onError?: (message?: string) => void;
@@ -35,5 +38,25 @@ export function PrivateImage({ assetId, thumbnail, onError, ...props }: Omit<Ima
   useEffect(() => {
     if (current && !current.url) onError?.();
   }, [current, onError]);
-  return current?.url ? <Image {...props} onError={() => onError?.()} source={{ uri: current.url }} /> : null;
+
+  if (current?.url) {
+    return <Image {...props} style={style} onError={() => onError?.()} source={{ uri: current.url }} />;
+  }
+  if (current && !current.url) {
+    return (
+      <View style={[style as StyleProp<ViewStyle>, st.errorPlaceholder]}>
+        <SkeletonBox style={StyleSheet.absoluteFill} borderRadius={0} staticOnly />
+        <Ionicons name="image-outline" size={24} color={Colors.textMuted} />
+      </View>
+    );
+  }
+  return <SkeletonBox style={style as StyleProp<ViewStyle>} borderRadius={0} />;
 }
+
+const st = StyleSheet.create({
+  errorPlaceholder: {
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+});

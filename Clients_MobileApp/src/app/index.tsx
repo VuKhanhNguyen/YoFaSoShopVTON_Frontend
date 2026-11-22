@@ -4,7 +4,6 @@ import {
   Dimensions,
   Image,
   Platform,
-  Pressable,
   StatusBar,
   StyleSheet,
   Text,
@@ -15,10 +14,12 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SplashScreen from "expo-splash-screen";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import Reanimated, { FadeIn, FadeInDown, useReducedMotion } from "react-native-reanimated";
 import { useSession } from "@/lib/session";
-import { Colors, Fonts, Radii, Shadows, Spacing } from "@/constants/theme";
+import { Colors, Fonts, Radii } from "@/constants/theme";
 import { EditorialImages } from "@/lib/catalog-data";
 import { Button, Logo } from "@/components/shop/ui";
+import { ScalePressable } from "@/components/shop/MotionPrimitives";
 import AuthScreen from "./auth";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
@@ -51,6 +52,7 @@ type Stage = "splash" | "onboarding" | "auth";
 
 export default function WelcomeIndex() {
   const { user } = useSession();
+  const reducedMotion = useReducedMotion();
   const [stage, setStage] = useState<Stage>("splash");
   const [slideIndex, setSlideIndex] = useState(0);
 
@@ -163,11 +165,17 @@ export default function WelcomeIndex() {
         backgroundColor="transparent"
       />
 
-      <Image
-        source={currentSlide.image}
+      <Reanimated.View
+        key={`bg-${slideIndex}`}
+        entering={reducedMotion ? undefined : FadeIn.duration(300)}
         style={st.bgImage}
-        resizeMode="cover"
-      />
+      >
+        <Image
+          source={currentSlide.image}
+          style={st.bgImage}
+          resizeMode="cover"
+        />
+      </Reanimated.View>
 
       <View style={st.onboardingBackdrop}>
         <SafeAreaView edges={["top", "bottom"]} style={st.onboardingSafeArea}>
@@ -189,26 +197,32 @@ export default function WelcomeIndex() {
               ))}
             </View>
 
-            <Pressable
+            <ScalePressable
               accessibilityRole="button"
               accessibilityLabel="Bỏ qua hướng dẫn"
+              activeScale={0.94}
               onPress={onSkipOnboarding}
               style={st.skipBtn}
             >
               <Text style={st.skipText}>Bỏ qua</Text>
-            </Pressable>
+            </ScalePressable>
           </View>
 
           {/* Bottom Content Area: Title -> Tag -> Description -> Button */}
           <View style={st.onboardingContent}>
-            <Text style={st.slideTitle}>{currentSlide.title}</Text>
+            <Reanimated.View
+              key={`copy-${slideIndex}`}
+              entering={reducedMotion ? undefined : FadeInDown.duration(260)}
+            >
+              <Text style={st.slideTitle}>{currentSlide.title}</Text>
 
-            <View style={st.tagRow}>
-              <Ionicons name={currentSlide.icon} size={13} color={Colors.champagneDeep} />
-              <Text style={st.tagText}>{currentSlide.tag}</Text>
-            </View>
+              <View style={st.tagRow}>
+                <Ionicons name={currentSlide.icon} size={13} color={Colors.champagneDeep} />
+                <Text style={st.tagText}>{currentSlide.tag}</Text>
+              </View>
 
-            <Text style={st.slideDesc}>{currentSlide.desc}</Text>
+              <Text style={st.slideDesc}>{currentSlide.desc}</Text>
+            </Reanimated.View>
 
             <View style={st.actionsRow}>
               <Button

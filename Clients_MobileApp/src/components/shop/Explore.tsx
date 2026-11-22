@@ -11,14 +11,23 @@ import {
 } from "react-native";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import Animated, { FadeIn, useReducedMotion } from "react-native-reanimated";
 import { api } from "@/lib/api";
 import type { Page, Product } from "@/lib/models";
 import { Colors, Radii, Shadows } from "@/constants/theme";
-import { EditorialImages, formatVND, VOUCHERS_MOCK, type Voucher } from "@/lib/catalog-data";
+import { EditorialImages, formatVND, VOUCHERS_MOCK } from "@/lib/catalog-data";
 import { ShopHeader } from "./ShopHeader";
 import { ProductCard, mapApiProduct, type UnifiedProduct } from "./ProductCard";
+import { AnimatedToast, ScalePressable, SlidingTabs } from "./MotionPrimitives";
+import { EditorialRepSkeleton, ProductGridSkeleton, SmartImage } from "./Skeleton";
+
+const EDITORIAL_GENDER_TABS = [
+  { id: "NU" as const, label: "👗 Thời trang Nữ" },
+  { id: "NAM" as const, label: "👔 Thời trang Nam" },
+];
 
 export const Explore = memo(function Explore() {
+  const reducedMotion = useReducedMotion();
   // Quick Search input in Explore header
   const [q, setQ] = useState("");
 
@@ -179,7 +188,7 @@ export const Explore = memo(function Explore() {
             <Text style={st.heroCollectionDesc}>
               Trải nghiệm ướm thử trang phục ảo theo số đo thực tế của cơ thể bạn.
             </Text>
-            <Pressable
+            <ScalePressable
               accessibilityRole="button"
               accessibilityLabel="Ướm thử vào bạn"
               onPress={() =>
@@ -195,7 +204,7 @@ export const Explore = memo(function Explore() {
             >
               <Text style={st.heroCtaText}>Ướm thử vào bạn</Text>
               <Ionicons name="arrow-forward" size={14} color="#FFFFFF" />
-            </Pressable>
+            </ScalePressable>
           </View>
         </View>
 
@@ -211,13 +220,13 @@ export const Explore = memo(function Explore() {
               </Text>
             </View>
 
-            <Pressable
+            <ScalePressable
               onPress={() => router.push("/(shop)/account" as any)}
               style={st.activateProfilePill}
             >
               <Text style={st.activateProfileText}>Kích hoạt</Text>
               <Ionicons name="chevron-forward" size={12} color={Colors.champagneDeep} />
-            </Pressable>
+            </ScalePressable>
           </View>
 
           <Text style={st.stylistCardSubtitle}>
@@ -228,8 +237,9 @@ export const Explore = memo(function Explore() {
             {["Đồng hồ cát", "Quả lê", "Thước kẻ", "Tam giác"].map((shape) => {
               const active = selectedBodyShape === shape;
               return (
-                <Pressable
+                <ScalePressable
                   key={shape}
+                  activeScale={0.94}
                   onPress={() => setSelectedBodyShape(shape)}
                   style={[st.bodyTypePill, active && st.bodyTypePillActive]}
                 >
@@ -241,7 +251,7 @@ export const Explore = memo(function Explore() {
                   >
                     {shape}
                   </Text>
-                </Pressable>
+                </ScalePressable>
               );
             })}
           </View>
@@ -325,14 +335,15 @@ export const Explore = memo(function Explore() {
                     <View style={st.voucherDivider} />
                     <View style={st.voucherRight}>
                       <Text style={st.voucherCodeText}>{v.maPhieuGiamGia}</Text>
-                      <Pressable
+                      <ScalePressable
+                        activeScale={0.92}
                         onPress={() => handleCollectVoucher(v.maPhieuGiamGia)}
                         style={[st.collectBtn, isCollected && st.collectBtnDone]}
                       >
                         <Text style={[st.collectBtnText, isCollected && st.collectBtnTextDone]}>
                           {isCollected ? "Đã lưu ✓" : "Lưu mã"}
                         </Text>
-                      </Pressable>
+                      </ScalePressable>
                     </View>
                   </View>
                 );
@@ -343,7 +354,7 @@ export const Explore = memo(function Explore() {
           <View style={st.voucherCampaignBanner}>
             <Ionicons name="sparkles" size={16} color={Colors.champagneDeep} />
             <Text style={st.voucherCampaignText}>
-              <Text style={{ fontFamily: "JakartaBold" }}>Đặc quyền AI VTON: </Text>
+              <Text style={{ fontFamily: "JakartaSemiBold" }}>Đặc quyền AI VTON: </Text>
               Tạo hồ sơ dáng người lần đầu nhận ngay Voucher 100K (VTON100) tự động lưu vào ví.
             </Text>
           </View>
@@ -351,44 +362,19 @@ export const Explore = memo(function Explore() {
 
         {/* GENDER FASHION EDITORIAL SHOWCASE (Thời trang Nam & Nữ tabs) */}
         <View style={st.editorialSection}>
-          <View style={st.editorialTabsRow}>
-            <Pressable
-              onPress={() => setEditorialTab("NU")}
-              style={[
-                st.editorialTabBtn,
-                editorialTab === "NU" && st.editorialTabBtnActive,
-              ]}
-            >
-              <Text
-                style={[
-                  st.editorialTabBtnText,
-                  editorialTab === "NU" && st.editorialTabBtnTextActive,
-                ]}
-              >
-                ✨ Thời trang Nữ
-              </Text>
-            </Pressable>
-
-            <Pressable
-              onPress={() => setEditorialTab("NAM")}
-              style={[
-                st.editorialTabBtn,
-                editorialTab === "NAM" && st.editorialTabBtnActive,
-              ]}
-            >
-              <Text
-                style={[
-                  st.editorialTabBtnText,
-                  editorialTab === "NAM" && st.editorialTabBtnTextActive,
-                ]}
-              >
-                🎩 Thời trang Nam
-              </Text>
-            </Pressable>
-          </View>
+          <SlidingTabs
+            options={EDITORIAL_GENDER_TABS}
+            value={editorialTab}
+            onChange={setEditorialTab}
+            variant="champagne"
+          />
 
           {/* Editorial Narrative Card */}
-          <View style={st.narrativeCard}>
+          <Animated.View
+            key={editorialTab}
+            entering={reducedMotion ? undefined : FadeIn.duration(180)}
+            style={st.narrativeCard}
+          >
             {editorialTab === "NU" ? (
               <>
                 <View style={st.narrativeTag}>
@@ -406,34 +392,36 @@ export const Explore = memo(function Explore() {
                 </Text>
 
                 {/* 3 Representative Women Products */}
-                <View style={st.repProductsGrid}>
-                  {(womenItems.length > 0 ? womenItems : newestItems.slice(0, 3)).map(
-                    (item) => (
-                      <Pressable
-                        key={item.id}
-                        onPress={() => handleOpenProduct(item)}
-                        style={st.repCard}
-                      >
-                        <Image
-                          source={
-                            typeof item.image === "number"
-                              ? item.image
-                              : { uri: item.image }
-                          }
-                          style={st.repImage}
-                          resizeMode="cover"
-                        />
-                        <Text numberOfLines={1} style={st.repTitle}>
-                          {item.name}
-                        </Text>
-                        <Text style={st.repPrice}>{formatVND(item.price)}</Text>
-                      </Pressable>
-                    )
-                  )}
-                </View>
+                {loading && womenItems.length === 0 && newestItems.length === 0 ? (
+                  <EditorialRepSkeleton />
+                ) : (
+                  <View style={st.repProductsGrid}>
+                    {(womenItems.length > 0 ? womenItems : newestItems.slice(0, 3)).map(
+                      (item) => (
+                        <ScalePressable
+                          key={item.id}
+                          activeScale={0.96}
+                          onPress={() => handleOpenProduct(item)}
+                          style={st.repCard}
+                        >
+                          <SmartImage
+                            source={item.image}
+                            style={st.repImage}
+                            contentFit="cover"
+                            iconSize={20}
+                          />
+                          <Text numberOfLines={1} style={st.repTitle}>
+                            {item.name}
+                          </Text>
+                          <Text style={st.repPrice}>{formatVND(item.price)}</Text>
+                        </ScalePressable>
+                      )
+                    )}
+                  </View>
+                )}
 
                 {/* CTA Button to Men/Women Catalog */}
-                <Pressable
+                <ScalePressable
                   onPress={() => handleNavigateToCatalog({ gender: "NU" })}
                   style={st.exploreCtaBtn}
                 >
@@ -441,7 +429,7 @@ export const Explore = memo(function Explore() {
                     Xem toàn bộ Thời trang Nữ ({womenItems.length > 0 ? "66" : "Nữ"})
                   </Text>
                   <Ionicons name="arrow-forward" size={15} color="#FFFFFF" />
-                </Pressable>
+                </ScalePressable>
               </>
             ) : (
               <>
@@ -460,34 +448,36 @@ export const Explore = memo(function Explore() {
                 </Text>
 
                 {/* 3 Representative Men Products */}
-                <View style={st.repProductsGrid}>
-                  {(menItems.length > 0 ? menItems : newestItems.slice(3, 6)).map(
-                    (item) => (
-                      <Pressable
-                        key={item.id}
-                        onPress={() => handleOpenProduct(item)}
-                        style={st.repCard}
-                      >
-                        <Image
-                          source={
-                            typeof item.image === "number"
-                              ? item.image
-                              : { uri: item.image }
-                          }
-                          style={st.repImage}
-                          resizeMode="cover"
-                        />
-                        <Text numberOfLines={1} style={st.repTitle}>
-                          {item.name}
-                        </Text>
-                        <Text style={st.repPrice}>{formatVND(item.price)}</Text>
-                      </Pressable>
-                    )
-                  )}
-                </View>
+                {loading && menItems.length === 0 && newestItems.length === 0 ? (
+                  <EditorialRepSkeleton />
+                ) : (
+                  <View style={st.repProductsGrid}>
+                    {(menItems.length > 0 ? menItems : newestItems.slice(3, 6)).map(
+                      (item) => (
+                        <ScalePressable
+                          key={item.id}
+                          activeScale={0.96}
+                          onPress={() => handleOpenProduct(item)}
+                          style={st.repCard}
+                        >
+                          <SmartImage
+                            source={item.image}
+                            style={st.repImage}
+                            contentFit="cover"
+                            iconSize={20}
+                          />
+                          <Text numberOfLines={1} style={st.repTitle}>
+                            {item.name}
+                          </Text>
+                          <Text style={st.repPrice}>{formatVND(item.price)}</Text>
+                        </ScalePressable>
+                      )
+                    )}
+                  </View>
+                )}
 
                 {/* CTA Button to Men/Women Catalog */}
-                <Pressable
+                <ScalePressable
                   onPress={() => handleNavigateToCatalog({ gender: "NAM" })}
                   style={st.exploreCtaBtn}
                 >
@@ -495,10 +485,10 @@ export const Explore = memo(function Explore() {
                     Xem toàn bộ Thời trang Nam ({menItems.length > 0 ? "55" : "Nam"})
                   </Text>
                   <Ionicons name="arrow-forward" size={15} color="#FFFFFF" />
-                </Pressable>
+                </ScalePressable>
               </>
             )}
-          </View>
+          </Animated.View>
         </View>
 
         {/* THIẾT KẾ MỚI VỀ (New Arrivals) */}
@@ -510,27 +500,31 @@ export const Explore = memo(function Explore() {
                 6 thiết kế mới nhất vừa ra mắt tuần này
               </Text>
             </View>
-            <Pressable
+            <ScalePressable
               onPress={() => handleNavigateToCatalog({ sort: "newest" })}
               style={st.seeAllBtn}
             >
               <Text style={st.seeAllBtnText}>Xem ngay</Text>
               <Ionicons name="chevron-forward" size={13} color={Colors.champagneDeep} />
-            </Pressable>
+            </ScalePressable>
           </View>
 
           {/* 6 Newest Products 2-Column Grid */}
-          <View style={st.twoColGrid}>
-            {newestItems.slice(0, 6).map((item, idx) => (
-              <ProductCard
-                key={item.id}
-                item={item}
-                index={idx}
-                onOpen={() => handleOpenProduct(item)}
-                onTry={() => handleTryOnProduct(item)}
-              />
-            ))}
-          </View>
+          {loading && newestItems.length === 0 ? (
+            <ProductGridSkeleton count={4} stagger />
+          ) : (
+            <View style={st.twoColGrid}>
+              {newestItems.slice(0, 6).map((item, idx) => (
+                <ProductCard
+                  key={item.id}
+                  item={item}
+                  index={idx}
+                  onOpen={() => handleOpenProduct(item)}
+                  onTry={() => handleTryOnProduct(item)}
+                />
+              ))}
+            </View>
+          )}
         </View>
 
         {/* THIẾT KẾ BÁN CHẠY (Best Sellers) */}
@@ -542,28 +536,32 @@ export const Explore = memo(function Explore() {
                 Xu hướng thời trang được lựa chọn nhiều nhất
               </Text>
             </View>
-            <Pressable
+            <ScalePressable
               onPress={() => handleNavigateToCatalog({ sort: "best_selling" })}
               style={st.seeAllBtn}
             >
               <Text style={st.seeAllBtnText}>Xem tất cả</Text>
               <Ionicons name="chevron-forward" size={13} color={Colors.champagneDeep} />
-            </Pressable>
+            </ScalePressable>
           </View>
 
-          <View style={st.twoColGrid}>
-            {(bestSellerItems.length > 0 ? bestSellerItems : newestItems.slice(2, 6)).map(
-              (item, idx) => (
-                <ProductCard
-                  key={item.id}
-                  item={item}
-                  index={idx}
-                  onOpen={() => handleOpenProduct(item)}
-                  onTry={() => handleTryOnProduct(item)}
-                />
-              )
-            )}
-          </View>
+          {loading && bestSellerItems.length === 0 && newestItems.length === 0 ? (
+            <ProductGridSkeleton count={4} stagger />
+          ) : (
+            <View style={st.twoColGrid}>
+              {(bestSellerItems.length > 0 ? bestSellerItems : newestItems.slice(2, 6)).map(
+                (item, idx) => (
+                  <ProductCard
+                    key={item.id}
+                    item={item}
+                    index={idx}
+                    onOpen={() => handleOpenProduct(item)}
+                    onTry={() => handleTryOnProduct(item)}
+                  />
+                )
+              )}
+            </View>
+          )}
         </View>
 
         {/* SHOP THE LOOK • COMBO PHỐI SẴN AI */}
@@ -582,7 +580,7 @@ export const Explore = memo(function Explore() {
               <Text style={st.comboPrice}>3.096.000đ</Text>
               <Text style={st.comboOldPrice}>3.440.000đ</Text>
             </View>
-            <Pressable
+            <ScalePressable
               onPress={() =>
                 router.push({
                   pathname: "/try-on",
@@ -595,7 +593,7 @@ export const Explore = memo(function Explore() {
               style={st.comboTryBtn}
             >
               <Text style={st.comboTryBtnText}>Mở phòng thử đồ</Text>
-            </Pressable>
+            </ScalePressable>
           </View>
         </View>
 
@@ -609,24 +607,19 @@ export const Explore = memo(function Explore() {
             <Text style={st.o2oSubtitle}>
               Nhận đồ sẵn tại phòng thử VIP sau 30 phút, Kệ A-01 Flagship.
             </Text>
-            <Pressable onPress={() => router.push("/orders")} style={st.o2oLinkRow}>
+            <ScalePressable onPress={() => router.push("/orders")} style={st.o2oLinkRow}>
               <Text style={st.o2oLinkText}>Đặt lịch & Nhận vé Fitting Pass</Text>
               <Ionicons name="chevron-forward" size={13} color={Colors.champagneDeep} />
-            </Pressable>
+            </ScalePressable>
           </View>
         </View>
 
         {/* Bottom padding for tab bar */}
-        <View style={{ height: 80 }} />
+        <View style={{ height: 96 }} />
       </ScrollView>
 
       {/* Toast Feedback */}
-      {!!exploreToast && (
-        <View style={st.toastPopup}>
-          <Ionicons name="checkmark-circle" size={17} color={Colors.statusSuccess} />
-          <Text style={st.toastPopupText}>{exploreToast}</Text>
-        </View>
-      )}
+      <AnimatedToast message={exploreToast} tone="success" offset={96} />
     </View>
   );
 });
@@ -817,7 +810,7 @@ const st = StyleSheet.create({
   },
   bodyTypePillText: {
     fontSize: 10.5,
-    fontFamily: "JakartaMedium",
+    fontFamily: "Jakarta",
     color: Colors.textSecondary,
   },
   bodyTypePillTextActive: {
@@ -898,7 +891,7 @@ const st = StyleSheet.create({
   },
   voucherDiscount: {
     fontSize: 13,
-    fontFamily: "JakartaBold",
+    fontFamily: "JakartaSemiBold",
     color: Colors.champagneDeep,
   },
   voucherTagPill: {
@@ -1104,7 +1097,7 @@ const st = StyleSheet.create({
   },
   repPrice: {
     fontSize: 10.5,
-    fontFamily: "JakartaBold",
+    fontFamily: "JakartaSemiBold",
     color: Colors.champagneDeep,
     paddingHorizontal: 6,
     paddingBottom: 6,
@@ -1187,7 +1180,7 @@ const st = StyleSheet.create({
   },
   comboPrice: {
     fontSize: 15,
-    fontFamily: "JakartaBold",
+    fontFamily: "JakartaSemiBold",
     color: "#FFFFFF",
   },
   comboOldPrice: {
