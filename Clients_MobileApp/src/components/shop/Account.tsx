@@ -423,9 +423,9 @@ export const Account = memo(function Account() {
                   },
                   {
                     icon: "chatbubble-ellipses-outline" as const,
-                    title: "Hỗ trợ khách hàng & Showroom",
-                    sub: "Hotline 1900 8822 (8:00 - 22:00)",
-                    action: showSoon,
+                    title: "Trung tâm Hỗ trợ & Showroom",
+                    sub: "Hotline / Zalo 0795 605 214",
+                    action: () => router.push("/support"),
                   },
                 ].map((m, i) => (
                   <ScalePressable key={i} activeScale={0.98} onPress={m.action} style={[st.menuRow, i > 0 && st.menuRowDivider]}>
@@ -535,26 +535,26 @@ export const Account = memo(function Account() {
                   {
                     icon: "call-outline" as const,
                     title: "Tổng đài hỗ trợ khách hàng",
-                    sub: "Hotline miễn phí 1900 8822 (8:00 - 22:00)",
-                    action: showSoon,
+                    sub: "Hotline / Zalo 0795 605 214 (8:00 - 22:00)",
+                    action: () => router.push({ pathname: "/support", params: { section: "hotline" } }),
                   },
                   {
                     icon: "business-outline" as const,
                     title: "Hệ thống Showroom YoFaSo",
                     sub: "Tìm cửa hàng & địa chỉ quầy thử đồ gần bạn",
-                    action: showSoon,
+                    action: () => router.push({ pathname: "/support", params: { section: "showroom" } }),
                   },
                   {
                     icon: "refresh-circle-outline" as const,
                     title: "Chính sách đổi trả & Bảo hành O2O",
                     sub: "Đổi hàng miễn phí toàn quốc trong vòng 30 ngày",
-                    action: showSoon,
+                    action: () => router.push({ pathname: "/support", params: { section: "policy" } }),
                   },
                   {
                     icon: "information-circle-outline" as const,
                     title: "Về thương hiệu YoFaSo Shop",
                     sub: "Tiên phong thời trang thông minh tích hợp AI VTON",
-                    action: showSoon,
+                    action: () => router.push({ pathname: "/support", params: { section: "about" } }),
                   },
                 ].map((m, i) => (
                   <Pressable key={i} onPress={m.action} style={[st.menuRow, i > 0 && st.menuRowDivider]}>

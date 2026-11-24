@@ -15,6 +15,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { Colors, Radii, Shadows } from "@/constants/theme";
 import { SPRING_SNAPPY } from "@/components/shop/MotionPrimitives";
+import { FloatingChatBubble } from "@/components/shop/ChatFabAndSheet";
 
 const SHOP_TABS = [
   {
@@ -146,6 +147,7 @@ export default function ShopTabsLayout() {
         onSelect={navState.navigate}
         blurTarget={blurTargetRef}
       />
+      <FloatingChatBubble />
     </View>
   );
 }

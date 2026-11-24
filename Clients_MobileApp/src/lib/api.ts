@@ -148,6 +148,14 @@ export const imageSource = (assetId: string, thumbnail = false) => ({
     ? { Authorization: `Bearer ${current.accessToken}` }
     : undefined,
 });
+export const chatImageSource = (messageId: string, sessionId?: string) => ({
+  uri: `${BASE_URL}/chat/images/${encodeURIComponent(messageId)}${
+    sessionId && !current ? `?sessionId=${encodeURIComponent(sessionId)}` : ""
+  }`,
+  headers: current
+    ? { Authorization: `Bearer ${current.accessToken}` }
+    : undefined,
+});
 export const publicUrl = (url: string) =>
   url.startsWith("/api/v1/") ? BASE_URL.replace(/\/api\/v1$/, "") + url : url;
 export async function api<T>(
@@ -164,9 +172,10 @@ export async function api<T>(
       ("_parts" in (body as any) || (body as any).constructor?.name === "FormData"));
 
   const controller = new AbortController();
+  const isChatSend = path.startsWith("/chat/messages") && method === "POST";
   const timeout = setTimeout(
     () => controller.abort(),
-    isFormData ? 60000 : 20000,
+    isFormData ? 60000 : isChatSend ? 50000 : 20000,
   );
   let response: Response;
   try {
