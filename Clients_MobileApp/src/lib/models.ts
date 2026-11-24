@@ -4,11 +4,12 @@ export type User = {
   userId: string;
   username: string;
   fullName: string;
-  email: string;
-  phone: string;
+  email?: string | null;
+  phone?: string | null;
   dateOfBirth?: string;
   gender?: "NAM" | "NU" | "KHAC" | string;
   roles: string[];
+  linkedProviders?: string[];
   loyaltyPoints: number;
   membership: string;
   membershipLabel?: string;
@@ -18,6 +19,29 @@ export type User = {
 };
 
 export type Tokens = { accessToken: string; refreshToken: string; user: User };
+
+export type OAuthProvider = "google" | "facebook";
+
+export type LinkedAccountItem = {
+  linkId: string;
+  provider: "GOOGLE" | "FACEBOOK" | string;
+  linkedAt: string;
+};
+
+export type OAuthLinkRequired = {
+  status: "LINK_REQUIRED";
+  linkToken: string;
+  provider: "GOOGLE" | "FACEBOOK" | string;
+  email: string;
+  existingFullName: string;
+  existingProviders: string[];
+  message: string;
+};
+
+export type OAuthExchangeResponse =
+  | (Tokens & { status: "AUTHENTICATED"; provider: string; isNewUser?: boolean })
+  | OAuthLinkRequired
+  | { status: "LINKED"; provider: string; linkedAccounts: LinkedAccountItem[] };
 
 export type Variant = {
   variantId: string;

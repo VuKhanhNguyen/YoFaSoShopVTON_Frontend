@@ -1353,7 +1353,7 @@ export function AdminOperations({
                         @{c.username}
                       </td>
                       <td className="font-semibold text-foreground">{c.fullName}</td>
-                      <td className="font-mono text-xs">{c.phone}</td>
+                      <td className="font-mono text-xs">{c.phone || "—"}</td>
                       <td className="font-mono text-xs text-muted-foreground">{c.email || "—"}</td>
                       <td className="max-w-[220px] truncate text-xs" title={c.address}>
                         {c.address || "Chưa thiết lập"}
@@ -1434,7 +1434,7 @@ export function AdminOperations({
           description={
             customerToToggle.status === "HOAT_DONG" ? (
               <span>
-                Tài khoản <strong>{customerToToggle.fullName}</strong> (@{customerToToggle.username} · SĐT {customerToToggle.phone}) sẽ bị chuyển sang trạng thái <code>KHOA_TAM_THOI</code>. Khách hàng sẽ không thể đăng nhập hoặc đặt đơn mới.
+                Tài khoản <strong>{customerToToggle.fullName}</strong> (@{customerToToggle.username} · {customerToToggle.phone ? `SĐT ${customerToToggle.phone}` : "Chưa có SĐT"}) sẽ bị chuyển sang trạng thái <code>KHOA_TAM_THOI</code>. Khách hàng sẽ không thể đăng nhập hoặc đặt đơn mới.
               </span>
             ) : (
               <span>

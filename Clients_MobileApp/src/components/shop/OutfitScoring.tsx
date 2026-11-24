@@ -14,6 +14,7 @@ import { api, publicUrl } from "@/lib/api";
 import { formatVND } from "@/lib/catalog-data";
 import { useResource } from "@/hooks/use-resource";
 import type { Page, Product, Row } from "@/lib/models";
+import type { ColorSwatch } from "@/lib/try-on";
 import { Colors, Radii, Shadows } from "@/constants/theme";
 import { SelectField } from "./SelectField";
 import { Button, Field, Notice, State } from "./ui";
@@ -47,11 +48,16 @@ export type OutfitScoringProps = {
   initialTierLabel?: string;
   initialProportionRule?: string;
   initialProportionNote?: string;
+  initialColorNote?: string;
+  initialColorSwatches?: ColorSwatch[];
+  initialRecommendedColors?: ColorSwatch[];
   singleItemPreview?: {
     evaluated: boolean;
     singleItem: boolean;
     colorName?: string;
     colorNote?: string;
+    colorSwatches?: ColorSwatch[];
+    recommendedColors?: ColorSwatch[];
     patternRule?: string;
     patternNote?: string;
     source?: string;
@@ -92,6 +98,49 @@ function tierVisual(total: number, rawTier?: string) {
   };
 }
 
+const HEX_PAIR_RE = /([^+()]+?)\s*\((#[0-9A-Fa-f]{6})\)/g;
+
+function stripHexAndLegacyPrefix(text: string): string {
+  return text
+    .replace(/^Ước tính quy tắc catalog;\s*/i, "")
+    .replace(/\s*\(#[0-9A-Fa-f]{6}\)/g, "")
+    .replace(/#[0-9A-Fa-f]{6}/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function normalizeSwatches(raw: unknown, fallbackText?: string): ColorSwatch[] {
+  if (Array.isArray(raw) && raw.length > 0) {
+    return raw
+      .filter((x): x is Record<string, unknown> => Boolean(x && typeof x === "object"))
+      .map((x) => ({
+        name: stripHexAndLegacyPrefix(String(x.name || "")),
+        hex: String(x.hex || "#CBD5E1"),
+        score: x.score != null ? Number(x.score) : undefined,
+      }))
+      .filter((x) => x.name.length > 0 && /^#[0-9A-Fa-f]{6}$/.test(x.hex));
+  }
+  if (!fallbackText) return [];
+  const parsed: ColorSwatch[] = [];
+  for (const match of fallbackText.matchAll(HEX_PAIR_RE)) {
+    const name = match[1].replace(/^\+\s*/, "").trim();
+    const hex = match[2].toUpperCase();
+    if (name && !parsed.some((p) => p.hex === hex)) {
+      parsed.push({ name, hex });
+    }
+  }
+  return parsed;
+}
+
+function isLightHex(hex: string): boolean {
+  const clean = hex.replace("#", "");
+  if (clean.length !== 6) return false;
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  return 0.299 * r + 0.587 * g + 0.114 * b > 215;
+}
+
 export function OutfitScoring({
   sessionId,
   variantId,
@@ -107,6 +156,9 @@ export function OutfitScoring({
   initialTierLabel,
   initialProportionRule,
   initialProportionNote,
+  initialColorNote,
+  initialColorSwatches,
+  initialRecommendedColors,
   singleItemPreview,
   onTry,
   onScoreUpdated,
@@ -180,16 +232,35 @@ export function OutfitScoring({
   const visual = tierVisual(total, (score?.tier ?? initialTier) as string | undefined);
   const tierLabel = String(score?.tierLabel ?? initialTierLabel ?? visual.tier);
   const formula = String(score?.formula ?? `S = 0.4·${proportion} + 0.4·${color} + 0.2·${pattern} - ${penalty}`);
-  const stylistComment = String(
-    score?.stylistComment ??
-      score?.advice ??
-      initialAdvice ??
-      ""
+  const stylistComment = stripHexAndLegacyPrefix(
+    String(
+      score?.stylistComment ??
+        score?.advice ??
+        initialAdvice ??
+        ""
+    )
   );
+  const isAiStylist =
+    Boolean(score?.stylistEnhanced) ||
+    String(score?.aiModelSource || "").startsWith("AI_STYLIST_");
+
+  const rawColorNote = String((score?.breakdown as any)?.color?.stylistNote || initialColorNote || "");
+  const activeColorSwatches = normalizeSwatches(
+    score?.colorSwatches ?? (score?.breakdown as any)?.color?.swatches ?? initialColorSwatches,
+    rawColorNote
+  );
+  const recommendedColors = normalizeSwatches(
+    score?.recommendedColors ?? initialRecommendedColors
+  );
+  const singleColorSwatches = normalizeSwatches(
+    singleItemPreview?.colorSwatches,
+    singleItemPreview?.colorNote
+  );
+  const singleRecommendedColors = normalizeSwatches(singleItemPreview?.recommendedColors);
 
   const breakdownNotes = {
     proportion: String((score?.breakdown as any)?.proportion?.stylistNote || initialProportionNote || (score?.proportionRule ?? initialProportionRule ?? "")),
-    color: String((score?.breakdown as any)?.color?.stylistNote || ""),
+    color: stripHexAndLegacyPrefix(rawColorNote),
     pattern: String((score?.breakdown as any)?.pattern?.stylistNote || ""),
   };
 
@@ -283,7 +354,8 @@ export function OutfitScoring({
               label="Phối màu bánh xe màu"
               weight="40%"
               value={color}
-              note={breakdownNotes.color}
+              note={activeColorSwatches.length > 0 ? "" : breakdownNotes.color}
+              swatches={activeColorSwatches}
               delayMs={80}
             />
             <BreakdownRow
@@ -302,15 +374,23 @@ export function OutfitScoring({
             </View>
           </View>
 
-          {/* AI Stylist Quote */}
+          {/* AI Stylist Quote + Gợi ý bảng màu Swatch */}
           {!!stylistComment && (
             <View style={st.stylistCard}>
               <View style={st.sparkleIconWrap}>
                 <Ionicons name="sparkles" size={15} color={Colors.champagneDeep} />
               </View>
-              <View style={{ flex: 1, gap: 4 }}>
+              <View style={{ flex: 1, gap: 6 }}>
                 <Text style={st.stylistQuote}>“{stylistComment}”</Text>
-                <Text style={st.stylistAuthor}>— Tư vấn Stylist YoFaSo</Text>
+                {recommendedColors.length > 0 && (
+                  <View style={st.paletteBlock}>
+                    <Text style={st.paletteHeading}>Tông màu gợi ý phối hài hòa</Text>
+                    <ColorSwatchRow swatches={recommendedColors} />
+                  </View>
+                )}
+                <Text style={st.stylistAuthor}>
+                  {isAiStylist ? "— AI Stylist YoFaSo Atelier" : "— Tư vấn Stylist YoFaSo"}
+                </Text>
               </View>
             </View>
           )}
@@ -324,8 +404,23 @@ export function OutfitScoring({
           </Text>
           {singleItemPreview && (
             <View style={st.singleMetaList}>
-              {!!singleItemPreview.colorNote && (
-                <Text style={st.singleMetaItem}>• Màu món chính: {singleItemPreview.colorNote}</Text>
+              {singleColorSwatches.length > 0 ? (
+                <View style={st.singleSwatchBlock}>
+                  <Text style={st.singleMetaItem}>• Màu món chính:</Text>
+                  <ColorSwatchRow swatches={singleColorSwatches} />
+                </View>
+              ) : (
+                !!singleItemPreview.colorNote && (
+                  <Text style={st.singleMetaItem}>
+                    • Màu món chính: {stripHexAndLegacyPrefix(singleItemPreview.colorNote)}
+                  </Text>
+                )
+              )}
+              {singleRecommendedColors.length > 0 && (
+                <View style={st.singleSwatchBlock}>
+                  <Text style={st.singleMetaItem}>• Gợi ý tông màu phối đẹp:</Text>
+                  <ColorSwatchRow swatches={singleRecommendedColors} />
+                </View>
               )}
               {!!singleItemPreview.patternNote && (
                 <Text style={st.singleMetaItem}>• Họa tiết: {singleItemPreview.patternNote}</Text>
@@ -378,6 +473,20 @@ export function OutfitScoring({
                     </View>
 
                     <Text style={st.cardName} numberOfLines={1}>{String(r.name || r.variantId)}</Text>
+                    {!!r.colorName && (
+                      <View style={st.cardSwatchRow}>
+                        {!!r.colorHex && /^#[0-9A-Fa-f]{6}$/.test(String(r.colorHex).split(",")[0].trim()) && (
+                          <View
+                            style={[
+                              st.swatchDotSm,
+                              { backgroundColor: String(r.colorHex).split(",")[0].trim() },
+                              isLightHex(String(r.colorHex).split(",")[0].trim()) && st.swatchDotBorder,
+                            ]}
+                          />
+                        )}
+                        <Text style={st.cardColorText} numberOfLines={1}>{String(r.colorName)}</Text>
+                      </View>
+                    )}
                     <Text style={st.cardPrice}>{formatVND(r.price as number | string)}</Text>
 
                     <ScalePressable
@@ -570,17 +679,39 @@ export function OutfitScoring({
   );
 }
 
+function ColorSwatchRow({ swatches }: { swatches: ColorSwatch[] }) {
+  if (!swatches.length) return null;
+  return (
+    <View style={st.swatchList}>
+      {swatches.map((sw, idx) => (
+        <View key={`${sw.hex}-${idx}`} style={st.swatchPill}>
+          <View
+            style={[
+              st.swatchDot,
+              { backgroundColor: sw.hex },
+              isLightHex(sw.hex) && st.swatchDotBorder,
+            ]}
+          />
+          <Text style={st.swatchLabel}>{sw.name}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 function BreakdownRow({
   label,
   weight,
   value,
   note,
+  swatches,
   delayMs = 0,
 }: {
   label: string;
   weight: string;
   value: number;
   note: string;
+  swatches?: ColorSwatch[];
   delayMs?: number;
 }) {
   const barColor =
@@ -601,7 +732,13 @@ function BreakdownRow({
         borderRadius={3}
         delayMs={delayMs}
       />
-      <Text style={st.barNote}>{note}</Text>
+      {swatches && swatches.length > 0 ? (
+        <View style={{ marginTop: 4 }}>
+          <ColorSwatchRow swatches={swatches} />
+        </View>
+      ) : (
+        !!note && <Text style={st.barNote}>{note}</Text>
+      )}
     </View>
   );
 }
@@ -754,6 +891,65 @@ const st = StyleSheet.create({
     fontSize: 11,
     fontFamily: "JakartaSemiBold",
     color: Colors.champagneDeep,
+  },
+  paletteBlock: {
+    gap: 5,
+    paddingTop: 2,
+  },
+  paletteHeading: {
+    fontSize: 11,
+    fontFamily: "JakartaSemiBold",
+    color: Colors.textSecondary,
+  },
+  swatchList: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  swatchPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.borderHairline,
+    borderRadius: Radii.full,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  swatchDot: {
+    width: 11,
+    height: 11,
+    borderRadius: 6,
+  },
+  swatchDotSm: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+  },
+  swatchDotBorder: {
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+  },
+  swatchLabel: {
+    fontSize: 11,
+    fontFamily: "JakartaSemiBold",
+    color: Colors.primary,
+  },
+  cardSwatchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  cardColorText: {
+    fontSize: 10.5,
+    fontFamily: "Jakarta",
+    color: Colors.textSecondary,
+    flex: 1,
+  },
+  singleSwatchBlock: {
+    gap: 4,
+    marginTop: 2,
   },
   suggestionsSection: {
     marginTop: 20,

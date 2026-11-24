@@ -16,8 +16,9 @@ import { Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors, Fonts, Radii, Shadows, Spacing } from "@/constants/theme";
 import { api } from "@/lib/api";
+import { useSession } from "@/lib/session";
 import { useResource } from "@/hooks/use-resource";
-import type { Row } from "@/lib/models";
+import type { Row, User } from "@/lib/models";
 import { RequireAccount } from "@/components/shop/RequireAccount";
 import { SelectField } from "@/components/shop/SelectField";
 import { ScalePressable, SlidingTabs } from "@/components/shop/MotionPrimitives";
@@ -100,6 +101,7 @@ export default function AddressesScreen() {
 }
 
 function AddressesContent() {
+  const { user, setUser } = useSession();
   const state = useResource<Row[]>("/me/addresses");
 
   // Resource danh mục địa chính MỚI (sau sáp nhập 01/07/2025)
@@ -194,12 +196,12 @@ function AddressesContent() {
   const [pendingSyncCity, setPendingSyncCity] = useState<string | null>(null);
   const [pendingSyncWard, setPendingSyncWard] = useState<string | null>(null);
 
-  // Mở modal Thêm mới
+  // Mở modal Thêm mới (tự điền sẵn họ tên và SĐT từ hồ sơ nếu có)
   const handleOpenAdd = () => {
     setEditing(null);
     setMode("new");
-    setName("");
-    setPhone("");
+    setName(user?.fullName || "");
+    setPhone(user?.phone || "");
     setStreet("");
     setNewProvince(undefined);
     setNewWard(undefined);
@@ -294,8 +296,13 @@ function AddressesContent() {
 
   // Lưu địa chỉ (Thêm mới hoặc Cập nhật)
   const handleSave = async () => {
-    if (!name.trim() || !phone.trim() || !street.trim()) {
+    const cleanPhone = phone.replace(/[\s.-]/g, "");
+    if (!name.trim() || !cleanPhone || !street.trim()) {
       setError("Vui lòng điền đầy đủ họ tên người nhận, số điện thoại và địa chỉ chi tiết.");
+      return;
+    }
+    if (!/^[0-9+]{9,15}$/.test(cleanPhone)) {
+      setError("Số điện thoại nhận hàng cần từ 9 đến 15 chữ số hợp lệ.");
       return;
     }
 
@@ -338,7 +345,7 @@ function AddressesContent() {
     try {
       const payload = {
         recipientName: name.trim(),
-        phone: phone.trim(),
+        phone: cleanPhone,
         street: street.trim(),
         defaultAddress: isDefault,
         city: finalCity,
@@ -351,6 +358,14 @@ function AddressesContent() {
         await api(`/me/addresses/${editing.addressId}`, "PUT", payload);
       } else {
         await api("/me/addresses", "POST", payload);
+      }
+      // Đồng bộ lại hồ sơ nếu tài khoản đăng nhập Google/Facebook vừa được tự gắn SĐT lần đầu
+      if (!user?.phone) {
+        void api<User>("/me", "GET")
+          .then((fresh) => {
+            if (fresh?.userId) setUser(fresh);
+          })
+          .catch(() => {});
       }
       setFormVisible(false);
       state.reload();

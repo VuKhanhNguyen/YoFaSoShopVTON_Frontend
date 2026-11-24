@@ -140,7 +140,10 @@ export function Loyalty({
               <div>
                 <h2 className="text-2xl font-bold">{customer.name}</h2>
                 <p className="mt-1 font-mono text-sm text-muted-foreground">
-                  {customer.phone.slice(0, 4)}.***.{customer.phone.slice(-3)} · Mã: {customer.id}
+                  {customer.phone && customer.phone.length >= 7
+                    ? `${customer.phone.slice(0, 4)}.***.${customer.phone.slice(-3)}`
+                    : customer.phone || "Chưa có SĐT"}{" "}
+                  · Mã: {customer.id}
                 </p>
               </div>
               <span className="flex items-center gap-2 rounded-full border border-accent bg-accent-subtle px-3 py-1.5 text-xs font-bold text-accent-hover">

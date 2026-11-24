@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -11,14 +11,21 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { router, Stack } from "expo-router";
+import { router, Stack, useLocalSearchParams } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import { File as ExpoFile } from "expo-file-system";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors, Fonts, Radii, Shadows, Spacing } from "@/constants/theme";
 import { api, publicUrl } from "@/lib/api";
+import {
+  exchangeOAuthCode,
+  fetchLinkedAccounts,
+  formatProviderName,
+  startLinkSocialFromSettings,
+  unlinkSocialProvider,
+} from "@/lib/oauth";
 import { useSession } from "@/lib/session";
-import type { User } from "@/lib/models";
+import type { LinkedAccountItem, OAuthProvider, User } from "@/lib/models";
 import { formatMembershipBadge } from "@/lib/catalog-data";
 import { RequireAccount } from "@/components/shop/RequireAccount";
 import { ConfirmModal, PasswordMeter } from "@/components/shop/ui";
@@ -33,16 +40,95 @@ export default function SettingsScreen() {
 
 function SettingsContent() {
   const { user, setUser, signOut } = useSession();
+  const { oauthCode, oauthError, oauthMessage } = useLocalSearchParams<{
+    oauthCode?: string;
+    oauthError?: string;
+    oauthMessage?: string;
+  }>();
 
   // Profile fields
   const [fullName, setFullName] = useState(user?.fullName || "");
   const [email, setEmail] = useState(user?.email || "");
   const [phone, setPhone] = useState(user?.phone || "");
+  const [emailConfirmPassword, setEmailConfirmPassword] = useState("");
   const [gender, setGender] = useState<"NAM" | "NU" | "KHAC" | string>(user?.gender || "NU");
   const [profileMessage, setProfileMessage] = useState("");
+  const [profileError, setProfileError] = useState(false);
   const [profileBusy, setProfileBusy] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
+
+  // Linked OAuth accounts (Google & Facebook)
+  const [linkedAccounts, setLinkedAccounts] = useState<LinkedAccountItem[]>([]);
+  const [socialBusyProvider, setSocialBusyProvider] = useState<OAuthProvider | null>(null);
+  const [socialMessage, setSocialMessage] = useState("");
+  const [socialIsError, setSocialIsError] = useState(false);
+  const [providerToUnlink, setProviderToUnlink] = useState<OAuthProvider | null>(null);
+  const handledOAuthRef = useRef("");
+
+  const refreshProfileAndLinks = useCallback(async () => {
+    try {
+      const [meRes, linkRes] = await Promise.all([
+        api<User>("/me", "GET"),
+        fetchLinkedAccounts(),
+      ]);
+      if (meRes?.userId) {
+        setUser(meRes);
+        setFullName(meRes.fullName || "");
+        setEmail(meRes.email || "");
+        setPhone(meRes.phone || "");
+        setGender(meRes.gender || "NU");
+      }
+      setLinkedAccounts(linkRes.linkedAccounts || []);
+    } catch {
+      // Giữ trạng thái hiện có nếu mạng chập chờn
+    }
+  }, [setUser]);
+
+  useEffect(() => {
+    void fetchLinkedAccounts()
+      .then((res) => setLinkedAccounts(res.linkedAccounts || []))
+      .catch(() => {});
+  }, []);
+
+  // Xử lý callback sau khi liên kết Google/Facebook trên Expo Web
+  useEffect(() => {
+    const codeStr = typeof oauthCode === "string" ? oauthCode : "";
+    const errStr = typeof oauthError === "string" ? oauthError : "";
+    const msgStr = typeof oauthMessage === "string" ? oauthMessage : "";
+    const sig = `${codeStr}|${errStr}|${msgStr}`;
+    if ((!codeStr && !errStr) || handledOAuthRef.current === sig) return;
+    handledOAuthRef.current = sig;
+
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
+    if (errStr) {
+      if (errStr !== "OAUTH_CANCELLED") {
+        void Promise.resolve().then(() => {
+          setSocialIsError(true);
+          setSocialMessage(msgStr || "Không thể liên kết tài khoản mạng xã hội.");
+        });
+      }
+      return;
+    }
+
+    if (codeStr) {
+      void exchangeOAuthCode(codeStr)
+        .then(async (res) => {
+          if (res.status === "LINKED") {
+            setSocialIsError(false);
+            setSocialMessage(`Đã liên kết tài khoản ${formatProviderName(res.provider)} thành công!`);
+            await refreshProfileAndLinks();
+          }
+        })
+        .catch((e: any) => {
+          setSocialIsError(true);
+          setSocialMessage(e?.message || "Không thể hoàn tất liên kết tài khoản.");
+        });
+    }
+  }, [oauthCode, oauthError, oauthMessage, refreshProfileAndLinks]);
 
   // Password fields with OTP requirement
   const [oldPassword, setOldPassword] = useState("");
@@ -184,30 +270,99 @@ function SettingsContent() {
     }
   };
 
+  const isChangingExistingEmail =
+    Boolean(user?.email && user.email.trim()) &&
+    email.trim().toLowerCase() !== (user?.email || "").trim().toLowerCase();
+
   const handleUpdateProfile = async () => {
+    const cleanName = fullName.trim();
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPhone = phone.replace(/[\s.-]/g, "");
+
+    if (!cleanName) {
+      setProfileError(true);
+      setProfileMessage("Vui lòng nhập họ và tên của bạn.");
+      return;
+    }
+    if (cleanEmail && !/.+@.+\..+/.test(cleanEmail)) {
+      setProfileError(true);
+      setProfileMessage("Địa chỉ email không hợp lệ.");
+      return;
+    }
+    if (cleanPhone && !/^[0-9+]{9,15}$/.test(cleanPhone)) {
+      setProfileError(true);
+      setProfileMessage("Số điện thoại cần gồm 9 đến 15 chữ số hợp lệ.");
+      return;
+    }
+    if (isChangingExistingEmail && !emailConfirmPassword) {
+      setProfileError(true);
+      setProfileMessage("Đổi sang email mới cần nhập mật khẩu hiện tại để xác nhận.");
+      return;
+    }
+
     setProfileBusy(true);
+    setProfileError(false);
     setProfileMessage("");
     try {
       const updated = await api<User>("/me", "PATCH", {
-        fullName: fullName.trim(),
-        email: email.trim(),
-        phone: phone.trim(),
-        gender: gender,
-      }).catch(() => ({
-        ...user,
-        fullName: fullName.trim(),
-        email: email.trim(),
-        phone: phone.trim(),
-        gender: gender,
-      } as User));
+        fullName: cleanName,
+        email: cleanEmail || undefined,
+        phone: cleanPhone || undefined,
+        currentPassword: isChangingExistingEmail ? emailConfirmPassword : undefined,
+        gender,
+      });
 
       setUser(updated);
+      setPhone(updated.phone || "");
+      setEmail(updated.email || "");
+      setEmailConfirmPassword("");
+      setProfileError(false);
       setProfileMessage("Đã cập nhật thông tin cá nhân thành công.");
-      setTimeout(() => setProfileMessage(""), 3000);
+      setTimeout(() => setProfileMessage(""), 3500);
     } catch (e) {
-      setProfileMessage(e instanceof Error ? e.message : "Không thể cập nhật.");
+      setProfileError(true);
+      setProfileMessage(e instanceof Error ? e.message : "Không thể cập nhật thông tin cá nhân.");
     } finally {
       setProfileBusy(false);
+    }
+  };
+
+  const handleLinkSocial = async (provider: OAuthProvider) => {
+    setSocialBusyProvider(provider);
+    setSocialIsError(false);
+    setSocialMessage("");
+    try {
+      const res = await startLinkSocialFromSettings(provider);
+      if (res.status === "LINKED") {
+        setSocialIsError(false);
+        setSocialMessage(`Đã liên kết tài khoản ${formatProviderName(provider)} thành công!`);
+        await refreshProfileAndLinks();
+      }
+    } catch (e: any) {
+      setSocialIsError(true);
+      setSocialMessage(e?.message || `Không thể liên kết tài khoản ${formatProviderName(provider)}.`);
+    } finally {
+      setSocialBusyProvider(null);
+    }
+  };
+
+  const handleConfirmUnlink = async () => {
+    if (!providerToUnlink) return;
+    const target = providerToUnlink;
+    setSocialBusyProvider(target);
+    setProviderToUnlink(null);
+    setSocialIsError(false);
+    setSocialMessage("");
+    try {
+      await unlinkSocialProvider(target);
+      setSocialIsError(false);
+      setSocialMessage(`Đã hủy liên kết ${formatProviderName(target)}.`);
+      await refreshProfileAndLinks();
+    } catch (e: any) {
+      setSocialIsError(true);
+      setSocialMessage(e?.message || `Không thể hủy liên kết ${formatProviderName(target)}.`);
+    } finally {
+      setSocialBusyProvider(null);
     }
   };
 
@@ -351,12 +506,21 @@ function SettingsContent() {
             <View
               style={[
                 st.messageBanner,
-                profileMessage.includes("thất bại") || profileMessage.includes("Không")
+                profileError || profileMessage.includes("thất bại") || profileMessage.includes("Không")
                   ? st.messageBannerError
                   : st.messageBannerSuccess,
               ]}
             >
               <Text style={st.messageBannerText}>{profileMessage}</Text>
+            </View>
+          )}
+
+          {!user?.phone && (
+            <View style={st.phoneHintBanner}>
+              <Ionicons name="call-outline" size={16} color={Colors.champagneDeep} />
+              <Text style={st.phoneHintText}>
+                Bổ sung số điện thoại giúp bạn tích điểm tại quầy (O2O) và nhận thông báo giao hàng nhanh hơn.
+              </Text>
             </View>
           )}
 
@@ -384,13 +548,27 @@ function SettingsContent() {
             />
           </View>
 
+          {isChangingExistingEmail && (
+            <View style={st.inputGroup}>
+              <Text style={st.inputLabel}>Mật khẩu hiện tại (xác nhận đổi email)</Text>
+              <TextInput
+                style={st.textInput}
+                value={emailConfirmPassword}
+                onChangeText={setEmailConfirmPassword}
+                placeholder="Nhập mật khẩu hiện tại"
+                placeholderTextColor={Colors.muted}
+                secureTextEntry
+              />
+            </View>
+          )}
+
           <View style={st.inputGroup}>
             <Text style={st.inputLabel}>Số điện thoại</Text>
             <TextInput
               style={st.textInput}
               value={phone}
               onChangeText={setPhone}
-              placeholder="Số điện thoại"
+              placeholder="Ví dụ: 0912345678"
               placeholderTextColor={Colors.muted}
               keyboardType="phone-pad"
             />
@@ -446,6 +624,70 @@ function SettingsContent() {
               {profileBusy ? "Đang lưu..." : "Cập nhật thông tin"}
             </Text>
           </Pressable>
+        </View>
+
+        {/* Linked Social Accounts Panel (Google & Facebook) */}
+        <View style={st.panel}>
+          <View style={st.panelHeader}>
+            <Ionicons name="link-outline" size={18} color={Colors.champagneDeep} />
+            <Text style={st.panelTitle}>Tài khoản liên kết</Text>
+          </View>
+
+          <Text style={st.socialHintText}>
+            Liên kết đồng thời Google và Facebook giúp bạn đăng nhập 1 chạm mà vẫn giữ nguyên điểm thưởng, voucher và lịch sử thử đồ VTON.
+          </Text>
+
+          {!!socialMessage && (
+            <View
+              style={[
+                st.messageBanner,
+                socialIsError ? st.messageBannerError : st.messageBannerSuccess,
+              ]}
+            >
+              <Text style={st.messageBannerText}>{socialMessage}</Text>
+            </View>
+          )}
+
+          {(
+            [
+              { key: "google" as const, dbKey: "GOOGLE", label: "Google", icon: "logo-google" as const, color: "#DB4437" },
+              { key: "facebook" as const, dbKey: "FACEBOOK", label: "Facebook", icon: "logo-facebook" as const, color: "#1877F2" },
+            ] as const
+          ).map((item) => {
+            const isLinked = linkedAccounts.some((l) => l.provider === item.dbKey);
+            const isBusy = socialBusyProvider === item.key;
+            return (
+              <View key={item.key} style={st.linkedRow}>
+                <View style={st.linkedIconCircle}>
+                  <Ionicons name={item.icon} size={18} color={item.color} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={st.linkedTitle}>{item.label}</Text>
+                  <Text style={[st.linkedSub, isLinked && { color: Colors.statusSuccess }]}>
+                    {isLinked ? "Đã liên kết" : "Chưa liên kết"}
+                  </Text>
+                </View>
+                <Pressable
+                  disabled={socialBusyProvider !== null}
+                  onPress={() =>
+                    isLinked ? setProviderToUnlink(item.key) : void handleLinkSocial(item.key)
+                  }
+                  style={({ pressed }) => [
+                    isLinked ? st.unlinkBtn : st.linkBtn,
+                    (pressed || socialBusyProvider !== null) && { opacity: 0.7 },
+                  ]}
+                >
+                  {isBusy ? (
+                    <ActivityIndicator size="small" color={isLinked ? Colors.statusDanger : Colors.primary} />
+                  ) : (
+                    <Text style={isLinked ? st.unlinkBtnText : st.linkBtnText}>
+                      {isLinked ? "Hủy liên kết" : "Liên kết"}
+                    </Text>
+                  )}
+                </Pressable>
+              </View>
+            );
+          })}
         </View>
 
         {/* Password Security Panel */}
@@ -577,6 +819,20 @@ function SettingsContent() {
           router.replace("/(shop)");
         }}
         onClose={() => setShowLogoutModal(false)}
+      />
+
+      {/* Confirmation Popup for Unlinking Social Account */}
+      <ConfirmModal
+        visible={providerToUnlink !== null}
+        title={`Hủy liên kết ${formatProviderName(providerToUnlink || undefined)}?`}
+        message={`Bạn sẽ không thể đăng nhập nhanh bằng ${formatProviderName(
+          providerToUnlink || undefined,
+        )} cho đến khi liên kết lại.`}
+        confirmLabel="Hủy liên kết"
+        cancelLabel="Giữ lại"
+        tone="warning"
+        onConfirm={handleConfirmUnlink}
+        onClose={() => setProviderToUnlink(null)}
       />
     </View>
   );
@@ -828,6 +1084,90 @@ const st = StyleSheet.create({
   signOutBtnText: {
     fontFamily: Fonts.sansSemiBold,
     fontSize: 13,
+    color: "#DC2626",
+  },
+  phoneHintBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    padding: 10,
+    borderRadius: Radii.sm,
+    backgroundColor: Colors.champagneSubtle,
+    borderWidth: 1,
+    borderColor: Colors.champagne,
+  },
+  phoneHintText: {
+    flex: 1,
+    fontFamily: Fonts.sans,
+    fontSize: 12,
+    color: Colors.primary,
+    lineHeight: 17,
+  },
+  socialHintText: {
+    fontFamily: Fonts.sans,
+    fontSize: 12,
+    color: Colors.textSecondary,
+    lineHeight: 17,
+  },
+  linkedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    padding: 12,
+    borderRadius: Radii.md,
+    backgroundColor: Colors.canvas,
+    borderWidth: 1,
+    borderColor: Colors.hairline,
+  },
+  linkedIconCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.hairline,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  linkedTitle: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: 13.5,
+    color: Colors.primary,
+  },
+  linkedSub: {
+    fontFamily: Fonts.sans,
+    fontSize: 11.5,
+    color: Colors.muted,
+    marginTop: 1,
+  },
+  linkBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: Radii.sm,
+    backgroundColor: Colors.champagneSubtle,
+    borderWidth: 1,
+    borderColor: Colors.champagne,
+    minWidth: 88,
+    alignItems: "center",
+  },
+  linkBtnText: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: 12,
+    color: Colors.primary,
+  },
+  unlinkBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: Radii.sm,
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    minWidth: 88,
+    alignItems: "center",
+  },
+  unlinkBtnText: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: 12,
     color: "#DC2626",
   },
 });

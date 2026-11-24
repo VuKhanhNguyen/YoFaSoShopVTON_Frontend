@@ -88,6 +88,7 @@ interface ChatMessageItem {
   imageUrl?: string | null;
   intent?: string | null;
   vtonSessionId?: string | null;
+  read?: boolean;
   sentAt?: string;
   attachments?: {
     products?: ProductAttachment[];
@@ -280,10 +281,16 @@ export const ChatSheetModal = memo(function ChatSheetModal() {
         const res = await api<{ items: ChatMessageItem[]; unreadCount?: number }>(
           `/chat/messages${qs}`,
         );
-        setMessages(res.items || []);
+        const items = res.items || [];
+        setMessages(items);
         if (channel === "CHU_SHOP" && user) {
           setUnreadShopCount(0);
-          api("/chat/read", "POST").catch(() => {});
+          const hasUnreadFromShop =
+            (res.unreadCount ?? 0) > 0 ||
+            items.some((m) => m.senderRole === "CHU_SHOP" && !m.read);
+          if (hasUnreadFromShop) {
+            api("/chat/read", "POST").catch(() => {});
+          }
         }
       } catch (e: any) {
         if (!silent) {
@@ -385,6 +392,7 @@ export const ChatSheetModal = memo(function ChatSheetModal() {
         channel,
         senderRole: "KHACH_HANG",
         content: text || "Ảnh đính kèm",
+        read: false,
         sentAt: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, optimistic]);
@@ -469,7 +477,17 @@ export const ChatSheetModal = memo(function ChatSheetModal() {
               />
             )}
             <Text style={[st.msgText, isMine && st.msgTextMine]}>{item.content}</Text>
-            <Text style={[st.msgTime, isMine && st.msgTimeMine]}>{formatTimeShort(item.sentAt)}</Text>
+            <View style={st.msgMetaRow}>
+              {isMine && (
+                <Ionicons
+                  name="checkmark-done"
+                  size={14}
+                  color={item.read ? "#0066E6" : "#6B7280"}
+                  accessibilityLabel={item.read ? "Đã đọc" : "Chưa đọc"}
+                />
+              )}
+              <Text style={[st.msgTime, isMine && st.msgTimeMine]}>{formatTimeShort(item.sentAt)}</Text>
+            </View>
           </View>
 
           {/* Rich Cards từ DuLieuDinhKem (JSON) */}
@@ -1069,7 +1087,9 @@ const st = StyleSheet.create({
     gap: 5,
   },
   bubbleMine: {
-    backgroundColor: Colors.primary,
+    backgroundColor: "#F3D899",
+    borderWidth: 1,
+    borderColor: "#DFBF73",
     borderBottomRightRadius: 4,
   },
   bubbleAi: {
@@ -1079,9 +1099,9 @@ const st = StyleSheet.create({
     borderBottomLeftRadius: 4,
   },
   bubbleShop: {
-    backgroundColor: Colors.champagneSubtle,
+    backgroundColor: Colors.surface,
     borderWidth: 1,
-    borderColor: "rgba(197, 168, 128, 0.55)",
+    borderColor: Colors.borderHairline,
     borderBottomLeftRadius: 4,
   },
   msgImage: {
@@ -1098,16 +1118,22 @@ const st = StyleSheet.create({
     color: Colors.primary,
   },
   msgTextMine: {
-    color: "#FFFFFF",
+    color: Colors.primary,
+  },
+  msgMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    alignSelf: "flex-end",
+    gap: 4,
   },
   msgTime: {
     fontFamily: Fonts.mono,
     fontSize: 10,
-    color: Colors.textMuted,
-    alignSelf: "flex-end",
+    color: Colors.textSecondary,
   },
   msgTimeMine: {
-    color: "rgba(255,255,255,0.68)",
+    color: "#5C4B28",
   },
   cardsWrap: {
     width: "100%",

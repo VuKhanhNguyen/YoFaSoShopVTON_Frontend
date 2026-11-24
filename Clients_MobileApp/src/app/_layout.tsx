@@ -33,6 +33,7 @@ export default function RootLayout() {
             >
               <Stack.Screen name="index" options={{ headerShown: false, animation: "fade" }} />
               <Stack.Screen name="auth" options={{ headerShown: false, animation: "fade_from_bottom" }} />
+              <Stack.Screen name="auth-callback" options={{ headerShown: false, animation: "fade" }} />
               <Stack.Screen name="(shop)" options={{ headerShown: false, animation: "fade" }} />
               <Stack.Screen name="+not-found" options={{ title: "404" }} />
               <Stack.Screen name="orders" options={{ title: "Đơn hàng của tôi" }} />

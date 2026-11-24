@@ -716,6 +716,9 @@ export default function SessionResultScreen() {
                   initialTierLabel={session.tierLabel}
                   initialProportionRule={session.proportionRule}
                   initialProportionNote={session.proportionNote}
+                  initialColorNote={session.colorNote}
+                  initialColorSwatches={session.colorSwatches}
+                  initialRecommendedColors={session.recommendedColors}
                   singleItemPreview={session.singleItemPreview}
                   onScoreUpdated={setLiveScore}
                   onTry={handleRecommendedTry}

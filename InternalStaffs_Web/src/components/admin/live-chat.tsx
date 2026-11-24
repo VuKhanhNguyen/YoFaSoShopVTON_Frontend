@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  CheckCheck,
   ImagePlus,
   Loader2,
   MessageCircle,
@@ -120,7 +121,8 @@ export function LiveChatCSKH({
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+  const shouldAutoScrollRef = useRef(true);
   const prevCountRef = useRef<number>(0);
 
   const fetchCustomers = useCallback(
@@ -159,7 +161,7 @@ export function LiveChatCSKH({
       if (!silent) setLoadingThread(true);
       try {
         const res = await api<CustomerMessagesResponse>(
-          `/admin/chat/customers/${encodeURIComponent(customerId)}/messages?limit=100`,
+          `/admin/chat/customers/${encodeURIComponent(customerId)}/messages?limit=200`,
         );
         setThread(res.items || []);
         setCustomers((prev) =>
@@ -214,8 +216,9 @@ export function LiveChatCSKH({
     if (!isActive || !selectedId) return;
     let active = true;
     prevCountRef.current = 0;
+    shouldAutoScrollRef.current = true;
     api<CustomerMessagesResponse>(
-      `/admin/chat/customers/${encodeURIComponent(selectedId)}/messages?limit=100`,
+      `/admin/chat/customers/${encodeURIComponent(selectedId)}/messages?limit=200`,
     )
       .then((res) => {
         if (!active) return;
@@ -251,12 +254,27 @@ export function LiveChatCSKH({
     return () => clearInterval(timer);
   }, [isActive, selectedId, fetchCustomers, fetchThread]);
 
+  const handleMessagesScroll = useCallback(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    shouldAutoScrollRef.current = distanceToBottom < 80;
+  }, []);
+
   useEffect(() => {
-    if (thread.length > prevCountRef.current) {
-      bottomRef.current?.scrollIntoView({ behavior: prevCountRef.current === 0 ? "auto" : "smooth" });
+    if (!isActive || loadingThread) return;
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const isInitialLoad = prevCountRef.current === 0 && thread.length > 0;
+    const hasNewMessages = thread.length > prevCountRef.current;
+    if (isInitialLoad || (hasNewMessages && shouldAutoScrollRef.current)) {
+      el.scrollTo({
+        top: el.scrollHeight,
+        behavior: isInitialLoad ? "auto" : "smooth",
+      });
     }
     prevCountRef.current = thread.length;
-  }, [thread.length]);
+  }, [isActive, loadingThread, selectedId, thread.length]);
 
   useEffect(() => {
     return () => {
@@ -311,6 +329,7 @@ export function LiveChatCSKH({
       );
       setDraft("");
       handleClearImage();
+      shouldAutoScrollRef.current = true;
       setThread((prev) => [...prev, res.message]);
       void fetchCustomers(true);
     } catch (e) {
@@ -325,7 +344,7 @@ export function LiveChatCSKH({
       <PageHeading
         eyebrow="Chăm sóc khách hàng trực tuyến"
         title="Live Chat CSKH"
-        detail="Trao đổi trực tiếp với khách hàng trên Mobile App theo từng tài khoản khách hàng (ROLE_CUSTOMER). Tự động đồng bộ mỗi 3,5 giây."
+        detail="Trao đổi trực tiếp với khách hàng"
       >
         <Button
           variant="outline"
@@ -355,10 +374,10 @@ export function LiveChatCSKH({
       )}
 
       {/* Bố cục 2 khung kiểu Messenger / Zalo: Trái = Danh sách khách hàng, Phải = Hội thoại */}
-      <div className="grid min-h-[640px] max-h-[calc(100dvh-15rem)] grid-cols-1 overflow-hidden rounded-lg border border-border bg-surface shadow-xs lg:grid-cols-[320px_1fr]">
+      <div className="grid grid-cols-1 overflow-hidden rounded-lg border border-border bg-surface shadow-xs lg:h-[clamp(520px,calc(100dvh-15rem),760px)] lg:grid-cols-[320px_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)]">
         {/* CỘT TRÁI: DANH SÁCH KHÁCH HÀNG (Gần sidebar nhất) */}
-        <div className="flex flex-col border-b border-border bg-canvas/40 lg:border-b-0 lg:border-r">
-          <div className="space-y-2.5 border-b border-border p-3.5">
+        <div className="flex h-[280px] min-h-0 flex-col overflow-hidden border-b border-border bg-canvas/40 lg:h-full lg:border-b-0 lg:border-r">
+          <div className="shrink-0 space-y-2.5 border-b border-border p-3.5">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <input
@@ -396,7 +415,7 @@ export function LiveChatCSKH({
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto divide-y divide-border">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain divide-y divide-border">
             {loadingCustomers ? (
               <div className="flex items-center justify-center gap-2 py-12 text-xs text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -452,7 +471,7 @@ export function LiveChatCSKH({
                         <span className="font-mono text-[10px] text-accent-hover">
                           {c.customerId}
                         </span>
-                        <span className="text-[10px] text-muted-foreground">· {c.phone}</span>
+                        <span className="text-[10px] text-muted-foreground">· {c.phone || "Chưa có SĐT"}</span>
                       </div>
 
                       <div className="mt-1 flex items-center justify-between gap-2">
@@ -476,7 +495,7 @@ export function LiveChatCSKH({
         </div>
 
         {/* CỘT PHẢI: KHUNG HỘI THOẠI GIỮA KHÁCH HÀNG VÀ CHỦ SHOP */}
-        <div className="flex min-h-[480px] flex-col bg-surface">
+        <div className="flex h-[520px] min-h-0 flex-col overflow-hidden bg-surface lg:h-full">
           {!activeCustomer ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
               <div className="flex h-14 w-14 items-center justify-center rounded-full bg-accent-subtle text-accent-hover">
@@ -492,7 +511,7 @@ export function LiveChatCSKH({
           ) : (
             <>
               {/* Header hội thoại */}
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-canvas/50 px-5 py-3.5">
+              <div className="shrink-0 flex flex-wrap items-center justify-between gap-3 border-b border-border bg-canvas/50 px-5 py-3.5">
                 <div className="flex items-center gap-3">
                   <div className="h-10 w-10 shrink-0 overflow-hidden rounded-full border border-accent/40 bg-primary text-primary-foreground flex items-center justify-center text-xs font-bold">
                     {activeCustomer.avatarUrl ? (
@@ -516,7 +535,7 @@ export function LiveChatCSKH({
                     </div>
                     <p className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
                       <Phone className="h-3 w-3" />
-                      <span>{activeCustomer.phone}</span>
+                      <span>{activeCustomer.phone || "Chưa có SĐT"}</span>
                       {activeCustomer.email && <span>· {activeCustomer.email}</span>}
                     </p>
                   </div>
@@ -524,7 +543,11 @@ export function LiveChatCSKH({
               </div>
 
               {/* Dòng thời gian tin nhắn */}
-              <div className="flex-1 space-y-3 overflow-y-auto bg-canvas/30 p-5">
+              <div
+                ref={messagesContainerRef}
+                onScroll={handleMessagesScroll}
+                className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain bg-canvas/30 p-5"
+              >
                 {loadingThread ? (
                   <div className="flex items-center justify-center gap-2 py-12 text-xs text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -547,11 +570,16 @@ export function LiveChatCSKH({
                         key={msg.messageId}
                         className={`flex flex-col ${isShop ? "items-end" : "items-start"}`}
                       >
+                        <span className="mb-1 px-1 text-[11px] font-medium text-muted-foreground">
+                          {isShop
+                            ? `Chủ shop${msg.staffName ? ` · ${msg.staffName}` : ""}`
+                            : activeCustomer.fullName}
+                        </span>
                         <div
                           className={`max-w-[78%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-xs ${
                             isShop
-                              ? "rounded-br-sm bg-primary text-primary-foreground"
-                              : "rounded-bl-sm border border-border bg-surface text-foreground"
+                              ? "rounded-br-sm border border-[#DFBF73] bg-[#F3D899] text-[#0F172A]"
+                              : "rounded-bl-sm border border-border bg-white text-[#0F172A]"
                           }`}
                         >
                           {msg.imageUrl && (
@@ -569,21 +597,36 @@ export function LiveChatCSKH({
                             </button>
                           )}
                           <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                          <div
+                            className={`mt-1.5 flex items-center justify-end gap-1 font-mono text-[10px] leading-none ${
+                              isShop ? "text-[#5C4B28]" : "text-slate-500"
+                            }`}
+                          >
+                            {isShop && (
+                              <span
+                                className="inline-flex items-center"
+                                title={msg.read ? "Đã đọc" : "Chưa đọc"}
+                              >
+                                <CheckCheck
+                                  className={`h-3.5 w-3.5 shrink-0 ${
+                                    msg.read ? "text-[#0066E6]" : "text-[#6B7280]"
+                                  }`}
+                                  strokeWidth={2.25}
+                                  aria-label={msg.read ? "Đã đọc" : "Chưa đọc"}
+                                />
+                              </span>
+                            )}
+                            <span>{formatChatTime(msg.sentAt)}</span>
+                          </div>
                         </div>
-                        <span className="mt-1 px-1 font-mono text-[10px] text-muted-foreground">
-                          {isShop ? `Chủ shop${msg.staffName ? ` · ${msg.staffName}` : ""}` : activeCustomer.fullName}
-                          {" · "}
-                          {formatChatTime(msg.sentAt)}
-                        </span>
                       </div>
                     );
                   })
                 )}
-                <div ref={bottomRef} />
               </div>
 
               {/* Khung soạn & gửi tin nhắn */}
-              <div className="border-t border-border bg-surface p-3.5">
+              <div className="shrink-0 border-t border-border bg-surface p-3.5">
                 {pendingPreviewUrl && (
                   <div className="mb-2.5 inline-flex items-center gap-2 rounded-md border border-border bg-canvas p-1.5 pr-2.5">
                     {/* eslint-disable-next-line @next/next/no-img-element */}

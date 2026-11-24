@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Dimensions,
   Image,
@@ -24,11 +24,19 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSession } from "@/lib/session";
 import { api, login } from "@/lib/api";
+import {
+  confirmOAuthAccountLink,
+  exchangeOAuthCode,
+  formatProviderName,
+  startSocialAuth,
+} from "@/lib/oauth";
+import type { OAuthLinkRequired, OAuthProvider } from "@/lib/models";
 import { Colors, Fonts, Radii, Shadows } from "@/constants/theme";
 import { EditorialImages } from "@/lib/catalog-data";
-import { Button, Notice, PasswordMeter } from "@/components/shop/ui";
+import { Button, ConfirmModal, Notice, PasswordMeter } from "@/components/shop/ui";
 import { DatePickerField } from "@/components/shop/DatePickerField";
 import { SPRING_SOFT, SlidingTabs } from "@/components/shop/MotionPrimitives";
+import { SocialAuthButtons } from "@/components/shop/SocialAuthButtons";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 const DRAWER_MIN_HEIGHT = Math.round(SCREEN_HEIGHT * 0.64);
@@ -69,15 +77,24 @@ function FormField({ label, required, error, children }: FormFieldProps) {
 }
 
 export default function AuthScreen() {
-  const { returnToFitting } = useLocalSearchParams<{ returnToFitting?: string }>();
-  const finishAuth = () => {
+  const { returnToFitting, oauthCode, oauthError, oauthMessage } = useLocalSearchParams<{
+    returnToFitting?: string;
+    oauthCode?: string;
+    oauthError?: string;
+    oauthMessage?: string;
+  }>();
+  const finishAuth = useCallback(() => {
     if (returnToFitting === "1" && router.canGoBack()) router.back();
     else router.replace("/(shop)");
-  };
+  }, [returnToFitting]);
   const { setUser } = useSession();
   const [tab, setTab] = useState<"login" | "register">("login");
   const [isForgotMode, setIsForgotMode] = useState(false);
   const [forgotStep, setForgotStep] = useState<"request" | "reset">("request");
+  const [socialLoading, setSocialLoading] = useState<OAuthProvider | null>(null);
+  const [pendingLink, setPendingLink] = useState<OAuthLinkRequired | null>(null);
+  const [linkBusy, setLinkBusy] = useState(false);
+  const handledOAuthParamRef = useRef<string>("");
 
   // Login inputs (Không cần +84, cho phép email / SĐT / username)
   const [loginIdentifier, setLoginIdentifier] = useState("");
@@ -110,6 +127,100 @@ export default function AuthScreen() {
 
   const [loading, setLoading] = useState(false);
   const [generalError, setGeneralError] = useState("");
+
+  // Xử lý callback OAuth trả về qua URL (Expo Web hoặc deep-link fallback trên Mobile)
+  useEffect(() => {
+    const codeStr = typeof oauthCode === "string" ? oauthCode : "";
+    const errStr = typeof oauthError === "string" ? oauthError : "";
+    const msgStr = typeof oauthMessage === "string" ? oauthMessage : "";
+    const signature = `${codeStr}|${errStr}|${msgStr}`;
+    if ((!codeStr && !errStr) || handledOAuthParamRef.current === signature) return;
+    handledOAuthParamRef.current = signature;
+
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      const cleanUrl = `${window.location.pathname}${returnToFitting === "1" ? "?returnToFitting=1" : ""}`;
+      window.history.replaceState({}, "", cleanUrl);
+    }
+
+    if (errStr) {
+      if (errStr !== "OAUTH_CANCELLED") {
+        void Promise.resolve().then(() =>
+          setGeneralError(msgStr || "Không thể hoàn tất đăng nhập mạng xã hội. Vui lòng thử lại."),
+        );
+      }
+      return;
+    }
+
+    if (codeStr) {
+      void (async () => {
+        setLoading(true);
+        setGeneralError("");
+        try {
+          const res = await exchangeOAuthCode(codeStr);
+          if (res.status === "AUTHENTICATED") {
+            setUser(res.user);
+            finishAuth();
+          } else if (res.status === "LINK_REQUIRED") {
+            setPendingLink(res);
+          }
+        } catch (e: any) {
+          setGeneralError(e?.message || "Phiên đăng nhập mạng xã hội không hợp lệ hoặc đã hết hạn.");
+        } finally {
+          setLoading(false);
+        }
+      })();
+    }
+  }, [oauthCode, oauthError, oauthMessage, returnToFitting, setUser, finishAuth]);
+
+  // Đăng nhập / Đăng ký 1 chạm bằng Google hoặc Facebook (dùng chung cho cả 2 tab)
+  const handleSocialAuth = async (provider: OAuthProvider) => {
+    setSocialLoading(provider);
+    setGeneralError("");
+    setLoginErrors({});
+    setRegErrors({});
+    try {
+      const res = await startSocialAuth(provider);
+      if (res.status === "AUTHENTICATED") {
+        setUser(res.user);
+        finishAuth();
+      } else if (res.status === "LINK_REQUIRED") {
+        setPendingLink(res);
+      }
+    } catch (e: any) {
+      setGeneralError(
+        e?.message || `Không thể tiếp tục với ${formatProviderName(provider)}. Vui lòng thử lại.`,
+      );
+    } finally {
+      setSocialLoading(null);
+    }
+  };
+
+  const handleConfirmAccountLink = async () => {
+    if (!pendingLink) return;
+    setLinkBusy(true);
+    setGeneralError("");
+    try {
+      const user = await confirmOAuthAccountLink(pendingLink.linkToken, "CONFIRM");
+      setPendingLink(null);
+      if (user) {
+        setUser(user);
+        finishAuth();
+      }
+    } catch (e: any) {
+      setPendingLink(null);
+      setGeneralError(e?.message || "Không thể liên kết tài khoản. Vui lòng thử lại.");
+    } finally {
+      setLinkBusy(false);
+    }
+  };
+
+  const handleCancelAccountLink = () => {
+    const token = pendingLink?.linkToken;
+    setPendingLink(null);
+    if (token) {
+      void confirmOAuthAccountLink(token, "CANCEL").catch(() => {});
+    }
+  };
 
   // GPU UI-thread drawer translateY (0 = expanded, COLLAPSED_OFFSET = collapsed)
   const reducedMotion = useReducedMotion();
@@ -768,13 +879,26 @@ export default function AuthScreen() {
                       <Button
                         title={loading ? "Đang xác thực..." : "ĐĂNG NHẬP VÀO YOFASO"}
                         loading={loading}
+                        disabled={socialLoading !== null}
                         onPress={handleLoginSubmit}
                         style={{ height: 52, marginTop: 10 }}
                       />
 
                       <View style={st.dividerRow}>
                         <View style={st.dividerLine} />
-                        <Text style={st.dividerText}>Hoặc tiếp tục trải nghiệm</Text>
+                        <Text style={st.dividerText}>Hoặc tiếp tục với</Text>
+                        <View style={st.dividerLine} />
+                      </View>
+
+                      <SocialAuthButtons
+                        loadingProvider={socialLoading}
+                        disabled={loading}
+                        onPress={handleSocialAuth}
+                      />
+
+                      <View style={st.dividerRow}>
+                        <View style={st.dividerLine} />
+                        <Text style={st.dividerText}>Hoặc trải nghiệm trước</Text>
                         <View style={st.dividerLine} />
                       </View>
 
@@ -787,7 +911,7 @@ export default function AuthScreen() {
                         <Ionicons name="sparkles" size={18} color={Colors.champagneDeep} />
                         <View style={{ flex: 1 }}>
                           <Text style={st.guestTitle}>Vào với tư cách Khách vãng lai</Text>
-                          <Text style={st.guestSub}>Khám phá lookbook, thử đồ ảo AI & tạo vé O2O</Text>
+                          <Text style={st.guestSub}>Khám phá các sản phẩm đẹp độc quyền của YoFaSo Shop</Text>
                         </View>
                         <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
                       </Pressable>
@@ -795,6 +919,19 @@ export default function AuthScreen() {
                   ) : (
                     /* ===== 2. FORM ĐĂNG KÝ ===== */
                     <View style={{ marginTop: 12 }}>
+                      <Text style={st.socialQuickLabel}>Đăng ký nhanh</Text>
+                      <SocialAuthButtons
+                        loadingProvider={socialLoading}
+                        disabled={loading}
+                        onPress={handleSocialAuth}
+                      />
+
+                      <View style={st.dividerRow}>
+                        <View style={st.dividerLine} />
+                        <Text style={st.dividerText}>Hoặc tạo tài khoản bằng form</Text>
+                        <View style={st.dividerLine} />
+                      </View>
+
                       {/* 1. Tên đăng nhập * */}
                       <FormField
                         label="Tên đăng nhập"
@@ -1112,7 +1249,7 @@ export default function AuthScreen() {
                         <Ionicons name="sparkles" size={18} color={Colors.champagneDeep} />
                         <View style={{ flex: 1 }}>
                           <Text style={st.guestTitle}>Vào với tư cách Khách vãng lai</Text>
-                          <Text style={st.guestSub}>Khám phá lookbook, thử đồ ảo AI & tạo vé O2O</Text>
+                          <Text style={st.guestSub}>Khám phá sản phẩm</Text>
                         </View>
                         <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
                       </Pressable>
@@ -1124,6 +1261,25 @@ export default function AuthScreen() {
           </KeyboardAvoidingView>
         </Animated.View>
       </View>
+
+      {/* Popup chuyên nghiệp xác nhận gộp liên kết khi email trùng giữa Google / Facebook / Tài khoản YoFaSo */}
+      <ConfirmModal
+        visible={pendingLink !== null}
+        tone="info"
+        loading={linkBusy}
+        title="Email này đã có tài khoản YoFaSo"
+        message={
+          pendingLink
+            ? `${pendingLink.message}\n\nBạn có muốn liên kết thêm ${formatProviderName(
+                pendingLink.provider,
+              )} vào tài khoản "${pendingLink.existingFullName}" để dùng chung lịch sử đơn hàng, điểm thưởng và tủ đồ VTON không?`
+            : ""
+        }
+        confirmLabel={linkBusy ? "Đang liên kết..." : "Liên kết & Đăng nhập"}
+        cancelLabel="Dùng tài khoản khác"
+        onConfirm={handleConfirmAccountLink}
+        onClose={handleCancelAccountLink}
+      />
     </View>
   );
 }
@@ -1359,6 +1515,12 @@ const st = StyleSheet.create({
     fontFamily: Fonts.sans,
     fontSize: 11,
     color: Colors.textMuted,
+  },
+  socialQuickLabel: {
+    fontFamily: Fonts.sansSemiBold,
+    fontSize: 12.5,
+    color: Colors.textSecondary,
+    marginBottom: 8,
   },
   guestCard: {
     flexDirection: "row",

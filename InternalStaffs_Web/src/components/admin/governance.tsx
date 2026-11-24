@@ -993,7 +993,7 @@ export function Governance({
                         <p className="font-semibold text-foreground">{s.fullName}</p>
                         <p className="mt-0.5 font-mono text-xs text-muted-foreground">{s.email}</p>
                       </td>
-                      <td className="font-mono text-xs">{s.phone}</td>
+                      <td className="font-mono text-xs">{s.phone || "—"}</td>
                       <td>
                         <div className="w-40">
                           <Badge tone="info">{roleLabel}</Badge>
@@ -1020,8 +1020,8 @@ export function Governance({
                                 setFormError("");
                                 setEditTarget(s);
                                 setEditFullName(s.fullName);
-                                setEditPhone(s.phone);
-                                setEditEmail(s.email);
+                                setEditPhone(s.phone || "");
+                                setEditEmail(s.email || "");
                                 setEditGender(s.gender || "NAM");
                                 setEditRoleId(s.roles?.[0]?.roleId || "VT003");
                               }}

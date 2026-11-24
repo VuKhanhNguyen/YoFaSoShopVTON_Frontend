@@ -247,6 +247,18 @@ export async function api<T>(
   }
   return result as T;
 }
+export async function completeSession(
+  tokens: Tokens,
+  remember = true,
+): Promise<User> {
+  if (!tokens.user.roles.includes("ROLE_CUSTOMER"))
+    throw new ApiError("Tài khoản nhân sự vui lòng dùng cổng nội bộ.", 403);
+  epoch++;
+  remembered = remember;
+  lastActivity = Date.now();
+  await saveTokens(tokens);
+  return tokens.user;
+}
 export async function login(
   body: unknown,
   register = false,
@@ -257,13 +269,7 @@ export async function login(
     "POST",
     body,
   );
-  if (!tokens.user.roles.includes("ROLE_CUSTOMER"))
-    throw new ApiError("Tài khoản nhân sự vui lòng dùng cổng nội bộ.", 403);
-  epoch++;
-  remembered = remember;
-  lastActivity = Date.now();
-  await saveTokens(tokens);
-  return tokens.user;
+  return completeSession(tokens, remember);
 }
 export async function logout() {
   // Đợi lần xoay đang chạy trước khi thu hồi refresh mới nhất.

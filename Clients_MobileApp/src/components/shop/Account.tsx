@@ -276,8 +276,45 @@ export const Account = memo(function Account() {
                     </Text>
                   </View>
                 </View>
-                <Text style={st.userPhone}>{user.phone || "Chưa cập nhật SĐT"}</Text>
-                <Text style={st.userEmail}>{user.email}</Text>
+                {user.phone ? (
+                  <Text style={st.userPhone}>{user.phone}</Text>
+                ) : (
+                  <Pressable onPress={() => router.push("/settings")}>
+                    <Text style={[st.userPhone, { color: Colors.champagneDeep }]}>
+                      Chưa cập nhật SĐT, bổ sung ngay →
+                    </Text>
+                  </Pressable>
+                )}
+                <Text style={st.userEmail}>{user.email || "Chưa cập nhật email"}</Text>
+                {!!user.linkedProviders?.length && (
+                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
+                    {user.linkedProviders.map((p) => (
+                      <View
+                        key={p}
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 4,
+                          paddingHorizontal: 7,
+                          paddingVertical: 2,
+                          borderRadius: Radii.full,
+                          backgroundColor: Colors.surfaceMuted,
+                          borderWidth: 1,
+                          borderColor: Colors.borderHairline,
+                        }}
+                      >
+                        <Ionicons
+                          name={p === "FACEBOOK" ? "logo-facebook" : "logo-google"}
+                          size={11}
+                          color={p === "FACEBOOK" ? "#1877F2" : "#DB4437"}
+                        />
+                        <Text style={{ fontFamily: Fonts.sansSemiBold, fontSize: 10, color: Colors.textSecondary }}>
+                          {p === "FACEBOOK" ? "Facebook" : "Google"}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
                 <Pressable onPress={() => router.push("/settings")} style={st.editProfileBtn}>
                   <Text style={st.editProfileText}>Chỉnh sửa hồ sơ</Text>
                 </Pressable>

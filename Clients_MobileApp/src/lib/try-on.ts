@@ -176,6 +176,12 @@ export type PairedTryOnItem = {
   productImageUrl?: string;
 };
 
+export type ColorSwatch = {
+  name: string;
+  hex: string;
+  score?: number;
+};
+
 export type TryOnSession = {
   sessionId: string;
   productId: string;
@@ -214,11 +220,16 @@ export type TryOnSession = {
   tierLabel?: string;
   proportionRule?: string;
   proportionNote?: string;
+  colorNote?: string;
+  colorSwatches?: ColorSwatch[];
+  recommendedColors?: ColorSwatch[];
   singleItemPreview?: {
     evaluated: boolean;
     singleItem: boolean;
     colorName?: string;
     colorNote?: string;
+    colorSwatches?: ColorSwatch[];
+    recommendedColors?: ColorSwatch[];
     patternRule?: string;
     patternNote?: string;
     source?: string;

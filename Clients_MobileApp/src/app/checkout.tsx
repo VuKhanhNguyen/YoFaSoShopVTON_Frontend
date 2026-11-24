@@ -9,6 +9,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
@@ -17,19 +18,26 @@ import QRCode from "react-native-qrcode-svg";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import { api, publicUrl, requestKey } from "@/lib/api";
+import { useSession } from "@/lib/session";
 import { useResource } from "@/hooks/use-resource";
-import { money, type Row } from "@/lib/models";
+import { money, type Row, type User } from "@/lib/models";
 import { Colors, Radii, Shadows } from "@/constants/theme";
 import { formatVND } from "@/lib/catalog-data";
 import { Button, Notice, Sheet } from "@/components/shop/ui";
 import { ListCardSkeleton, SmartImage } from "@/components/shop/Skeleton";
 
 export default function CheckoutScreen() {
+  const { user, setUser } = useSession();
   const cart = useResource<Row[]>("/cart");
   const addresses = useResource<Row[]>("/me/addresses");
 
   const params = useLocalSearchParams<{ paymentMethod?: string; voucher?: string }>();
   const [selectedAddressId, setSelectedAddressId] = useState<string>("");
+  const [quickPhone, setQuickPhone] = useState("");
+  const [showPhoneInput, setShowPhoneInput] = useState(false);
+  const [phoneBusy, setPhoneBusy] = useState(false);
+  const [phoneMsg, setPhoneMsg] = useState("");
+  const [phoneErr, setPhoneErr] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"COD" | "VIETQR">(
     params.paymentMethod === "VIETQR" ? "VIETQR" : "COD"
   );
@@ -76,6 +84,33 @@ export default function CheckoutScreen() {
   }, [params.paymentMethod]);
 
   const addressList = addresses.data || [];
+  const selectedAddress = addressList.find((a) => String(a.addressId) === selectedAddressId);
+
+  const handleSaveQuickPhone = async (rawPhone: string) => {
+    const cleanPhone = rawPhone.replace(/[\s.-]/g, "");
+    if (!/^[0-9+]{9,15}$/.test(cleanPhone)) {
+      setPhoneErr("Số điện thoại cần gồm 9 đến 15 chữ số hợp lệ.");
+      return;
+    }
+    setPhoneBusy(true);
+    setPhoneErr("");
+    setPhoneMsg("");
+    try {
+      const updated = await api<User>("/me", "PATCH", {
+        fullName: user?.fullName || "Khách hàng YoFaSo",
+        phone: cleanPhone,
+      });
+      setUser(updated);
+      setQuickPhone("");
+      setShowPhoneInput(false);
+      setPhoneMsg("Đã cập nhật số điện thoại thành viên thành công!");
+      setTimeout(() => setPhoneMsg(""), 3000);
+    } catch (e: any) {
+      setPhoneErr(e?.message || "Không thể lưu số điện thoại.");
+    } finally {
+      setPhoneBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (addressList.length > 0) {
@@ -318,7 +353,7 @@ export default function CheckoutScreen() {
                   color: Colors.champagneDeep,
                 }}
               >
-                + Nhấn vào đây để thêm địa chỉ giao hàng
+                + Nhấn vào đây để thêm địa chỉ & số điện thoại nhận hàng
               </Text>
               </View>
             </Pressable>
@@ -348,6 +383,75 @@ export default function CheckoutScreen() {
             })
           )}
         </View>
+
+        {/* Bổ sung SĐT thành viên ngay tại Checkout nếu tài khoản đăng nhập bằng Google/Facebook chưa có SĐT */}
+        {user && !user.phone && (
+          <View style={st.phoneSyncCard}>
+            <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
+              <Ionicons name="call-outline" size={18} color={Colors.champagneDeep} style={{ marginTop: 2 }} />
+              <View style={{ flex: 1 }}>
+                <Text style={st.phoneSyncTitle}>Bổ sung số điện thoại thành viên</Text>
+                <Text style={st.phoneSyncSub}>
+                  Tài khoản Google/Facebook của bạn chưa có SĐT hồ sơ. Bổ sung để tích điểm O2O tại cửa hàng và đồng bộ đơn hàng.
+                </Text>
+              </View>
+            </View>
+
+            {!!phoneErr && <Text style={st.phoneSyncErr}>{phoneErr}</Text>}
+
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              {selectedAddress?.phone ? (
+                <Pressable
+                  disabled={phoneBusy}
+                  onPress={() => void handleSaveQuickPhone(String(selectedAddress.phone))}
+                  style={({ pressed }) => [st.phoneSyncPrimaryBtn, pressed && { opacity: 0.8 }]}
+                >
+                  <Text style={st.phoneSyncPrimaryBtnText}>
+                    {phoneBusy ? "Đang lưu..." : `Dùng SĐT nhận hàng (${String(selectedAddress.phone)})`}
+                  </Text>
+                </Pressable>
+              ) : null}
+
+              <Pressable
+                disabled={phoneBusy}
+                onPress={() => {
+                  setShowPhoneInput((v) => !v);
+                  setPhoneErr("");
+                }}
+                style={({ pressed }) => [st.phoneSyncSecondaryBtn, pressed && { opacity: 0.8 }]}
+              >
+                <Text style={st.phoneSyncSecondaryBtnText}>
+                  {showPhoneInput ? "Ẩn ô nhập" : "Nhập SĐT khác"}
+                </Text>
+              </Pressable>
+            </View>
+
+            {showPhoneInput && (
+              <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+                <TextInput
+                  style={st.phoneSyncInput}
+                  value={quickPhone}
+                  onChangeText={(v) => {
+                    setQuickPhone(v);
+                    if (phoneErr) setPhoneErr("");
+                  }}
+                  placeholder="Ví dụ: 0912345678"
+                  placeholderTextColor={Colors.textMuted}
+                  keyboardType="phone-pad"
+                />
+                <Pressable
+                  disabled={phoneBusy}
+                  onPress={() => void handleSaveQuickPhone(quickPhone)}
+                  style={({ pressed }) => [st.phoneSyncSaveBtn, pressed && { opacity: 0.8 }]}
+                >
+                  <Text style={st.phoneSyncPrimaryBtnText}>{phoneBusy ? "..." : "Lưu"}</Text>
+                </Pressable>
+              </View>
+            )}
+          </View>
+        )}
+
+        {!!phoneMsg && <Notice success>{phoneMsg}</Notice>}
 
         {/* Order Items Preview */}
         <View style={st.sectionBlock}>
@@ -833,5 +937,74 @@ const st = StyleSheet.create({
     fontSize: 12,
     fontFamily: "Mono",
     color: Colors.primary,
+  },
+  phoneSyncCard: {
+    backgroundColor: Colors.champagneSubtle,
+    borderRadius: Radii.lg,
+    borderWidth: 1,
+    borderColor: Colors.champagne,
+    padding: 14,
+    gap: 10,
+  },
+  phoneSyncTitle: {
+    fontSize: 13,
+    fontFamily: "JakartaSemiBold",
+    color: Colors.primary,
+  },
+  phoneSyncSub: {
+    fontSize: 11.5,
+    fontFamily: "Jakarta",
+    color: Colors.textSecondary,
+    lineHeight: 16,
+    marginTop: 2,
+  },
+  phoneSyncErr: {
+    fontSize: 11.5,
+    fontFamily: "Jakarta",
+    color: Colors.statusDanger,
+  },
+  phoneSyncPrimaryBtn: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: Radii.sm,
+  },
+  phoneSyncPrimaryBtnText: {
+    fontSize: 12,
+    fontFamily: "JakartaSemiBold",
+    color: "#FFFFFF",
+  },
+  phoneSyncSecondaryBtn: {
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.borderHairline,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: Radii.sm,
+  },
+  phoneSyncSecondaryBtnText: {
+    fontSize: 12,
+    fontFamily: "JakartaSemiBold",
+    color: Colors.primary,
+  },
+  phoneSyncInput: {
+    flex: 1,
+    height: 42,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.borderHairline,
+    borderRadius: Radii.sm,
+    paddingHorizontal: 12,
+    fontSize: 13,
+    fontFamily: "Jakarta",
+    color: Colors.primary,
+  },
+  phoneSyncSaveBtn: {
+    height: 42,
+    paddingHorizontal: 16,
+    borderRadius: Radii.sm,
+    backgroundColor: Colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });
