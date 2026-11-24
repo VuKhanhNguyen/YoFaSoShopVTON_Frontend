@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   BarChart3,
@@ -8,6 +8,7 @@ import {
   ScanLine,
   ShoppingBag,
   ShieldCheck,
+  MessageCircle,
   CheckCircle2,
   User,
   LogOut,
@@ -15,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { StaffHeader } from "@/components/staff-header";
 import { useAuth, useRequireAuth } from "@/lib/auth";
+import { api } from "@/lib/api";
 import {
   ADMIN_ORDERS,
   ADMIN_VOUCHERS,
@@ -27,30 +29,52 @@ import { Analytics } from "@/components/admin/analytics";
 import { ProductCrudStudio } from "@/components/admin/product-crud-studio";
 import { AdminOperations } from "@/components/admin/operations";
 import { Governance } from "@/components/admin/governance";
+import { LiveChatCSKH } from "@/components/admin/live-chat";
 import { ProfileModal } from "@/components/admin/profile-modal";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { AdminFooter } from "@/components/admin-footer";
 
-type Tab = "finance" | "analytics" | "studio" | "operations" | "governance";
+type Tab = "finance" | "analytics" | "studio" | "operations" | "livechat" | "governance";
 
 const TABS = [
   { key: "finance", label: "Tổng quan & Tài chính", icon: BarChart3 },
   { key: "analytics", label: "Phân tích VTON & AI", icon: ChartNoAxesCombined },
   { key: "studio", label: "Quản lý sản phẩm + AI Studio", icon: ScanLine },
   { key: "operations", label: "Vận hành & Khách hàng", icon: ShoppingBag },
+  { key: "livechat", label: "Live Chat CSKH", icon: MessageCircle },
   { key: "governance", label: "Phê duyệt & Phân quyền", icon: ShieldCheck },
 ] as const;
 
-export function AdminDashboard() {
+export function AdminDashboard({ initialTab = "finance" }: { initialTab?: Tab }) {
   const { user, ready } = useRequireAuth(["ROLE_SHOP_ADMIN"]);
   const { logout } = useAuth();
   const router = useRouter();
 
-  const [tab, setTab] = useState<Tab>("finance");
+  const [tab, setTab] = useState<Tab>(initialTab);
+  const [chatUnread, setChatUnread] = useState(0);
   const [orders, setOrders] = useState(ADMIN_ORDERS);
   const [vouchers, setVouchers] = useState(ADMIN_VOUCHERS);
   const [reviews, setReviews] = useState(ADMIN_REVIEWS);
   const [logs, setLogs] = useState<AuditEntry[]>(AUDIT_LOGS);
+
+  useEffect(() => {
+    if (!ready || !user || user.role !== "ROLE_SHOP_ADMIN") return;
+    let active = true;
+    const pollUnread = () => {
+      if (document.visibilityState !== "visible") return;
+      api<{ unreadMessages: number }>("/admin/chat/unread-count")
+        .then((res) => {
+          if (active) setChatUnread(res.unreadMessages || 0);
+        })
+        .catch(() => {});
+    };
+    pollUnread();
+    const timer = setInterval(pollUnread, 10000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [ready, user]);
 
   // Modals for sidebar bottom
   const [profileOpen, setProfileOpen] = useState(false);
@@ -114,7 +138,12 @@ export function AdminDashboard() {
                 onClick={() => setTab(t.key)}
               >
                 <t.icon />
-                {t.label}
+                <span className="flex-1 text-left">{t.label}</span>
+                {t.key === "livechat" && chatUnread > 0 && (
+                  <span className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 font-mono text-[10px] font-bold text-white">
+                    {chatUnread > 99 ? "99+" : chatUnread}
+                  </span>
+                )}
               </Button>
             ))}
 
@@ -171,6 +200,9 @@ export function AdminDashboard() {
                 setReviews={setReviews}
                 log={log}
               />
+            </div>
+            <div hidden={tab !== "livechat"}>
+              <LiveChatCSKH isActive={tab === "livechat"} onUnreadChange={setChatUnread} />
             </div>
             <div hidden={tab !== "governance"}>
               <Governance logs={logs} log={log} />

@@ -148,6 +148,8 @@ async function handle(
         path.startsWith("/admin/ai/") ||
         path.startsWith("/catalog/images/") ||
         path.includes("/images/") ||
+        path === "/chat/images" ||
+        path.startsWith("/chat/images/") ||
         path.endsWith("/mask/content") ||
         path === "/me/avatar"
           ? 180000

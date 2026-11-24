@@ -73,6 +73,12 @@ const links = [
     roles: ["SHOP_ADMIN"],
   },
   {
+    slug: "livechat",
+    label: "Live Chat CSKH",
+    icon: ChatCircle,
+    roles: ["SHOP_ADMIN"],
+  },
+  {
     slug: "users",
     label: "Nhân sự & quyền",
     icon: Users,

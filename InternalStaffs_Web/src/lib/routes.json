@@ -20,6 +20,26 @@
     "path": "/admin/categories/{id}"
   },
   {
+    "method": "GET",
+    "path": "/admin/chat/customers"
+  },
+  {
+    "method": "GET",
+    "path": "/admin/chat/customers/{customerId}/messages"
+  },
+  {
+    "method": "POST",
+    "path": "/admin/chat/customers/{customerId}/messages"
+  },
+  {
+    "method": "POST",
+    "path": "/admin/chat/customers/{customerId}/read"
+  },
+  {
+    "method": "GET",
+    "path": "/admin/chat/unread-count"
+  },
+  {
     "method": "POST",
     "path": "/admin/orders/{id}/cancel"
   },
@@ -254,6 +274,18 @@
   {
     "method": "GET",
     "path": "/catalog/products/{id}/reviews"
+  },
+  {
+    "method": "GET",
+    "path": "/chat/config"
+  },
+  {
+    "method": "POST",
+    "path": "/chat/images"
+  },
+  {
+    "method": "GET",
+    "path": "/chat/images/{messageId}"
   },
   {
     "method": "GET",

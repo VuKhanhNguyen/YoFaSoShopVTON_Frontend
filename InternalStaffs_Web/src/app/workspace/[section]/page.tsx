@@ -20,6 +20,8 @@ export default async function WorkspaceSectionPage({
     case "shifts":
     case "notifications":
       return <AdminDashboard />;
+    case "livechat":
+      return <AdminDashboard initialTab="livechat" />;
     case "pos":
       return <PosTerminal />;
     case "warehouse":
