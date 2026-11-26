@@ -10,9 +10,11 @@ import {
   RefreshCw,
   Search,
   Send,
+  Sparkles,
   X,
 } from "lucide-react";
 import { api, catalogImage } from "@/lib/api";
+import { pushToast } from "@/lib/feedback";
 import { Button } from "@/components/ui/button";
 import { Badge, PageHeading } from "./shared";
 
@@ -119,6 +121,9 @@ export function LiveChatCSKH({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [aiSuggesting, setAiSuggesting] = useState(false);
+  const [aiIntentSummary, setAiIntentSummary] = useState<string | null>(null);
+  const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
@@ -287,6 +292,32 @@ export function LiveChatCSKH({
     [customers, selectedId],
   );
 
+  useEffect(() => {
+    setAiIntentSummary(null);
+    setAiSuggestions([]);
+  }, [selectedId]);
+
+  const handleAiSuggest = async () => {
+    if (!selectedId || aiSuggesting) return;
+    setAiSuggesting(true);
+    setError(null);
+    try {
+      const res = await api<{
+        intentSummary?: string;
+        suggestedReplies?: string[];
+      }>("/admin/ai/chat-suggest", "POST", { customerId: selectedId });
+      setAiIntentSummary(res.intentSummary || null);
+      setAiSuggestions(Array.isArray(res.suggestedReplies) ? res.suggestedReplies : []);
+      pushToast({ tone: "success", title: "Đã tạo gợi ý trả lời nhanh AI", detail: "Bấm vào mẫu câu để chèn vào ô soạn thảo." });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Không thể lấy gợi ý trả lời AI.";
+      setError(msg);
+      pushToast({ tone: "error", title: msg });
+    } finally {
+      setAiSuggesting(false);
+    }
+  };
+
   const handleSelectImage = async (file?: File | null) => {
     if (!file) return;
     setUploadingImage(true);
@@ -298,8 +329,11 @@ export function LiveChatCSKH({
       if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl);
       setPendingImageKey(res.imageKey);
       setPendingPreviewUrl(URL.createObjectURL(file));
+      pushToast({ tone: "success", title: "Đã tải ảnh đính kèm lên R2 private" });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Tải ảnh thất bại (chỉ hỗ trợ PNG/JPEG ≤ 10MB).");
+      const msg = e instanceof Error ? e.message : "Tải ảnh thất bại (chỉ hỗ trợ PNG/JPEG ≤ 10MB).";
+      setError(msg);
+      pushToast({ tone: "error", title: msg });
     } finally {
       setUploadingImage(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -627,6 +661,41 @@ export function LiveChatCSKH({
 
               {/* Khung soạn & gửi tin nhắn */}
               <div className="shrink-0 border-t border-border bg-surface p-3.5">
+                {/* Phase 5: AI Smart Reply Strip (click chip -> fills input, never auto-sends) */}
+                {aiSuggestions.length > 0 && (
+                  <div className="mb-2.5 rounded-lg border border-accent/35 bg-accent-subtle/50 p-2.5">
+                    <div className="mb-1.5 flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-1.5 text-[11px] font-semibold text-accent-hover">
+                        <Sparkles className="h-3.5 w-3.5" />
+                        {aiIntentSummary || "Gợi ý trả lời nhanh từ AI (bấm để chèn, không tự gửi)"}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAiSuggestions([]);
+                          setAiIntentSummary(null);
+                        }}
+                        className="text-muted-foreground hover:text-foreground"
+                        aria-label="Ẩn gợi ý AI"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {aiSuggestions.map((s, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setDraft(s)}
+                          className="rounded-md border border-border bg-surface px-2.5 py-1.5 text-left text-xs text-foreground transition-colors hover:border-accent hover:bg-muted"
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {pendingPreviewUrl && (
                   <div className="mb-2.5 inline-flex items-center gap-2 rounded-md border border-border bg-canvas p-1.5 pr-2.5">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -668,6 +737,22 @@ export function LiveChatCSKH({
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
                       <ImagePlus className="h-4 w-4" />
+                    )}
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    disabled={aiSuggesting || sending}
+                    onClick={() => void handleAiSuggest()}
+                    title="AI Gợi ý trả lời nhanh"
+                    aria-label="AI Gợi ý trả lời nhanh"
+                  >
+                    {aiSuggesting ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-4 w-4 text-accent-hover" />
                     )}
                   </Button>
 

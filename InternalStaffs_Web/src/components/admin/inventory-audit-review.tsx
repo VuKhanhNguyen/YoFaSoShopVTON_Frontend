@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useResource } from "@/hooks/use-resource";
 import { api, requestKey } from "@/lib/api";
 import { pushToast } from "@/lib/feedback";
+import { exportStockSlipPdf } from "@/lib/receipt-pdf";
 
 type Audit = {
   id: string;
@@ -49,11 +51,36 @@ export function InventoryAuditReview({ onApproved }: { onApproved: () => void })
     try {
       await api("/staff/inventory/audits/" + id + "/" + action, "POST");
       audits.reload();
-      if (action === "approve") onApproved();
+      if (action === "approve") {
+        onApproved();
+        pushToast({ tone: "success", title: `Đã duyệt phiếu kiểm kê ${id} và cập nhật tồn kho` });
+      } else {
+        pushToast({ tone: "info", title: `Đã yêu cầu kho đếm lại phiếu ${id}` });
+      }
     } catch (error) {
       pushToast({ tone: "error", title: error instanceof Error ? error.message : "Không thể xử lý phiếu." });
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function downloadAuditPdf(audit: Audit) {
+    try {
+      const statusLabel = { PENDING: "Chờ duyệt", APPROVED: "Đã ghi sổ", REJECTED: "Yêu cầu đếm lại" }[audit.status];
+      const lines = [
+        `Trạng thái phiếu: ${statusLabel}`,
+        `Lý do giải trình: ${audit.reason || "—"}`,
+        ...audit.lines.map(
+          (l) => `Biến thể ${l.variantId} · Tồn sổ sách: ${l.book} · Thực đếm: ${l.counted} · Lệch: ${l.counted - l.book > 0 ? "+" : ""}${l.counted - l.book}`
+        ),
+      ];
+      const filename = await exportStockSlipPdf("Phiếu Kiểm Kê & Điều Chỉnh Tồn Kho", lines, {
+        docCode: audit.id,
+        actor: audit.author,
+      });
+      pushToast({ tone: "success", title: "Đã tải phiếu kiểm kê (PDF A4)", detail: filename });
+    } catch (err) {
+      pushToast({ tone: "error", title: "Không thể xuất PDF phiếu kiểm kê", detail: err instanceof Error ? err.message : undefined });
     }
   }
 
@@ -81,10 +108,17 @@ export function InventoryAuditReview({ onApproved }: { onApproved: () => void })
           <ul className="my-2">
             {audit.lines.map((line) => <li key={line.variantId}>{line.variantId} · Sổ {line.book} · Đếm {line.counted}</li>)}
           </ul>
-          {audit.status === "PENDING" && <div className="flex flex-wrap gap-2">
-            <Button disabled={busy} onClick={() => void review(audit.id, "approve")}>Duyệt và ghi tồn</Button>
-            <Button disabled={busy} variant="outline" onClick={() => void review(audit.id, "reject")}>Yêu cầu đếm lại</Button>
-          </div>}
+          <div className="flex flex-wrap gap-2">
+            {audit.status === "PENDING" && (
+              <>
+                <Button disabled={busy} onClick={() => void review(audit.id, "approve")}>Duyệt và ghi tồn</Button>
+                <Button disabled={busy} variant="outline" onClick={() => void review(audit.id, "reject")}>Yêu cầu đếm lại</Button>
+              </>
+            )}
+            <Button variant="outline" size="sm" onClick={() => void downloadAuditPdf(audit)} className="gap-1.5">
+              <Printer className="h-3.5 w-3.5" /> Tải phiếu PDF (A4)
+            </Button>
+          </div>
         </details>
       ))}
     </section>

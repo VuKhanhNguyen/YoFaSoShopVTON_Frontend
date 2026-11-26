@@ -1,7 +1,30 @@
 import type { Metadata } from "next";
+import localFont from "next/font/local";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
 import { DesktopToastStack, ServerOfflineBanner } from "@/components/feedback";
+
+const fontSans = localFont({
+  src: [
+    { path: "./fonts/Jakarta-Regular.ttf", weight: "400", style: "normal" },
+    { path: "./fonts/Jakarta-SemiBold.ttf", weight: "600", style: "normal" },
+    { path: "./fonts/Jakarta-SemiBold.ttf", weight: "700", style: "normal" },
+  ],
+  variable: "--font-local-sans",
+  display: "swap",
+});
+
+const fontEditorial = localFont({
+  src: [{ path: "./fonts/Playfair-SemiBold.ttf", weight: "600", style: "normal" }],
+  variable: "--font-local-editorial",
+  display: "swap",
+});
+
+const fontMono = localFont({
+  src: [{ path: "./fonts/JetBrains-Medium.ttf", weight: "500", style: "normal" }],
+  variable: "--font-local-mono",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "YoFaSo Shop — Cổng Vận hành Nội bộ & POS Đa kênh",
@@ -16,14 +39,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="vi" suppressHydrationWarning>
+    <html
+      lang="vi"
+      suppressHydrationWarning
+      className={`${fontSans.variable} ${fontEditorial.variable} ${fontMono.variable}`}
+    >
       <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Playfair+Display:wght@600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
-        />
         {/* shortcut: xoa thuoc tinh bis_skin_checked do browser extension (Urban VPN) bom vao DOM truoc khi React hydrate, tat extension hoac mo an danh neu can test moi truong sach tuyet doi */}
         <script
           dangerouslySetInnerHTML={{

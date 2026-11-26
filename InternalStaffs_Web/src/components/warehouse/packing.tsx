@@ -1,13 +1,13 @@
 import { pushToast } from "@/lib/feedback";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { AlertTriangle, CheckCircle2, Printer, ScanBarcode } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, Printer, ScanBarcode } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { applyScan, scanProgress, verifyScan, type WhOrder } from "@/lib/warehouse";
 import { vnd } from "@/lib/pos";
 import { api } from "@/lib/api";
+import { exportWaybillPdf } from "@/lib/receipt-pdf";
 
 /** Mã vạch 1D mô phỏng (Code128 giả lập) vẽ bằng CSS từ chuỗi mã. */
 function CssBarcode({ code, className = "" }: { code: string; className?: string }) {
@@ -44,6 +44,7 @@ export function PackingStation({
   const [flash, setFlash] = useState(false);
   const [showWaybill, setShowWaybill] = useState(false);
   const [done, setDone] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const scanRef = useRef<HTMLInputElement>(null);
   const [code, setCode] = useState("");
 
@@ -75,13 +76,16 @@ export function PackingStation({
     });
 
     if (!found) {
-      setError(`Không tìm thấy đơn hàng hoặc mã SKU "${orderId}" cần đóng gói`);
+      const msg = `Không tìm thấy đơn hàng hoặc mã SKU "${orderId}" cần đóng gói`;
+      setError(msg);
+      pushToast({ tone: "warning", title: msg });
       return;
     }
     setError("");
     setOrder(found);
     setScanned({});
     setDone(false);
+    pushToast({ tone: "info", title: `Đã mở đơn #${found.id} tại trạm đóng gói` });
   };
 
   const progress = order ? scanProgress(order.lines, scanned) : { done: 0, total: 0, complete: false };
@@ -92,15 +96,23 @@ export function PackingStation({
     if (result.kind === "ok") {
       setScanned((s) => applyScan(s, result.line));
       setError("");
+      pushToast({
+        tone: "success",
+        title: `Khớp mã: ${result.line.ten} (${result.line.size}) · ${result.done}/${result.total}`,
+      });
     } else if (result.kind === "line-complete") {
-      setError(`Món ${result.line.ten} (Size ${result.line.size}) đã quét đủ ${result.line.qty}/${result.line.qty}`);
+      const msg = `Món ${result.line.ten} (Size ${result.line.size}) đã quét đủ ${result.line.qty}/${result.line.qty}`;
+      setError(msg);
+      pushToast({ tone: "warning", title: msg });
       setFlash(true);
     } else if (result.kind === "wrong-variant") {
       pushToast({ tone: "error", title: `❌ SAI MÃ SKU! Kiện hàng yêu cầu ${result.expected.ten} Size ${result.expected.size} nhưng bạn vừa quét ${result.scanned}!` });
       setError(`LỖI SAI SIZE/MÀU! Đơn yêu cầu ${result.expected.ten} Size ${result.expected.size} (${result.expected.mau}), bạn đang quét ${result.scanned}. Vui lòng đổi lại!`);
       setFlash(true);
     } else {
-      setError(`Mã ${result.scanned} không thuộc đơn hàng này!`);
+      const msg = `Mã ${result.scanned} không thuộc đơn hàng này!`;
+      setError(msg);
+      pushToast({ tone: "error", title: msg });
       setFlash(true);
     }
     setCode("");
@@ -115,15 +127,35 @@ export function PackingStation({
         pushToast({ tone: "success", title: `Đã đóng gói đơn #${order.id} thành công!` });
         onRefresh?.();
       } catch (e: any) {
-        setError(e.message || "Không thể xác nhận đóng gói.");
+        const msg = e.message || "Không thể xác nhận đóng gói.";
+        setError(msg);
+        pushToast({ tone: "error", title: msg });
         return;
       }
     }
     setShowWaybill(true);
   };
 
-  const printWaybill = () => {
-    requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+  const printWaybill = async () => {
+    if (!order || downloading) return;
+    setDownloading(true);
+    try {
+      const filename = await exportWaybillPdf(order);
+      setDone(true);
+      pushToast({
+        tone: "success",
+        title: "Đã xuất & tải Tem Vận Đơn A6 (PDF)",
+        detail: `Đã lưu tự động: ${filename}`,
+      });
+    } catch (err) {
+      pushToast({
+        tone: "error",
+        title: "Không thể xuất PDF tem vận đơn A6",
+        detail: err instanceof Error ? err.message : "Vui lòng thử lại.",
+      });
+    } finally {
+      setDownloading(false);
+    }
   };
 
   return (
@@ -245,27 +277,14 @@ export function PackingStation({
           {order && <Waybill order={order} />}
           <div className="flex justify-end gap-2 border-t border-border pt-3">
             <Button variant="outline" onClick={() => setShowWaybill(false)}>Đóng</Button>
-            <Button
-              onClick={() => {
-                printWaybill();
-                setDone(true);
-              }}
-            >
-              <Printer className="h-4 w-4" /> In tem A6
+            <Button disabled={downloading} onClick={() => void printWaybill()} className="gap-2">
+              {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+              {downloading ? "Đang tạo PDF…" : "In / Tải tem A6 (PDF)"}
             </Button>
           </div>
-          {done && <p className="text-sm font-semibold text-success">Đã gửi lệnh in tem A6 — kiện hàng sẵn sàng bàn giao shipper.</p>}
+          {done && <p className="text-sm font-semibold text-success">Đã xuất tem vận đơn A6 — kiện hàng sẵn sàng bàn giao shipper.</p>}
         </DialogContent>
       </Dialog>
-
-      {/* Portal in tem A6 */}
-      {showWaybill && order &&
-        createPortal(
-          <div className="print-sheet waybill-sheet">
-            <Waybill order={order} />
-          </div>,
-          document.body,
-        )}
     </div>
   );
 }

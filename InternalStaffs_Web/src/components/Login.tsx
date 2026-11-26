@@ -22,6 +22,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { roleHome, useAuth, type Role } from "@/lib/auth";
 import { api, ApiError } from "@/lib/api";
+import { pushToast } from "@/lib/feedback";
 
 export function Login() {
   const { user, ready, login } = useAuth();
@@ -77,16 +78,17 @@ export function Login() {
     try {
       const u = await login(email, pass, remember);
       if (!u) {
-        setError("Tài khoản hoặc mật khẩu không chính xác, hoặc chưa được cấp quyền!");
+        const msg = "Tài khoản hoặc mật khẩu không chính xác, hoặc chưa được cấp quyền!";
+        setError(msg);
+        pushToast({ tone: "error", title: msg });
         return;
       }
+      pushToast({ tone: "success", title: `Xin chào ${u.name}!`, detail: "Đăng nhập hệ thống thành công" });
       go(u.role);
     } catch (err: unknown) {
-      if (err instanceof Error && err.message) {
-        setError(err.message);
-      } else {
-        setError("Đã xảy ra lỗi khi đăng nhập. Vui lòng thử lại!");
-      }
+      const msg = err instanceof Error && err.message ? err.message : "Đã xảy ra lỗi khi đăng nhập. Vui lòng thử lại!";
+      setError(msg);
+      pushToast({ tone: "error", title: msg });
     } finally {
       setLoading(false);
     }

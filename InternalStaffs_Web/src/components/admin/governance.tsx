@@ -23,7 +23,6 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
-  approveStock,
   STAFF_ROLE_LABELS,
   type AdminStaff,
   type AuditEntry,
@@ -46,6 +45,8 @@ export interface RealShift {
   openedAt: string;
   closedAt?: string;
   openingCash: number;
+  cashSales?: number;
+  expectedCash?: number;
   countedCash?: number;
   status: string;
   note?: string;
@@ -98,11 +99,6 @@ export function Governance({
   log: (action: string, reason: string) => void;
 }) {
   const [view, setView] = useState<View>("shift");
-  const [shift, setShift] = useState("CHO_DUYET");
-  const [stock, setStock] = useState(8);
-  const [stockApproved, setStockApproved] = useState(false);
-  const [recount, setRecount] = useState(false);
-  const [reason, setReason] = useState("");
   const [search, setSearch] = useState("");
 
   // Real MySQL Staff state
@@ -350,6 +346,7 @@ export function Governance({
         roleIds: [newRoleId],
       });
       log(`Thêm nhân sự mới @${newUsername}`, `Vai trò ${newRoleId}`);
+      pushToast({ tone: "success", title: `Đã tạo tài khoản nhân sự @${newUsername}` });
       setAddModalOpen(false);
       // Reset form
       setNewUsername("");
@@ -360,7 +357,9 @@ export function Governance({
       setNewEmail("");
       await loadStaff();
     } catch (err: unknown) {
-      setFormError(err instanceof ApiError ? err.message : "Thêm nhân viên thất bại.");
+      const msg = err instanceof ApiError ? err.message : "Thêm nhân viên thất bại.";
+      setFormError(msg);
+      pushToast({ tone: "error", title: msg });
     } finally {
       setSubmitting(false);
     }
@@ -387,10 +386,13 @@ export function Governance({
       });
 
       log(`Cập nhật hồ sơ nhân sự @${editTarget.username}`, `Cập nhật thông tin & vai trò`);
+      pushToast({ tone: "success", title: `Đã cập nhật nhân sự @${editTarget.username}` });
       setEditTarget(null);
       await loadStaff();
     } catch (err: unknown) {
-      setFormError(err instanceof ApiError ? err.message : "Cập nhật nhân viên thất bại.");
+      const msg = err instanceof ApiError ? err.message : "Cập nhật nhân viên thất bại.";
+      setFormError(msg);
+      pushToast({ tone: "error", title: msg });
     } finally {
       setSubmitting(false);
     }
@@ -409,10 +411,18 @@ export function Governance({
         `${nextStatus === "KHOA_TAM_THOI" ? "Khóa" : "Mở khóa"} tài khoản nhân sự @${statusTarget.username}`,
         `Cập nhật trạng thái người dùng ${statusTarget.userId}`
       );
+      pushToast({
+        tone: "success",
+        title: nextStatus === "KHOA_TAM_THOI" ? `Đã khóa tài khoản @${statusTarget.username}` : `Đã mở khóa tài khoản @${statusTarget.username}`,
+      });
       setStatusTarget(null);
       await loadStaff();
     } catch (err) {
-      console.error("Lỗi cập nhật trạng thái nhân sự:", err);
+      pushToast({
+        tone: "error",
+        title: "Không cập nhật được trạng thái nhân sự",
+        detail: err instanceof Error ? err.message : undefined,
+      });
     } finally {
       setSubmitting(false);
     }
@@ -428,10 +438,19 @@ export function Governance({
         "DELETE"
       );
       log(`Xóa nhân sự @${deleteTarget.username}`, res.message || "Xóa tài khoản khỏi hệ thống");
+      pushToast({
+        tone: "success",
+        title: res.deleted ? `Đã xóa nhân sự @${deleteTarget.username}` : `Đã khóa bảo toàn nhân sự @${deleteTarget.username}`,
+        detail: res.message,
+      });
       setDeleteTarget(null);
       await loadStaff();
     } catch (err: unknown) {
-      console.error("Lỗi xóa nhân sự:", err);
+      pushToast({
+        tone: "error",
+        title: "Không thể xóa nhân sự",
+        detail: err instanceof Error ? err.message : undefined,
+      });
     } finally {
       setSubmitting(false);
     }
@@ -448,8 +467,11 @@ export function Governance({
       setOtpRequestId(res.requestId);
       setOtpSent(true);
       setOtpCooldown(60);
+      pushToast({ tone: "success", title: `Đã gửi mã OTP tới ${otpResetTarget.email}` });
     } catch (err: unknown) {
-      setOtpResetError(err instanceof ApiError ? err.message : "Không thể gửi OTP về email nhân viên.");
+      const msg = err instanceof ApiError ? err.message : "Không thể gửi OTP về email nhân viên.";
+      setOtpResetError(msg);
+      pushToast({ tone: "error", title: msg });
     }
   };
 
@@ -554,7 +576,10 @@ export function Governance({
     safeMovementPage * MOVEMENT_PAGE_SIZE
   );
 
-  const allLogs = realLogs.length > 0 ? realLogs : logs;
+  const allLogs = useMemo(() => {
+    const seen = new Set(realLogs.map((l) => l.id));
+    return [...logs.filter((l) => !seen.has(l.id)), ...realLogs];
+  }, [realLogs, logs]);
   const filteredLogs = useMemo(() => {
     return allLogs.filter((l) => {
       const q = search.trim().toLowerCase();
@@ -1562,32 +1587,6 @@ export function Governance({
         />
       )}
 
-      {recount && (
-        <Dialog open onOpenChange={setRecount}>
-          <DialogContent>
-            <DialogTitle>Yêu cầu đếm lại CA000001</DialogTitle>
-            <DialogDescription>Ghi rõ nội dung thu ngân cần kiểm tra lại.</DialogDescription>
-            <Field label="Lý do">
-              <textarea
-                className={`${inputClass} h-24 py-2`}
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-              />
-            </Field>
-            <Button
-              disabled={!reason.trim()}
-              onClick={() => {
-                setRecount(false);
-                setShift("YEU_CAU_DEM_LAI");
-                log("Yêu cầu đếm lại CA000001", reason);
-              }}
-            >
-              Gửi yêu cầu
-            </Button>
-          </DialogContent>
-        </Dialog>
-      )}
-
       {/* MODAL: STAFF DETAIL */}
       {staffDetailModal && (
         <Dialog open onOpenChange={(open) => !open && setStaffDetailModal(null)}>
@@ -1684,7 +1683,19 @@ export function Governance({
                 <p className="font-mono font-bold text-foreground">{vnd(shiftDetailModal.openingCash)}</p>
               </div>
               <div className="rounded-lg border border-border bg-muted/20 p-3">
-                <p className="text-xs text-muted-foreground">Tiền mặt cuối ca</p>
+                <p className="text-xs text-muted-foreground">Doanh thu tiền mặt trong ca</p>
+                <p className="font-mono font-bold text-foreground">
+                  {vnd(Number(shiftDetailModal.cashSales ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/20 p-3">
+                <p className="text-xs text-muted-foreground">Tiền mặt sổ sách dự kiến</p>
+                <p className="font-mono font-bold text-accent">
+                  {vnd(Number(shiftDetailModal.expectedCash ?? shiftDetailModal.openingCash))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/20 p-3">
+                <p className="text-xs text-muted-foreground">Tiền mặt kiểm đếm thực tế</p>
                 <p className="font-mono font-bold text-foreground">
                   {shiftDetailModal.countedCash != null ? vnd(shiftDetailModal.countedCash) : "Chưa kiểm đếm"}
                 </p>
@@ -1692,16 +1703,41 @@ export function Governance({
               <div className="rounded-lg border border-border bg-muted/20 p-3">
                 <p className="text-xs text-muted-foreground">Trạng thái ca</p>
                 <div className="mt-1">
-                  <Badge tone={shiftDetailModal.status === "DA_DUYET" ? "success" : shiftDetailModal.status === "DA_DONG_CHO_DUYET" ? "warning" : "neutral"}>
+                  <Badge
+                    tone={
+                      shiftDetailModal.status === "DA_PHE_DUYET_BAN_GIAO" || shiftDetailModal.status === "DA_DUYET"
+                        ? "success"
+                        : shiftDetailModal.status === "DA_DONG_CHO_DUYET"
+                        ? "warning"
+                        : "neutral"
+                    }
+                  >
                     {vnLabel(shiftDetailModal.status)}
                   </Badge>
                 </div>
               </div>
               <div className="rounded-lg border border-border bg-muted/20 p-3">
-                <p className="text-xs text-muted-foreground">Chênh lệch tiền mặt</p>
-                <p className="font-mono font-bold text-foreground">
-                  {shiftDetailModal.countedCash != null ? vnd(shiftDetailModal.countedCash - shiftDetailModal.openingCash) : "0 đ"}
-                </p>
+                <p className="text-xs text-muted-foreground">Chênh lệch (Thực tế − Dự kiến)</p>
+                {(() => {
+                  const expected = Number(shiftDetailModal.expectedCash ?? shiftDetailModal.openingCash);
+                  const diff =
+                    shiftDetailModal.countedCash != null
+                      ? Number(shiftDetailModal.countedCash) - expected
+                      : 0;
+                  return (
+                    <p
+                      className={`font-mono font-bold ${
+                        shiftDetailModal.countedCash == null
+                          ? "text-muted-foreground"
+                          : diff === 0
+                          ? "text-success"
+                          : "text-destructive"
+                      }`}
+                    >
+                      {shiftDetailModal.countedCash != null ? vnd(diff) : "—"}
+                    </p>
+                  );
+                })()}
               </div>
               {shiftDetailModal.note && (
                 <div className="rounded-lg border border-border bg-muted/20 p-3 sm:col-span-2">

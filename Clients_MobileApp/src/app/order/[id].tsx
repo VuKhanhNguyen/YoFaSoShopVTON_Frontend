@@ -14,6 +14,8 @@ import {
 import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
+import { File as ExpoFile } from "expo-file-system";
+import * as ImagePicker from "expo-image-picker";
 import * as Sharing from "expo-sharing";
 import { api, publicUrl } from "@/lib/api";
 import { useResource } from "@/hooks/use-resource";
@@ -38,10 +40,16 @@ export default function OrderDetailScreen() {
   const [cancelSheetVisible, setCancelSheetVisible] = useState(false);
   const [vietQrSheetVisible, setVietQrSheetVisible] = useState(false);
   const [reviewSheetVisible, setReviewSheetVisible] = useState(false);
+  const [selectedOrderLineId, setSelectedOrderLineId] = useState<string | null>(null);
+  const [selectedProductName, setSelectedProductName] = useState("");
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewComment, setReviewComment] = useState("");
   const [fitChoice, setFitChoice] = useState("Vừa vặn");
   const [fabricChoice, setFabricChoice] = useState("Đúng mô tả");
+  const [reviewPhotoUri, setReviewPhotoUri] = useState<string | null>(null);
+  const [reviewPhotoMime, setReviewPhotoMime] = useState<string | null>(null);
+  const [submittingReview, setSubmittingReview] = useState(false);
+  const [reviewError, setReviewError] = useState("");
   const [toast, setToast] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [downloadingQr, setDownloadingQr] = useState(false);
@@ -161,9 +169,93 @@ export default function OrderDetailScreen() {
     state.reload();
   };
 
+  const openReviewForLine = (item: any) => {
+    setSelectedOrderLineId(String(item.orderLineId || ""));
+    setSelectedProductName(String(item.productName || "Sản phẩm YoFaSo"));
+    setReviewRating(5);
+    setReviewComment("");
+    setFitChoice("Vừa vặn");
+    setFabricChoice("Đúng mô tả");
+    setReviewPhotoUri(null);
+    setReviewPhotoMime(null);
+    setReviewError("");
+    setReviewSheetVisible(true);
+  };
+
+  const handlePickReviewPhoto = async () => {
+    setReviewError("");
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted") {
+        setReviewError("Cần cấp quyền thư viện ảnh để đính kèm ảnh đánh giá.");
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: false,
+        quality: 0.85,
+      });
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        if (asset.fileSize && asset.fileSize > 10 * 1024 * 1024) {
+          setReviewError("Ảnh đánh giá vượt quá giới hạn 10MB.");
+          return;
+        }
+        setReviewPhotoUri(asset.uri);
+        setReviewPhotoMime(asset.mimeType || null);
+      }
+    } catch (e: any) {
+      setReviewError(e?.message || "Không thể chọn ảnh đánh giá.");
+    }
+  };
+
   const handleSubmitReview = async () => {
-    setReviewSheetVisible(false);
-    showToast("Cảm ơn bạn đã gửi đánh giá sản phẩm!");
+    if (!selectedOrderLineId || submittingReview) return;
+    setSubmittingReview(true);
+    setReviewError("");
+    try {
+      const tagsPrefix = `[Phom dáng: ${fitChoice} · Chất vải: ${fabricChoice}]`;
+      const trimmed = reviewComment.trim();
+      const fullComment = (trimmed ? `${tagsPrefix} ${trimmed}` : tagsPrefix).slice(0, 500);
+      if (reviewPhotoUri) {
+        const form = new FormData();
+        form.append("orderLineId", selectedOrderLineId);
+        form.append("stars", String(reviewRating));
+        form.append("comment", fullComment);
+        const isPng = reviewPhotoMime?.includes("png") || reviewPhotoUri.toLowerCase().endsWith(".png");
+        const mimeType = isPng ? "image/png" : "image/jpeg";
+        const fileName = isPng ? "review.png" : "review.jpg";
+        if (Platform.OS === "web") {
+          const res = await fetch(reviewPhotoUri);
+          const blob = await res.blob();
+          form.append("photo", blob, fileName);
+        } else {
+          try {
+            const file = new ExpoFile(reviewPhotoUri);
+            form.append("photo", file as unknown as Blob, fileName);
+          } catch {
+            form.append("photo", { uri: reviewPhotoUri, type: mimeType, name: fileName } as any);
+          }
+        }
+        await api("/reviews", "POST", form);
+      } else {
+        await api("/reviews", "POST", {
+          orderLineId: selectedOrderLineId,
+          stars: reviewRating,
+          comment: fullComment,
+        });
+      }
+      setReviewSheetVisible(false);
+      setReviewPhotoUri(null);
+      setReviewPhotoMime(null);
+      setReviewComment("");
+      state.reload();
+      showToast("Đã gửi đánh giá! Đang chờ shop duyệt hiển thị.");
+    } catch (e: any) {
+      setReviewError(e?.message || "Gửi đánh giá thất bại. Vui lòng thử lại.");
+    } finally {
+      setSubmittingReview(false);
+    }
   };
 
   return (
@@ -324,12 +416,34 @@ export default function OrderDetailScreen() {
                   {formatVND(Number(item.unitPrice || 0) * Number(item.quantity || 1))}
                 </Text>
                 {o?.status === "HOAN_TAT" && (
-                  <Pressable
-                    onPress={() => setReviewSheetVisible(true)}
-                    style={st.reviewActionBtn}
-                  >
-                    <Text style={st.reviewActionText}>Đánh giá sản phẩm</Text>
-                  </Pressable>
+                  item.reviewId ? (
+                    <View style={st.reviewedBadge}>
+                      <Ionicons
+                        name={item.reviewStatus === "DA_HIEN_THI" ? "checkmark-circle" : "time-outline"}
+                        size={12}
+                        color={item.reviewStatus === "DA_HIEN_THI" ? Colors.statusSuccess : Colors.champagneDeep}
+                      />
+                      <Text
+                        style={[
+                          st.reviewedBadgeText,
+                          item.reviewStatus === "DA_HIEN_THI" && { color: Colors.statusSuccess },
+                        ]}
+                      >
+                        {item.reviewStatus === "DA_HIEN_THI"
+                          ? "Đã đánh giá"
+                          : item.reviewStatus === "DA_AN_VI_PHAM"
+                          ? "Đánh giá đã ẩn"
+                          : "Đã gửi · Chờ duyệt"}
+                      </Text>
+                    </View>
+                  ) : (
+                    <Pressable
+                      onPress={() => openReviewForLine(item)}
+                      style={st.reviewActionBtn}
+                    >
+                      <Text style={st.reviewActionText}>Đánh giá sản phẩm</Text>
+                    </Pressable>
+                  )
                 )}
               </View>
             </View>
@@ -449,12 +563,21 @@ export default function OrderDetailScreen() {
       {/* Product Review Sheet */}
       <Sheet
         visible={reviewSheetVisible}
-        onClose={() => setReviewSheetVisible(false)}
+        onClose={() => !submittingReview && setReviewSheetVisible(false)}
         title="Đánh giá sản phẩm"
       >
         <View style={{ gap: 14 }}>
+          {!!selectedProductName && (
+            <Text
+              numberOfLines={2}
+              style={{ fontSize: 13, fontFamily: "JakartaSemiBold", color: Colors.primary }}
+            >
+              {selectedProductName}
+            </Text>
+          )}
+
           {/* 5-Star Rating Row */}
-          <View style={{ alignItems: "center", gap: 6, marginVertical: 8 }}>
+          <View style={{ alignItems: "center", gap: 6, marginVertical: 4 }}>
             <View style={{ flexDirection: "row", gap: 10 }}>
               {[1, 2, 3, 4, 5].map((star) => (
                 <Pressable
@@ -513,10 +636,48 @@ export default function OrderDetailScreen() {
             onChangeText={setReviewComment}
             multiline
             numberOfLines={3}
+            maxLength={420}
             style={st.reviewInput}
           />
 
-          <Button title="GỬI ĐÁNH GIÁ" accent onPress={handleSubmitReview} />
+          {/* Optional Photo Upload */}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            {reviewPhotoUri ? (
+              <View style={{ position: "relative" }}>
+                <Image
+                  source={{ uri: reviewPhotoUri }}
+                  style={{ width: 72, height: 72, borderRadius: Radii.md, backgroundColor: Colors.surfaceMuted }}
+                  resizeMode="cover"
+                />
+                <Pressable
+                  onPress={() => {
+                    setReviewPhotoUri(null);
+                    setReviewPhotoMime(null);
+                  }}
+                  style={st.removePhotoBtn}
+                  accessibilityLabel="Xóa ảnh đính kèm"
+                >
+                  <Ionicons name="close" size={14} color="#FFFFFF" />
+                </Pressable>
+              </View>
+            ) : (
+              <Pressable onPress={handlePickReviewPhoto} style={st.addPhotoBtn}>
+                <Ionicons name="camera-outline" size={20} color={Colors.champagneDeep} />
+                <Text style={{ fontSize: 12, fontFamily: "JakartaSemiBold", color: Colors.primary }}>
+                  Thêm ảnh thực tế (tùy chọn)
+                </Text>
+              </Pressable>
+            )}
+          </View>
+
+          {!!reviewError && <Notice error>{reviewError}</Notice>}
+
+          <Button
+            title={submittingReview ? "ĐANG GỬI ĐÁNH GIÁ..." : "GỬI ĐÁNH GIÁ"}
+            accent
+            disabled={submittingReview}
+            onPress={handleSubmitReview}
+          />
         </View>
       </Sheet>
 
@@ -629,7 +790,6 @@ export default function OrderDetailScreen() {
                 style={{
                   fontSize: 12,
                   fontFamily: "Mono",
-                  fontWeight: "700",
                   color: Colors.primary,
                 }}
               >
@@ -648,7 +808,6 @@ export default function OrderDetailScreen() {
                 style={{
                   fontSize: 13,
                   fontFamily: "Mono",
-                  fontWeight: "700",
                   color: Colors.statusSuccess,
                 }}
               >
@@ -661,7 +820,6 @@ export default function OrderDetailScreen() {
                 style={{
                   fontSize: 12,
                   fontFamily: "Mono",
-                  fontWeight: "700",
                   color: Colors.champagneDeep,
                 }}
               >
@@ -823,6 +981,47 @@ const st = StyleSheet.create({
     fontFamily: "JakartaSemiBold",
     color: Colors.primary,
   },
+  reviewedBadge: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: Radii.full,
+    backgroundColor: Colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: Colors.borderHairline,
+    marginTop: 6,
+  },
+  reviewedBadgeText: {
+    fontSize: 10.5,
+    fontFamily: "JakartaSemiBold",
+    color: Colors.champagneDeep,
+  },
+  addPhotoBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: Radii.md,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: Colors.champagneDeep,
+    backgroundColor: Colors.champagneSubtle,
+  },
+  removePhotoBtn: {
+    position: "absolute",
+    top: -6,
+    right: -6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: Colors.statusDanger,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   calcRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -851,7 +1050,6 @@ const st = StyleSheet.create({
   totalAmount: {
     fontSize: 18,
     fontFamily: "Mono",
-    fontWeight: "700",
     color: Colors.statusSuccess,
   },
   cancelBtn: {

@@ -23,33 +23,8 @@ export const FAIL_REASONS: Record<FailReason, string> = {
   TU_CHOI_NHAN: "Khách đổi ý từ chối nhận",
 };
 
-const s = (maDon: string, khach: string, sdt: string, diaChi: string, soTienThuHo: number, ghiChu = "Cho xem hàng, không cho thử"): Stop => ({
-  maDon, khach, sdt, diaChi, soTienThuHo, ghiChu, soLanGiao: 0, status: "DANG_GIAO_HANG",
-});
-
-/** Tuyến Hải Châu đã sắp xếp tối ưu (dữ liệu mô phỏng). */
-export const ROUTE_HAI_CHAU: Stop[] = [
-  s("DH00000001", "Trần Thu Hà", "0912345789", "48 Cao Thắng, Hải Châu, Đà Nẵng", 880_000),
-  s("DH00000008", "Ngô Minh Khoa", "0905112233", "15 Lê Hồng Phong, Hải Châu, Đà Nẵng", 650_000),
-  s("DH00000009", "Phan Thị Yến", "0935224466", "102 Phan Châu Trinh, Hải Châu, Đà Nẵng", 1_200_000),
-  s("DH00000010", "Đặng Quốc Việt", "0978334455", "7 Trần Phú, Hải Châu, Đà Nẵng", 0, "Đã thanh toán online"),
-  s("DH00000011", "Võ Hồng Nhung", "0913445566", "220 Bạch Đằng, Hải Châu, Đà Nẵng", 720_000),
-  s("DH00000012", "Lý Thanh Tâm", "0988556677", "33 Nguyễn Chí Thanh, Hải Châu, Đà Nẵng", 990_000),
-  s("DH00000015", "Huỳnh Gia Bảo", "0909667788", "64 Hoàng Diệu, Hải Châu, Đà Nẵng", 450_000),
-  s("DH00000016", "Bùi Ngọc Lan", "0932778899", "18 Ông Ích Khiêm, Hải Châu, Đà Nẵng", 1_050_000),
-  s("DH00000017", "Trương Đức Anh", "0967889900", "91 Lê Duẩn, Hải Châu, Đà Nẵng", 560_000),
-  s("DH00000018", "Mai Phương Thảo", "0918990011", "5 Hùng Vương, Hải Châu, Đà Nẵng", 0, "Đã thanh toán online"),
-  s("DH00000019", "Cao Minh Trí", "0903001122", "140 Nguyễn Văn Linh, Hải Châu, Đà Nẵng", 1_100_000),
-  s("DH00000020", "Đỗ Thùy Linh", "0936112233", "27 Hải Phòng, Hải Châu, Đà Nẵng", 850_000),
-];
-
-/** Kiện thủ kho đang chờ bàn giao, quét để nạp thêm vào chuyến. */
-export const PENDING_PARCELS: Stop[] = [
-  s("DH00000013", "Lâm Bảo Ngọc", "0914223344", "58 Nguyễn Thị Minh Khai, Hải Châu, Đà Nẵng", 690_000),
-  s("DH00000014", "Tạ Quang Huy", "0989334455", "12 Lý Tự Trọng, Hải Châu, Đà Nẵng", 0, "Đã thanh toán online"),
-];
-
-export const maskPhone = (p: string) => `${p.slice(0, 4)}.***.${p.slice(-3)}`;
+export const maskPhone = (p: string) =>
+  !p || p.length < 7 ? p || "Chưa có SĐT" : `${p.slice(0, 4)}.***.${p.slice(-3)}`;
 export const mapsUrl = (addr: string) => `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}`;
 
 /** Chuyển đổi dữ liệu đơn hàng từ CSDL sang trạm dừng giao hàng (Stop). */

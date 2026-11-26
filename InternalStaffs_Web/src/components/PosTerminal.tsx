@@ -15,19 +15,16 @@ import {
   Clock,
   User,
   Search,
-  CheckCircle2,
-  AlertCircle,
   GripVertical,
   Layers,
   ShoppingBag,
-  Filter,
   Loader2,
-  RotateCcw,
   Sparkles,
   MapPin,
   PlusCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Loyalty } from "@/components/pos/loyalty";
 import { O2O } from "@/components/pos/o2o";
@@ -46,10 +43,11 @@ import {
   redeemedPoints,
   loadSet,
   type Customer,
+  type DiscountDetail,
   type Method,
   type Order,
 } from "@/lib/pos-workflows";
-import { type BienThe, type Dong, themVaoDon, thanhTien, tongTienHang, tongThanhToan, VOUCHERS, vnd } from "@/lib/pos";
+import { type BienThe, type Dong, themVaoDon, thanhTien, tongTienHang, tongThanhToan, vnd } from "@/lib/pos";
 
 const SHORTCUTS = [
   ["F1", "Tra cứu O2O"],
@@ -102,12 +100,24 @@ export function PosTerminal() {
   const [pointRequest, setPointRequest] = useState(0);
   const [voucher, setVoucher] = useState("");
   const [voucherInput, setVoucherInput] = useState("");
+  const [o2oSessionId, setO2oSessionId] = useState<string | null>(null);
+  const [activePromotions, setActivePromotions] = useState<
+    { code: string; name: string; type: string; value: number; minimumTotal: number }[]
+  >([]);
+  const [serverQuote, setServerQuote] = useState<{
+    comboEligible: boolean;
+    comboDiscount: number;
+    voucherDiscount: number;
+    voucherName?: string;
+    totalDiscount: number;
+    discountDetails: DiscountDetail[];
+  } | null>(null);
   const [code, setCode] = useState("");
   const scanRef = useRef<HTMLInputElement>(null);
 
   // Parked orders (Lưu tạm đơn)
   const [parkedOrders, setParkedOrders] = useState<
-    { id: string; time: string; lines: Dong[]; customer: Customer | null; voucher: string }[]
+    { id: string; time: string; lines: Dong[]; customer: Customer | null; voucher: string; sessionId?: string | null }[]
   >([]);
 
   // Modals & Panels
@@ -115,11 +125,10 @@ export function PosTerminal() {
   const [operationsTab, setOperationsTab] = useState<"orders" | "shift">("orders");
   const [stockLowList, setStockLowList] = useState<any[]>([]);
   const [loadingStock, setLoadingStock] = useState(false);
+  const [cancelCartOpen, setCancelCartOpen] = useState(false);
 
   // Print & Receipt
   const [printOrder, setPrintOrder] = useState<Order | null>(null);
-  const [printPicking, setPrintPicking] = useState(false);
-  const [toast, setToast] = useState<{ t: string; ok: boolean } | null>(null);
   const [now, setNow] = useState<Date | null>(null);
 
   // Load split ratio preference
@@ -144,16 +153,13 @@ export function PosTerminal() {
     return () => clearInterval(i);
   }, []);
 
-  // Toast timer
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 3500);
-    return () => clearTimeout(t);
-  }, [toast]);
-
   // Initial focus
   useEffect(() => {
     scanRef.current?.focus();
+  }, []);
+
+  const notify = useCallback((t: string, ok: boolean) => {
+    pushToast({ tone: ok ? "success" : "error", title: t });
   }, []);
 
   // 1. Fetch Categories from Database
@@ -209,13 +215,83 @@ export function PosTerminal() {
     }
   }, []);
 
+  // 4. Fetch Active Promotions from Database
+  const fetchPromotions = useCallback(async () => {
+    try {
+      const res = await api<any[]>("/promotions");
+      if (Array.isArray(res)) {
+        setActivePromotions(
+          res.map((p) => ({
+            code: String(p.code || ""),
+            name: String(p.name || p.code || ""),
+            type: String(p.type || ""),
+            value: Number(p.value || 0),
+            minimumTotal: Number(p.minimumTotal || 0),
+          }))
+        );
+      }
+    } catch {
+      setActivePromotions([]);
+    }
+  }, []);
+
   useEffect(() => {
     if (ready && user) {
       fetchCategories();
       fetchProducts();
       fetchShift();
+      fetchPromotions();
     }
-  }, [ready, user, fetchCategories, fetchProducts, fetchShift]);
+  }, [ready, user, fetchCategories, fetchProducts, fetchShift, fetchPromotions]);
+
+  // Live quote from server (/promotions/quote) for real Combo -5% + DB Voucher stacking
+  useEffect(() => {
+    if (!ready || !user || don.length === 0) {
+      setServerQuote(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api<any>("/promotions/quote", "POST", {
+          items: don.map((d) => ({
+            variantId: d.variantId || d.maQuanLy,
+            quantity: d.soLuong,
+            sessionId: d.sessionId || undefined,
+          })),
+          customerId: customerId || undefined,
+          voucher: !birthday && voucher ? voucher : undefined,
+          sessionId: o2oSessionId || undefined,
+        });
+        if (!cancelled && res) {
+          setServerQuote({
+            comboEligible: Boolean(res.comboEligible),
+            comboDiscount: Number(res.comboDiscount || 0),
+            voucherDiscount: Number(res.voucherDiscount || 0),
+            voucherName: res.voucherName ? String(res.voucherName) : undefined,
+            totalDiscount: Number(res.totalDiscount || 0),
+            discountDetails: Array.isArray(res.discountDetails) ? res.discountDetails : [],
+          });
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          if (voucher) {
+            pushToast({
+              tone: "warning",
+              title: `Mã voucher "${voucher}" chưa đủ điều kiện áp dụng`,
+              detail: err?.message || "Kiểm tra lại giá trị đơn tối thiểu hoặc hạn sử dụng.",
+            });
+            setVoucher("");
+          }
+          setServerQuote(null);
+        }
+      }
+    }, 180);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [ready, user, don, voucher, birthday, customerId, o2oSessionId]);
 
   // Resizable Splitter handlers
   const handlePointerDown = (e: React.PointerEvent) => {
@@ -247,18 +323,35 @@ export function PosTerminal() {
     localStorage.setItem("yofaso_pos_split_ratio", "60");
   };
 
-  // Cart Calculations
+  // Cart Calculations (100% Real Server Quote + Loyalty Points/Birthday)
   const tong = tongTienHang(don);
-  const selectedVoucher = VOUCHERS[voucher];
-  const birthdayActive = birthday && customer && now && birthdayEligible(customer, now);
+  const comboDiscount = serverQuote?.comboDiscount ?? 0;
+  const birthdayActive = Boolean(birthday && customer && now && birthdayEligible(customer, now));
   const voucherDiscount = birthdayActive
-    ? birthdayDiscount(tong)
-    : selectedVoucher && tong > 0
-    ? Math.min(tong, selectedVoucher.tinh(tong))
-    : 0;
-  const pointsUsed = redeemedPoints(customer?.points ?? 0, pointRequest, tong - voucherDiscount);
-  const giam = Math.min(tong, voucherDiscount + pointsUsed * 100);
+    ? birthdayDiscount(Math.max(0, tong - comboDiscount))
+    : (serverQuote?.voucherDiscount ?? 0);
+  const pointsUsed = redeemedPoints(customer?.points ?? 0, pointRequest, Math.max(0, tong - comboDiscount - voucherDiscount));
+  const giam = Math.min(tong, comboDiscount + voucherDiscount + pointsUsed * 100);
   const tt = tongThanhToan(don, giam);
+  const discountDetails: DiscountDetail[] = [
+    ...(comboDiscount > 0
+      ? [{ type: "COMBO_VTON", label: "Ưu đãi Combo VTON (−5%)", amount: comboDiscount }]
+      : []),
+    ...(birthdayActive && voucherDiscount > 0
+      ? [{ type: "BIRTHDAY", label: "Ưu đãi sinh nhật (−15%)", amount: voucherDiscount }]
+      : !birthdayActive && voucherDiscount > 0
+      ? [
+          {
+            type: "VOUCHER",
+            label: `Voucher ${voucher}${serverQuote?.voucherName ? ` (${serverQuote.voucherName})` : ""}`,
+            amount: voucherDiscount,
+          },
+        ]
+      : []),
+    ...(pointsUsed > 0
+      ? [{ type: "POINTS", label: `Đổi ${pointsUsed} điểm tích lũy`, amount: pointsUsed * 100 }]
+      : []),
+  ];
 
   const tonCon = (p: { ton?: number; stock?: number; maQuanLy?: string; variantId?: string }) => {
     const totalTon = Number(p.ton ?? p.stock ?? 0);
@@ -272,7 +365,7 @@ export function PosTerminal() {
   const handleOpenShift = async () => {
     const amt = parseFloat(openingAmountInput);
     if (isNaN(amt) || amt < 0) {
-      alert("Số tiền mặt đầu ca không hợp lệ.");
+      pushToast({ tone: "warning", title: "Số tiền mặt đầu ca không hợp lệ." });
       return;
     }
     setOpeningShiftLoading(true);
@@ -289,7 +382,11 @@ export function PosTerminal() {
       setOpenShiftModal(false);
       fetchShift();
     } catch (err: any) {
-      alert(err.message || "Không thể mở ca làm việc. Vui lòng kiểm tra lại.");
+      pushToast({
+        tone: "error",
+        title: "Không thể mở ca làm việc",
+        detail: err.message || "Vui lòng kiểm tra lại.",
+      });
     } finally {
       setOpeningShiftLoading(false);
     }
@@ -299,12 +396,14 @@ export function PosTerminal() {
   const addVariantToCart = (v: any, parentProduct?: any) => {
     if (shiftStatus !== "DANG_MO") {
       setOpenShiftModal(true);
-      return setToast({ t: "Ca chưa mở. Vui lòng mở ca làm việc trước khi bán hàng.", ok: false });
+      notify("Ca chưa mở. Vui lòng mở ca làm việc trước khi bán hàng.", false);
+      return;
     }
     const stock = Number(v.stock ?? v.ton ?? 0);
     const remaining = tonCon({ ton: stock, variantId: v.variantId, maQuanLy: v.sku || v.maQuanLy });
     if (remaining <= 0) {
-      return setToast({ t: `${v.sku || "Sản phẩm"} đã hết tồn khả dụng trong kho`, ok: false });
+      notify(`${v.sku || "Sản phẩm"} đã hết tồn khả dụng trong kho`, false);
+      return;
     }
 
     const bienThe: BienThe = {
@@ -315,13 +414,13 @@ export function PosTerminal() {
       ten: parentProduct?.name || v.productName || v.name || "Sản phẩm",
       size: v.size || "Free",
       mau: v.colorName || "Mặc định",
-      donGia: Number(v.salePrice || v.price) || 350000,
+      donGia: Number(v.salePrice ?? v.price ?? 0),
       ton: stock,
       shelf: v.shelf,
     };
 
     setDon((ds) => themVaoDon(ds, bienThe));
-    setToast({ t: `+1 ${bienThe.ten} (${bienThe.size})`, ok: true });
+    notify(`+1 ${bienThe.ten} (${bienThe.size})`, true);
     setSelectedProductForVariant(null);
     setMobileTab("cart"); // On mobile, automatically show cart
   };
@@ -340,20 +439,18 @@ export function PosTerminal() {
           addVariantToCart(res.variants[0], p);
         }
       } else {
-        // Fallback single variant
-        const fallbackVariant = {
-          variantId: p.sku || `VAR-${p.productId}`,
-          sku: p.sku,
-          size: "Free",
-          colorName: "Mặc định",
-          price: p.minPrice || 350000,
-          stock: 20,
-        };
-        addVariantToCart(fallbackVariant, p);
+        pushToast({
+          tone: "warning",
+          title: `Sản phẩm "${p.name}" chưa có biến thể khả dụng trong kho`,
+        });
       }
-    } catch {
-      // Direct add with representative SKU
-      addVariantToCart({ variantId: p.sku, sku: p.sku, price: p.minPrice, stock: 10 }, p);
+    } catch (err: any) {
+      setSelectedProductForVariant(null);
+      pushToast({
+        tone: "error",
+        title: "Không tải được danh sách biến thể sản phẩm",
+        detail: err?.message || "Vui lòng thử lại.",
+      });
     } finally {
       setLoadingVariants(false);
     }
@@ -382,7 +479,7 @@ export function PosTerminal() {
       return;
     }
 
-    setToast({ t: `Không tìm thấy mã SKU / Barcode "${cleanCode}" trên hệ thống`, ok: false });
+    notify(`Không tìm thấy mã SKU / Barcode "${cleanCode}" trên hệ thống`, false);
     setCode("");
     scanRef.current?.focus();
   };
@@ -412,7 +509,9 @@ export function PosTerminal() {
     setPointRequest(0);
     setVoucher("");
     setVoucherInput("");
-    setToast({ t: msg, ok: true });
+    setO2oSessionId(null);
+    setServerQuote(null);
+    notify(msg, true);
     scanRef.current?.focus();
   };
 
@@ -425,6 +524,7 @@ export function PosTerminal() {
       lines: don,
       customer,
       voucher,
+      sessionId: o2oSessionId,
     };
     const updated = [newDraft, ...parkedOrders];
     setParkedOrders(updated);
@@ -438,32 +538,40 @@ export function PosTerminal() {
     setCustomer(draft.customer);
     setCustomerId(draft.customer?.id ?? null);
     setVoucher(draft.voucher);
+    setO2oSessionId(draft.sessionId ?? null);
     const updated = parkedOrders.filter((p) => p.id !== draft.id);
     setParkedOrders(updated);
     localStorage.setItem("yofaso_pos_parked_orders", JSON.stringify(updated));
-    setToast({ t: `Đã nạp lại đơn tạm ${draft.id}`, ok: true });
+    notify(`Đã nạp lại đơn tạm ${draft.id}`, true);
   };
 
   // Open Payment modal
   const handlePay = () => {
     if (shiftStatus !== "DANG_MO") {
       setOpenShiftModal(true);
-      return setToast({ t: "Ca làm việc chưa mở", ok: false });
+      notify("Ca làm việc chưa mở", false);
+      return;
     }
-    if (!don.length) return setToast({ t: "Giỏ hàng đang trống", ok: false });
+    if (!don.length) {
+      notify("Giỏ hàng đang trống", false);
+      return;
+    }
     setPanel("payment");
   };
 
   // Complete Payment & Save to Database (POST /pos/orders)
   const completePayment = async (method: Method, tendered: number): Promise<Order | null> => {
     const key = crypto.randomUUID();
+    const effectiveSessionId = o2oSessionId || don.find((d) => d.sessionId)?.sessionId || undefined;
     const payload = {
       items: don.map((d) => ({
         variantId: d.variantId || d.maQuanLy,
         quantity: d.soLuong,
+        sessionId: d.sessionId || effectiveSessionId || undefined,
       })),
       customerId: customerId || undefined,
-      voucher: voucher || undefined,
+      voucher: !birthdayActive && voucher ? voucher : undefined,
+      sessionId: effectiveSessionId,
       cashReceived: tendered,
       paymentMethod: method === "QR" ? "VIETQR" : "COD",
     };
@@ -478,6 +586,9 @@ export function PosTerminal() {
         created: new Date().toISOString(),
         lines: don,
         discount: giam,
+        comboDiscount,
+        voucherCode: voucher || undefined,
+        discountDetails,
         pointsUsed,
         customerId: customerId ?? undefined,
         customerName: customer?.name ?? "Khách tại quầy",
@@ -485,7 +596,7 @@ export function PosTerminal() {
         cashierId: user?.name || "Thu ngân",
         method,
         tendered,
-        total: tt,
+        total: Number(res.total ?? tt),
         status: "HOAN_TAT",
         channel: "TAI_QUAY_POS",
       };
@@ -508,6 +619,8 @@ export function PosTerminal() {
       setBirthday(false);
       setPointRequest(0);
       setVoucher("");
+      setO2oSessionId(null);
+      setServerQuote(null);
 
       return createdOrder;
     } catch (err: any) {
@@ -529,20 +642,28 @@ export function PosTerminal() {
     if (birthdayVoucher) setVoucher("");
     setPointRequest(points);
     setPanel(null);
-    setToast({ t: `Đã gán khách hàng ${c.name} (${c.tier})`, ok: true });
+    notify(`Đã gán khách hàng ${c.name} (${c.tier})`, true);
   };
 
   // Load O2O Set
-  const loadO2OSet = (setItems: BienThe[]) => {
+  const loadO2OSet = (setItems: BienThe[], sessionId?: string) => {
     if (shiftStatus !== "DANG_MO") {
       setOpenShiftModal(true);
+      notify("Vui lòng mở ca làm việc trước khi nạp đơn O2O.", false);
       return false;
     }
-    const loaded = loadSet(don, setItems);
+    const tagged = sessionId ? setItems.map((it) => ({ ...it, sessionId })) : setItems;
+    const loaded = loadSet(don, tagged);
     if (!loaded) return false;
     setDon(loaded);
+    if (sessionId) setO2oSessionId(sessionId);
     setPanel(null);
-    setToast({ t: "Đã nạp toàn bộ set đồ O2O vào hóa đơn", ok: true });
+    notify(
+      sessionId
+        ? `Đã nạp ${setItems.length} món từ phiên O2O ${sessionId} vào hóa đơn`
+        : `Đã nạp ${setItems.length} món phối đồ vào hóa đơn`,
+      true
+    );
     return true;
   };
 
@@ -553,17 +674,17 @@ export function PosTerminal() {
     try {
       const res = await api<any[]>("/staff/inventory/low-stock?threshold=20&limit=30");
       if (Array.isArray(res)) setStockLowList(res);
-    } catch {}
-    finally {
+    } catch (err: any) {
+      pushToast({ tone: "error", title: "Không tải được danh sách tồn thấp", detail: err?.message });
+    } finally {
       setLoadingStock(false);
     }
   };
 
-  // Print Receipt (K80 thermal receipt & Save as PDF simulation)
+  // Browser Print Receipt fallback
   const printReceipt = (order?: Order) => {
     const o = order ?? currentDraftOrder;
     setPrintOrder(o);
-    setPrintPicking(!order);
     const prevTitle = typeof document !== "undefined" ? document.title : "";
     if (typeof document !== "undefined") {
       const orderCode = String(o?.orderId || o?.id || "POS").replace(/^#?POS-/, "POS-");
@@ -581,20 +702,25 @@ export function PosTerminal() {
     });
   };
 
-  // Apply Voucher
-  const applyVoucher = () => {
-    const v = voucherInput.trim().toUpperCase();
+  // Apply Voucher (verified live against MySQL via /promotions/quote)
+  const applyVoucher = (explicitCode?: string) => {
+    const v = (explicitCode ?? voucherInput).trim().toUpperCase();
     if (!v) return;
-    if (v in VOUCHERS) {
-      setBirthday(false);
-      setVoucher(v);
-      setToast({ t: `Áp dụng voucher ${v}: ${VOUCHERS[v].label}`, ok: true });
-    } else {
-      // Allow custom voucher code for DB checking during checkout
-      setBirthday(false);
-      setVoucher(v);
-      setToast({ t: `Đã nhập mã voucher ${v}`, ok: true });
+    const found = activePromotions.find((p) => p.code.toUpperCase() === v);
+    if (found && tong > 0 && tong < found.minimumTotal) {
+      pushToast({
+        tone: "warning",
+        title: `Mã ${v} yêu cầu đơn tối thiểu ${vnd(found.minimumTotal)}`,
+      });
+      return;
     }
+    setBirthday(false);
+    setVoucher(v);
+    pushToast({
+      tone: "info",
+      title: `Đang áp dụng mã voucher ${v}`,
+      detail: found ? found.name : "Đang đối soát điều kiện từ máy chủ…",
+    });
     setVoucherInput("");
   };
 
@@ -642,6 +768,9 @@ export function PosTerminal() {
     created: now?.toISOString() ?? new Date().toISOString(),
     lines: don,
     discount: giam,
+    comboDiscount,
+    voucherCode: voucher || undefined,
+    discountDetails,
     pointsUsed,
     customerId: customerId ?? undefined,
     customerName: customer?.name ?? "Khách tại quầy",
@@ -1104,19 +1233,38 @@ export function PosTerminal() {
                   value={voucherInput}
                   onChange={(e) => setVoucherInput(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && applyVoucher()}
-                  placeholder="Mã giảm giá (YOFASO10, FREESHIP50)"
+                  placeholder="Nhập mã khuyến mãi từ hệ thống…"
                   className="h-9 w-full rounded-md border border-border bg-background pl-9 pr-3 font-mono text-xs uppercase outline-none focus:border-primary"
                 />
               </div>
-              <Button variant="outline" onClick={applyVoucher} className="h-9 px-3 text-xs font-semibold">
+              <Button variant="outline" onClick={() => applyVoucher()} className="h-9 px-3 text-xs font-semibold">
                 Áp dụng
               </Button>
             </div>
 
+            {activePromotions.length > 0 && !voucher && (
+              <div className="flex flex-wrap gap-1.5">
+                {activePromotions.slice(0, 4).map((p) => (
+                  <button
+                    key={p.code}
+                    type="button"
+                    onClick={() => applyVoucher(p.code)}
+                    title={p.name}
+                    className="rounded-full border border-accent/40 bg-accent-subtle/60 px-2.5 py-0.5 font-mono text-[11px] font-semibold text-accent-hover hover:bg-accent-subtle"
+                  >
+                    {p.code}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {voucher && (
               <div className="flex items-center justify-between rounded-md bg-accent-subtle px-3 py-1.5 text-xs">
                 <span>
-                  <b className="font-mono text-accent-hover">{voucher}</b> — {VOUCHERS[voucher]?.label || "Mã ưu đãi"}
+                  <b className="font-mono text-accent-hover">{voucher}</b> —{" "}
+                  {serverQuote?.voucherName ||
+                    activePromotions.find((p) => p.code.toUpperCase() === voucher)?.name ||
+                    "Mã khuyến mãi"}
                 </span>
                 <Button
                   variant="ghost"
@@ -1124,10 +1272,20 @@ export function PosTerminal() {
                   title="Bỏ voucher"
                   aria-label="Bỏ voucher"
                   className="h-6 w-6 shrink-0"
-                  onClick={() => setVoucher("")}
+                  onClick={() => {
+                    setVoucher("");
+                    pushToast({ tone: "info", title: `Đã gỡ mã voucher ${voucher}` });
+                  }}
                 >
                   <X className="h-3 w-3" />
                 </Button>
+              </div>
+            )}
+
+            {comboDiscount > 0 && (
+              <div className="flex items-center justify-between rounded-md bg-success-subtle px-3 py-1.5 text-xs text-success font-semibold">
+                <span>✨ Tự động áp dụng Combo VTON (−5%)</span>
+                <span className="font-mono">-{vnd(comboDiscount)}</span>
               </div>
             )}
 
@@ -1152,10 +1310,19 @@ export function PosTerminal() {
                 <dt className="text-muted-foreground">Tổng tiền hàng</dt>
                 <dd className="font-mono font-semibold">{vnd(tong)}</dd>
               </div>
-              <div className="flex justify-between">
-                <dt className="text-muted-foreground">Giảm giá / Chiết khấu</dt>
-                <dd className="font-mono text-destructive font-semibold">-{vnd(giam)}</dd>
-              </div>
+              {discountDetails.length > 0 ? (
+                discountDetails.map((d, i) => (
+                  <div key={`${d.type}-${i}`} className="flex justify-between">
+                    <dt className="text-muted-foreground">{d.label}</dt>
+                    <dd className="font-mono text-destructive font-semibold">-{vnd(d.amount)}</dd>
+                  </div>
+                ))
+              ) : (
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">Giảm giá / Chiết khấu</dt>
+                  <dd className="font-mono text-destructive font-semibold">-{vnd(giam)}</dd>
+                </div>
+              )}
             </dl>
 
             <div className="flex flex-wrap items-end justify-between gap-2 border-t-2 border-dashed border-border pt-2">
@@ -1177,7 +1344,7 @@ export function PosTerminal() {
               <Button
                 variant="outline"
                 disabled={!don.length}
-                onClick={() => don.length && confirm("Xác nhận hủy giỏ hàng hiện tại?") && resetOrder("Đã hủy đơn hàng")}
+                onClick={() => don.length && setCancelCartOpen(true)}
                 className="h-8 font-semibold text-xs text-destructive hover:bg-danger-subtle hover:text-destructive gap-1.5"
               >
                 <X className="h-3.5 w-3.5" />
@@ -1348,7 +1515,7 @@ export function PosTerminal() {
           </DialogDescription>
 
           {panel === "loyalty" && <Loyalty payable={tong} onAssign={assignCustomer} />}
-          {panel === "o2o" && <O2O products={[]} onLoad={loadO2OSet} onPrint={() => printReceipt()} />}
+          {panel === "o2o" && <O2O onLoad={loadO2OSet} />}
           {panel === "payment" && (
             <Payment
               draft={currentDraftOrder}
@@ -1382,7 +1549,11 @@ export function PosTerminal() {
                   });
                   fetchShift();
                 } catch (err: any) {
-                  alert(err.message || "Không thể kết ca.");
+                  pushToast({
+                    tone: "error",
+                    title: "Không thể nộp báo cáo kết ca",
+                    detail: err.message || "Vui lòng kiểm tra lại.",
+                  });
                 }
               }}
               onOrderUpdated={() => {
@@ -1440,36 +1611,31 @@ export function PosTerminal() {
         </DialogContent>
       </Dialog>
 
-      {/* Printing Sheet */}
+      {/* Cancel Cart Confirm Dialog */}
+      <ConfirmDialog
+        open={cancelCartOpen}
+        title="Xác nhận hủy hóa đơn hiện tại?"
+        description="Toàn bộ sản phẩm, mã giảm giá và khách hàng đã chọn trên quầy sẽ được làm trống."
+        confirmLabel="Hủy hóa đơn"
+        cancelLabel="Giữ lại"
+        tone="danger"
+        onConfirm={() => {
+          setCancelCartOpen(false);
+          resetOrder("Đã hủy hóa đơn đang soạn trên quầy");
+        }}
+        onClose={() => setCancelCartOpen(false)}
+      />
+
+      {/* Printing Sheet (browser print fallback, centered on A4) */}
       {now &&
+        printOrder &&
         typeof document !== "undefined" &&
         createPortal(
           <div className="print-sheet">
-            {printOrder && <Receipt order={printOrder} />}
-            {printPicking && (
-              <article className="picking-slip">
-                <h2>YOFASO · PHIẾU LẤY ĐỒ THỬ</h2>
-                <p>Mã phiên: TD00000001</p>
-                <p>Áo polo cổ sen đen · M · Kệ A-01</p>
-                <p>Quần jeans ống suông · M · Kệ B-03</p>
-              </article>
-            )}
+            <Receipt order={printOrder} />
           </div>,
           document.body
         )}
-
-      {/* Toast Notification */}
-      {toast && (
-        <div
-          role="status"
-          className={`fixed left-1/2 top-4 z-50 flex w-max max-w-[calc(100%-32px)] -translate-x-1/2 items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3 text-sm font-medium shadow-floating-toast backdrop-blur-md ${
-            toast.ok ? "text-success border-success/30" : "text-destructive border-destructive/30"
-          }`}
-        >
-          {toast.ok ? <CheckCircle2 className="h-5 w-5 shrink-0" /> : <AlertCircle className="h-5 w-5 shrink-0" />}
-          <span>{toast.t}</span>
-        </div>
-      )}
     </div>
   );
 }

@@ -1,20 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { AUDIT_ZONES, XNT, auditSummary, variance, LOW_STOCK_THRESHOLD, type AuditItem } from "@/lib/warehouse";
+import { auditSummary, variance, LOW_STOCK_THRESHOLD, type AuditItem } from "@/lib/warehouse";
 import { useResource } from "@/hooks/use-resource";
 import { api } from "@/lib/api";
 import { pushToast } from "@/lib/feedback";
 
-/** UC_WH_AUDIT + UC_WH_REPORT + UC_LOW_STOCK — Kiểm kê theo dãy kệ, báo cáo XNT, cảnh báo tồn tối thiểu. */
+/** UC_WH_AUDIT + UC_WH_REPORT + UC_LOW_STOCK — Kiểm kê theo dãy kệ, báo cáo XNT, cảnh báo tồn tối thiểu (100% Real Data). */
 export function AuditReport({ onRefresh }: { onRefresh?: () => void }) {
-  const { data: remoteZones, reload: reloadZones } = useResource<Record<string, { label: string; items: AuditItem[] }>>("/staff/inventory/audit-zones");
-  const { data: remoteSummary, reload: reloadSummary } = useResource<{ tonDau: number; nhapMoi: number; xuatBan: number; tonCuoi: number }>("/staff/inventory/summary");
+  const { data: remoteZones, loading: loadingZones, reload: reloadZones } = useResource<Record<string, { label: string; items: AuditItem[] }>>("/staff/inventory/audit-zones");
+  const { data: remoteSummary, loading: loadingSummary, reload: reloadSummary } = useResource<{ tonDau: number; nhapMoi: number; xuatBan: number; tonCuoi: number }>("/staff/inventory/summary");
   const { data: remoteLows, reload: reloadLows } = useResource<any[]>("/staff/inventory/low-stock?threshold=5");
 
-  const zones = remoteZones && Object.keys(remoteZones).length > 0 ? remoteZones : AUDIT_ZONES;
+  const zones = remoteZones ?? {};
   const zoneKeys = Object.keys(zones);
-  const [zone, setZone] = useState<string>(zoneKeys[0] ?? "A");
+  const [zone, setZone] = useState<string>("");
 
   useEffect(() => {
     if (zoneKeys.length > 0 && !zones[zone]) {
@@ -27,10 +27,10 @@ export function AuditReport({ onRefresh }: { onRefresh?: () => void }) {
   const [sent, setSent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const zoneData = zones[zone] ?? { label: "Dãy kệ", items: [] };
+  const zoneData = zones[zone] ?? { label: "Chưa chọn dãy kệ", items: [] };
   const summary = useMemo(() => auditSummary(zoneData.items, counts), [zoneData, counts]);
 
-  const xnt = remoteSummary ?? XNT;
+  const xnt = remoteSummary ?? { tonDau: 0, nhapMoi: 0, xuatBan: 0, tonCuoi: 0 };
   const lows = remoteLows ?? [];
 
   const setCount = (sku: string, v: string) => {
@@ -39,7 +39,14 @@ export function AuditReport({ onRefresh }: { onRefresh?: () => void }) {
   };
 
   const submit = async () => {
-    if (summary.checked === 0 || (summary.mismatched > 0 && !reason.trim())) return;
+    if (summary.checked === 0) {
+      pushToast({ tone: "warning", title: "Vui lòng nhập số thực đếm cho ít nhất 1 SKU." });
+      return;
+    }
+    if (summary.mismatched > 0 && !reason.trim()) {
+      pushToast({ tone: "warning", title: "Có chênh lệch kiểm kê — bắt buộc nhập lý do giải trình." });
+      return;
+    }
     setSubmitting(true);
     try {
       const lines = zoneData.items.flatMap((item) => {
@@ -91,6 +98,20 @@ export function AuditReport({ onRefresh }: { onRefresh?: () => void }) {
             </tr>
           </thead>
           <tbody>
+            {loadingZones && (
+              <tr>
+                <td colSpan={7} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                  Đang tải danh mục giá kệ kiểm kê từ MySQL…
+                </td>
+              </tr>
+            )}
+            {!loadingZones && zoneData.items.length === 0 && (
+              <tr>
+                <td colSpan={7} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                  Chưa có biến thể nào trên dãy kệ này.
+                </td>
+              </tr>
+            )}
             {zoneData.items.map((item) => {
               const c = counts[item.sku];
               const hasCount = c !== undefined && !Number.isNaN(c);
@@ -169,7 +190,7 @@ export function AuditReport({ onRefresh }: { onRefresh?: () => void }) {
       <div className="grid gap-4 lg:grid-cols-2">
         {/* Báo cáo XNT */}
         <section className="rounded-xl border border-border bg-surface p-4">
-          <h2 className="text-sm font-bold">Báo cáo Xuất — Nhập — Tồn </h2>
+          <h2 className="text-sm font-bold">Báo cáo Xuất — Nhập — Tồn {loadingSummary && <span className="font-normal text-xs text-muted-foreground">(Đang tải…)</span>}</h2>
           <div className="mt-4 flex items-end justify-around gap-3">
             {[
               { label: "Tồn đầu kỳ", value: xnt.tonDau, cls: "bg-primary" },

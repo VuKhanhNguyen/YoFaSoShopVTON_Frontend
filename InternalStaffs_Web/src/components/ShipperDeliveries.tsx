@@ -15,6 +15,7 @@ import {
   RotateCcw,
   ScanLine,
   Undo2,
+  Upload,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -27,14 +28,11 @@ import { pushToast } from "@/lib/feedback";
 import {
   FAIL_REASONS,
   MAX_ATTEMPTS,
-  PENDING_PARCELS,
-  ROUTE_HAI_CHAU,
   completeDelivery,
   failDelivery,
   mapOrderToStop,
   mapsUrl,
   maskPhone,
-  scanParcel,
   settlement,
   type FailReason,
   type ShipStatus,
@@ -53,25 +51,22 @@ const STATUS_UI: Record<ShipStatus, { label: string; cls: string }> = {
 export function ShipperDeliveries() {
   const { user, ready } = useRequireAuth(["ROLE_STAFF_SHIPPER", "ROLE_SHOP_ADMIN"]);
   const { data: dbOrders, reload: reloadOrders, loading } = useResource<any[]>("/staff/orders?size=100");
-  const [route, setRoute] = useState<Stop[]>(() => ROUTE_HAI_CHAU.map((s) => ({ ...s })));
+  const [route, setRoute] = useState<Stop[]>([]);
   const [view, setView] = useState<View>("route");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [settled, setSettled] = useState(false);
 
   useEffect(() => {
     if (dbOrders) {
-      if (dbOrders.length === 0) {
-        setRoute([]);
-        return;
-      }
       const relevant = dbOrders.filter(
         (o) =>
-          o.status === "DANG_GIAO_HANG" ||
-          o.status === "TRA_HANG" ||
-          o.status === "HOAN_TAT" ||
-          (user && (o.shipperId === user.code || o.shipperName === user.name))
+          o.channel !== "TAI_QUAY_POS" &&
+          (o.status === "DANG_GIAO_HANG" ||
+            o.status === "TRA_HANG" ||
+            o.status === "HOAN_TAT" ||
+            (user && (o.shipperId === user.code || o.shipperName === user.name)))
       );
-      setRoute(relevant.length > 0 ? relevant.map(mapOrderToStop) : dbOrders.map(mapOrderToStop));
+      setRoute(relevant.map(mapOrderToStop));
     }
   }, [dbOrders, user]);
 
@@ -238,6 +233,11 @@ function RouteView({
       <p className="text-xs text-muted-foreground">
         Đã xong {sum.delivered + sum.returns}/{sum.total} điểm
       </p>
+      {route.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border bg-surface p-8 text-center text-sm text-muted-foreground">
+          Chưa có kiện hàng nào trong lộ trình giao hôm nay. Bấm <b>Quét nhận thêm kiện</b> để tiếp nhận đơn từ kho.
+        </div>
+      ) : (
       <ol className="space-y-3">
         {route.map((s, i) => {
           const st = STATUS_UI[s.status];
@@ -299,6 +299,7 @@ function RouteView({
           );
         })}
       </ol>
+      )}
     </main>
   );
 }
@@ -321,7 +322,7 @@ function useCamera() {
       setOn(true);
       setErr(null);
     } catch {
-      setErr("Không mở được camera — dùng ô nhập mã / ảnh mô phỏng.");
+      setErr("Không mở được camera trực tiếp — vui lòng dùng nút Tải / Chọn ảnh POD thật từ thiết bị.");
     }
   };
 
@@ -362,43 +363,34 @@ function ScanView({
   const { data: pendingParcels, reload: reloadPending } = useResource<any[]>("/staff/shipper/pending-parcels");
 
   const submit = async (raw: string) => {
-    const c = raw.trim().toUpperCase();
+    const c = raw.trim().toUpperCase().replace(/^#/, "").replace(/^YFS/, "");
     if (!c) return;
     if (route.some((r) => r.maDon === c)) {
-      setMsg({ ok: false, text: "Kiện đã có trong lộ trình chuyến đi." });
+      const text = "Kiện đã có trong lộ trình chuyến đi.";
+      setMsg({ ok: false, text });
+      pushToast({ tone: "warning", title: text });
       setCode("");
       return;
     }
     setSubmitting(true);
     try {
-      const res = await api<any>(`/staff/orders/${c}/pickup`, "POST");
+      const res = await api<any>(`/staff/orders/${encodeURIComponent(c)}/pickup`, "POST");
       const newStop = mapOrderToStop(res);
       onAdd(newStop);
       setMsg({ ok: true, text: `Đã tiếp nhận đơn #${c} — ${newStop.khach}` });
       pushToast({ tone: "success", title: `Đã nhận kiện #${c} vào lộ trình` });
       reloadPending();
     } catch (e: any) {
-      // Fallback check against pendingParcels or local scanParcel
-      const pList: Stop[] = pendingParcels && pendingParcels.length > 0 ? pendingParcels.map(mapOrderToStop) : PENDING_PARCELS;
-      const r = scanParcel(route, pList, c);
-      if (r.kind === "added") {
-        onAdd(r.stop);
-        setMsg({ ok: true, text: `Đã nạp #${r.stop.maDon} — ${r.stop.khach}` });
-      } else {
-        setMsg({
-          ok: false,
-          text: e.message || (r.kind === "duplicate" ? "Kiện đã có trong chuyến đi." : "Mã vận đơn không tìm thấy hoặc chưa sẵn sàng bàn giao."),
-        });
-      }
+      const text = e.message || "Mã vận đơn không tìm thấy hoặc chưa sẵn sàng bàn giao từ kho.";
+      setMsg({ ok: false, text });
+      pushToast({ tone: "error", title: text });
     } finally {
       setSubmitting(false);
       setCode("");
     }
   };
 
-  const pool: Stop[] = pendingParcels && pendingParcels.length > 0
-    ? pendingParcels.map(mapOrderToStop)
-    : PENDING_PARCELS;
+  const pool: Stop[] = (pendingParcels ?? []).map(mapOrderToStop);
   const remaining = pool.filter((p) => !route.some((r) => r.maDon === p.maDon));
 
   return (
@@ -494,14 +486,46 @@ function StopView({
   const [photo, setPhoto] = useState<string | undefined>();
   const [reason, setReason] = useState<FailReason | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const cam = useCamera();
   const k = stop.soTienThuHo > 0 ? `THU ${Math.round(stop.soTienThuHo / 1000)}K` : "ĐÃ TRẢ ONLINE";
   const needCash = stop.soTienThuHo > 0;
 
+  const handlePodFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      pushToast({ tone: "error", title: "Vui lòng chọn file ảnh hợp lệ (JPG/PNG)." });
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      pushToast({ tone: "error", title: "Dung lượng ảnh POD tối đa 5 MB." });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setPhoto(reader.result);
+        cam.stop();
+        pushToast({ tone: "success", title: "Đã tải ảnh bằng chứng giao hàng (POD)" });
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
   const handleDeliverSuccess = async () => {
+    if (needCash && !cash) {
+      pushToast({ tone: "warning", title: "Vui lòng xác nhận đã thu đủ tiền mặt COD từ khách." });
+      return;
+    }
+    if (!photo) {
+      pushToast({ tone: "warning", title: "Vui lòng chụp hoặc tải lên ảnh bằng chứng giao hàng (POD)." });
+      return;
+    }
     try {
       setSubmitting(true);
-      await api(`/staff/orders/${stop.maDon}/deliver`, "POST", {
+      await api(`/staff/orders/${encodeURIComponent(stop.maDon)}/deliver`, "POST", {
         cashConfirmed: cash,
         podPhoto: photo,
       });
@@ -509,7 +533,6 @@ function StopView({
       onSave(completeDelivery(stop, cash, photo));
     } catch (e: any) {
       pushToast({ tone: "error", title: e.message || "Lưu kết quả giao hàng thất bại" });
-      onSave(completeDelivery(stop, cash, photo));
     } finally {
       setSubmitting(false);
     }
@@ -519,15 +542,14 @@ function StopView({
     if (!reason) return;
     try {
       setSubmitting(true);
-      await api(`/staff/orders/${stop.maDon}/delivery-failed`, "POST", {
+      await api(`/staff/orders/${encodeURIComponent(stop.maDon)}/delivery-failed`, "POST", {
         reason,
         note: FAIL_REASONS[reason],
       });
       pushToast({ tone: "info", title: `Đã cập nhật trạng thái đơn #${stop.maDon}` });
       onSave(failDelivery(stop, reason));
     } catch (e: any) {
-      pushToast({ tone: "warning", title: e.message || "Lỗi cập nhật máy chủ, đã ghi nhận cục bộ" });
-      onSave(failDelivery(stop, reason));
+      pushToast({ tone: "error", title: e.message || "Cập nhật giao thất bại không thành công" });
     } finally {
       setSubmitting(false);
     }
@@ -622,13 +644,23 @@ function StopView({
               </Button>
             )}
             {!photo && (
-              <Button variant="outline" className="h-14" onClick={() => setPhoto(simulatedPod(stop.maDon))}>
-                Ảnh mô phỏng
-              </Button>
+              <>
+                <Button variant="outline" className="h-14 gap-1.5" onClick={() => fileInputRef.current?.click()}>
+                  <Upload className="h-5 w-5" /> Chọn ảnh POD
+                </Button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={handlePodFileChange}
+                />
+              </>
             )}
             {photo && (
               <Button variant="outline" className="col-span-2 h-14" onClick={() => setPhoto(undefined)}>
-                Chụp lại
+                Chụp / Chọn lại ảnh
               </Button>
             )}
           </div>
@@ -682,11 +714,6 @@ function StopView({
   );
 }
 
-function simulatedPod(id: string): string {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="400" height="300" fill="#C5A880"/><rect x="120" y="90" width="160" height="120" fill="#FAFAF9" stroke="#0F172A" stroke-width="4"/><text x="200" y="160" font-family="monospace" font-size="18" text-anchor="middle" fill="#0F172A">POD ${id}</text><text x="200" y="250" font-family="sans-serif" font-size="14" text-anchor="middle" fill="#0F172A">Ảnh mô phỏng</text></svg>`;
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-}
-
 /* ---------- End-of-shift settlement ---------- */
 function SettleView({
   route,
@@ -714,8 +741,7 @@ function SettleView({
       pushToast({ tone: "success", title: "Đã gửi biên bản bàn giao COD cho Thu ngân" });
       onConfirm();
     } catch (e: any) {
-      pushToast({ tone: "info", title: e.message || "Đã lưu biên bản quyết toán ca" });
-      onConfirm();
+      pushToast({ tone: "error", title: e.message || "Không thể gửi biên bản quyết toán ca" });
     } finally {
       setSubmitting(false);
     }

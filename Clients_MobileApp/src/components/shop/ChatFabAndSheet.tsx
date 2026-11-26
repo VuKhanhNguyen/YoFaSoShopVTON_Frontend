@@ -37,6 +37,7 @@ import {
   openZaloChat,
 } from "@/lib/support-config";
 import { SPRING_SNAPPY, ScalePressable, SlidingTabs } from "./MotionPrimitives";
+import { PrivateImage } from "./PrivateImage";
 
 const FAB_SIZE = 56;
 const EDGE_MARGIN = 16;
@@ -254,6 +255,7 @@ export const ChatSheetModal = memo(function ChatSheetModal() {
   const [draft, setDraft] = useState("");
   const [pendingImageKey, setPendingImageKey] = useState<string | null>(null);
   const [pendingImageUri, setPendingImageUri] = useState<string | null>(null);
+  const [zoomImageSource, setZoomImageSource] = useState<{ uri: string; headers?: Record<string, string> } | null>(null);
   const [errorText, setErrorText] = useState("");
 
   const listRef = useRef<FlatList<ChatMessageItem> | null>(null);
@@ -470,11 +472,17 @@ export const ChatSheetModal = memo(function ChatSheetModal() {
           )}
           <View style={[st.bubble, isMine ? st.bubbleMine : isShop ? st.bubbleShop : st.bubbleAi]}>
             {item.imageUrl && !item.messageId.startsWith("tmp-") && (
-              <Image
-                source={chatImageSource(item.messageId, aiSessionId)}
-                style={st.msgImage}
-                resizeMode="cover"
-              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Phóng to ảnh tin nhắn"
+                onPress={() => setZoomImageSource(chatImageSource(item.messageId, aiSessionId))}
+              >
+                <PrivateImage
+                  customSource={chatImageSource(item.messageId, aiSessionId)}
+                  style={st.msgImage}
+                  resizeMode="cover"
+                />
+              </Pressable>
             )}
             <Text style={[st.msgText, isMine && st.msgTextMine]}>{item.content}</Text>
             <View style={st.msgMetaRow}>
@@ -867,6 +875,51 @@ export const ChatSheetModal = memo(function ChatSheetModal() {
           )}
         </KeyboardAvoidingView>
       </View>
+
+      {zoomImageSource && (
+        <Modal
+          visible
+          transparent
+          animationType="fade"
+          onRequestClose={() => setZoomImageSource(null)}
+        >
+          <Pressable
+            onPress={() => setZoomImageSource(null)}
+            style={{
+              flex: 1,
+              backgroundColor: "rgba(15, 23, 42, 0.9)",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 18,
+            }}
+          >
+            <Pressable
+              onPress={() => setZoomImageSource(null)}
+              accessibilityRole="button"
+              accessibilityLabel="Đóng xem ảnh"
+              style={{
+                position: "absolute",
+                top: Platform.OS === "ios" ? 52 : 28,
+                right: 20,
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                backgroundColor: "rgba(255,255,255,0.18)",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 10,
+              }}
+            >
+              <Ionicons name="close" size={22} color="#FFFFFF" />
+            </Pressable>
+            <PrivateImage
+              customSource={zoomImageSource}
+              style={{ width: "100%", height: "75%", maxWidth: 680 }}
+              resizeMode="contain"
+            />
+          </Pressable>
+        </Modal>
+      )}
     </Modal>
   );
 });

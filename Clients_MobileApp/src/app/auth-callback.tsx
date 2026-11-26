@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { Colors, Fonts } from "@/constants/theme";
+import { getOAuthFallbackTarget, isNativeOAuthInProgress } from "@/lib/oauth";
 
 /**
  * Fallback route cho deep link `yofasomobile://auth-callback` nếu hệ điều hành
@@ -15,14 +16,28 @@ export default function AuthCallbackScreen() {
   }>();
 
   useEffect(() => {
-    router.replace({
-      pathname: "/auth",
-      params: {
-        ...(params.oauthCode ? { oauthCode: String(params.oauthCode) } : {}),
-        ...(params.oauthError ? { oauthError: String(params.oauthError) } : {}),
-        ...(params.oauthMessage ? { oauthMessage: String(params.oauthMessage) } : {}),
-      },
-    });
+    const target = getOAuthFallbackTarget();
+    const redirect = () => {
+      router.replace({
+        pathname: target,
+        params: {
+          ...(params.oauthCode ? { oauthCode: String(params.oauthCode) } : {}),
+          ...(params.oauthError ? { oauthError: String(params.oauthError) } : {}),
+          ...(params.oauthMessage ? { oauthMessage: String(params.oauthMessage) } : {}),
+        },
+      });
+    };
+    // Nếu WebBrowser.openAuthSessionAsync đang quản lý chính phiên này, giữ loading
+    // chờ phiên đóng/điều hướng để không bắn đổi oauthCode lần 2.
+    if (isNativeOAuthInProgress()) {
+      const fallbackTimer = setTimeout(() => {
+        if (!isNativeOAuthInProgress()) {
+          router.replace(target);
+        }
+      }, 2500);
+      return () => clearTimeout(fallbackTimer);
+    }
+    redirect();
   }, [params.oauthCode, params.oauthError, params.oauthMessage]);
 
   return (

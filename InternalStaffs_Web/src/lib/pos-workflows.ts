@@ -6,20 +6,17 @@ export type Customer = {
   phone: string;
   tier: "DONG" | "BAC" | "VANG" | "KIM_CUONG";
   points: number;
-  birthday: string;
+  birthday: string | null;
   birthdayUsedYear?: number | undefined;
 };
 
-export const CUSTOMERS: Customer[] = [
-  { id: "KH0001", name: "Trần Thu Hà", phone: "0912345789", tier: "KIM_CUONG", points: 1250, birthday: "1998-10-15" },
-  { id: "KH0002", name: "Nguyễn Minh Anh", phone: "0905123456", tier: "BAC", points: 320, birthday: "1995-04-20" },
-];
-
 export function birthdayEligible(c: Customer, date: Date) {
+  if (!c.birthday || c.birthday.length < 10) return false;
   return Number(c.birthday.slice(5, 7)) === date.getMonth() + 1 && c.birthdayUsedYear !== date.getFullYear();
 }
 
 export function isBirthday(c: Customer, date: Date) {
+  if (!c.birthday || c.birthday.length < 10) return false;
   return Number(c.birthday.slice(5, 7)) === date.getMonth() + 1 && Number(c.birthday.slice(8, 10)) === date.getDate();
 }
 
@@ -39,12 +36,24 @@ export const canReturn = (created: string, now: Date) =>
 
 export type Method = "CASH" | "QR" | "CARD";
 
+export type DiscountDetail = {
+  type?: string;
+  kind?: string;
+  code?: string;
+  label: string;
+  description?: string;
+  amount: number;
+};
+
 export type Order = {
   id: number | string;
   orderId?: string;
   created: string;
   lines: Dong[];
   discount: number;
+  comboDiscount?: number;
+  voucherCode?: string;
+  discountDetails?: DiscountDetail[];
   pointsUsed: number;
   customerId?: string | undefined;
   customerName?: string | undefined;

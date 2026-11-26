@@ -581,7 +581,10 @@ export function Sheet({
       animationType="none"
       onRequestClose={handleDismiss}
     >
-      <View style={s.modalOverlay}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={s.modalOverlay}
+      >
         {/* Animated Dim Backdrop */}
         <Animated.View
           style={[
@@ -635,7 +638,7 @@ export function Sheet({
             <View style={{ flexShrink: 1 }}>{children}</View>
           )}
         </Animated.View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

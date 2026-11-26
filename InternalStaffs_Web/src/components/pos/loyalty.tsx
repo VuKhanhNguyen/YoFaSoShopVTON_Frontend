@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/api";
+import { pushToast } from "@/lib/feedback";
 import { birthdayEligible, isBirthday, redeemedPoints, type Customer } from "@/lib/pos-workflows";
 import { vnd } from "@/lib/pos";
 
@@ -45,6 +46,7 @@ export function Loyalty({
         fullName: string;
         points: number;
         membership: string;
+        birthday?: string | null;
       }>(`/pos/customers?phone=${encodeURIComponent(clean)}`);
       if (res && res.userId) {
         setCustomer({
@@ -53,16 +55,20 @@ export function Loyalty({
           phone: clean,
           tier: (res.membership as Customer["tier"]) || "DONG",
           points: Number(res.points) || 0,
-          birthday: "1998-10-15",
+          birthday: res.birthday ? String(res.birthday).slice(0, 10) : null,
         });
+        pushToast({ tone: "success", title: `Đã tìm thấy khách hàng ${res.fullName}` });
       } else {
         setCustomer(null);
+        pushToast({ tone: "info", title: "Không tìm thấy khách hàng với số điện thoại này." });
       }
     } catch (err: unknown) {
       setCustomer(null);
       if (err instanceof ApiError && err.status === 401) {
         setAuthError(true);
         window.dispatchEvent(new Event("yofaso:session-expired"));
+      } else {
+        pushToast({ tone: "info", title: "Không tìm thấy khách hàng trong hệ thống." });
       }
     } finally {
       setLoading(false);
@@ -162,7 +168,9 @@ export function Loyalty({
               </div>
               <div>
                 <dt className="text-xs uppercase tracking-wider text-muted-foreground">Ngày sinh nhật</dt>
-                <dd className="mt-2 font-mono font-semibold">{customer.birthday.split("-").reverse().join("/")}</dd>
+                <dd className="mt-2 font-mono font-semibold">
+                  {customer.birthday ? customer.birthday.split("-").reverse().join("/") : "Chưa cập nhật"}
+                </dd>
               </div>
             </dl>
           </section>

@@ -1,15 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { CheckCircle2, AlertCircle, Printer, ArrowLeftRight, RotateCcw, Loader2, RefreshCw } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Download, RotateCcw, Loader2, RefreshCw } from "lucide-react";
 import { pushToast } from "@/lib/feedback";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Receipt } from "./receipt";
 import { api } from "@/lib/api";
-import { canReturn, countCash, DENOMINATIONS, shiftVariance, type Order } from "@/lib/pos-workflows";
+import { countCash, DENOMINATIONS, type Order } from "@/lib/pos-workflows";
 import { type BienThe, vnd } from "@/lib/pos";
 import { vnLabel } from "@/lib/vietnamese-labels";
+import { exportReceiptPdf } from "@/lib/receipt-pdf";
 
 export function Operations({
   initialTab,
@@ -37,6 +39,8 @@ export function Operations({
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [returning, setReturning] = useState(false);
+  const [returnConfirmId, setReturnConfirmId] = useState<string | number | null>(null);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   // Shift state
   const [shiftData, setShiftData] = useState<{
@@ -120,7 +124,7 @@ export function Operations({
             ten: it.productName || it.name || "Sản phẩm",
             size: it.size || "",
             mau: it.colorName || "",
-            donGia: Number(it.price) || 0,
+            donGia: Number(it.unitPrice ?? it.price) || 0,
             soLuong: Number(it.quantity) || 1,
           })),
         };
@@ -135,10 +139,28 @@ export function Operations({
     }
   };
 
-  const handleReturnOrder = async (orderId: string | number) => {
-    if (!confirm(`Xác nhận nhận trả hàng và hoàn tồn kho cho đơn #${orderId}? Thao tác này sẽ ghi trực tiếp vào cơ sở dữ liệu.`)) {
-      return;
+  const handleDownloadOrderPdf = async (order: Order) => {
+    if (downloadingPdf) return;
+    setDownloadingPdf(true);
+    try {
+      const filename = await exportReceiptPdf(order);
+      pushToast({
+        tone: "success",
+        title: "Đã tải hóa đơn POS (PDF A5)",
+        detail: `Đã lưu tự động: ${filename}`,
+      });
+    } catch (err) {
+      pushToast({
+        tone: "error",
+        title: "Không thể xuất PDF hóa đơn",
+        detail: err instanceof Error ? err.message : "Vui lòng thử lại.",
+      });
+    } finally {
+      setDownloadingPdf(false);
     }
+  };
+
+  const handleReturnOrder = async (orderId: string | number) => {
     setReturning(true);
     try {
       await api(`/staff/orders/${encodeURIComponent(orderId)}/receive-return`, "POST");
@@ -160,18 +182,23 @@ export function Operations({
       });
     } finally {
       setReturning(false);
+      setReturnConfirmId(null);
     }
   };
 
   // Cash calculations
   const totalCounted = countCash(counts);
-  const expectedCash = shiftData?.expectedCash ?? 2000000;
+  const expectedCash = shiftData?.expectedCash ?? 0;
   const variance = totalCounted - expectedCash;
 
   const handleCloseShiftSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (variance !== 0 && !note.trim()) {
-      alert("Tiền mặt kiểm đếm có chênh lệch so với kỳ vọng. Bắt buộc nhập ghi chú giải trình!");
+      pushToast({
+        tone: "warning",
+        title: "Chênh lệch két tiền mặt",
+        detail: "Bắt buộc nhập ghi chú giải trình trước khi nộp báo cáo kết ca.",
+      });
       return;
     }
     onCloseShift(counts, note);
@@ -298,16 +325,21 @@ export function Operations({
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" onClick={() => onPrint(selectedOrder)} className="gap-2 h-9 text-xs">
-                    <Printer className="h-4 w-4" />
-                    In / Tải hóa đơn (PDF)
+                  <Button
+                    variant="outline"
+                    disabled={downloadingPdf}
+                    onClick={() => void handleDownloadOrderPdf(selectedOrder)}
+                    className="gap-2 h-9 text-xs"
+                  >
+                    {downloadingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                    Tải hóa đơn (PDF A5)
                   </Button>
 
                   {selectedOrder.status !== "TRA_HANG" && (
                     <Button
                       variant="outline"
                       disabled={returning}
-                      onClick={() => handleReturnOrder(selectedOrder.orderId || selectedOrder.id)}
+                      onClick={() => setReturnConfirmId(selectedOrder.orderId || selectedOrder.id)}
                       className="gap-2 h-9 text-xs text-destructive hover:bg-danger-subtle hover:text-destructive"
                     >
                       {returning ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
@@ -353,15 +385,21 @@ export function Operations({
           <div className="grid gap-4 border-y border-border py-4 sm:grid-cols-3">
             <div>
               <p className="text-xs uppercase text-muted-foreground">Tiền mặt đầu ca</p>
-              <p className="mt-1 font-mono font-bold text-lg">{vnd(shiftData?.openingCash ?? 2000000)}</p>
+              <p className="mt-1 font-mono font-bold text-lg">
+                {loadingShift ? "Đang tải…" : vnd(shiftData?.openingCash ?? 0)}
+              </p>
             </div>
             <div>
               <p className="text-xs uppercase text-muted-foreground">Doanh thu tiền mặt</p>
-              <p className="mt-1 font-mono font-bold text-lg">{vnd(shiftData?.cashSales ?? 0)}</p>
+              <p className="mt-1 font-mono font-bold text-lg">
+                {loadingShift ? "Đang tải…" : vnd(shiftData?.cashSales ?? 0)}
+              </p>
             </div>
             <div>
               <p className="text-xs uppercase text-muted-foreground">Tổng kỳ vọng trong két</p>
-              <p className="mt-1 font-mono font-bold text-lg text-accent-hover">{vnd(expectedCash)}</p>
+              <p className="mt-1 font-mono font-bold text-lg text-accent-hover">
+                {loadingShift ? "Đang tải…" : vnd(expectedCash)}
+              </p>
             </div>
           </div>
 
@@ -418,13 +456,26 @@ export function Operations({
 
           <Button
             type="submit"
-            disabled={shiftStatus !== "DANG_MO"}
+            disabled={shiftStatus !== "DANG_MO" || loadingShift}
             className="h-12 w-full text-base font-bold"
           >
             Xác nhận nộp báo cáo kết ca (F12)
           </Button>
         </form>
       )}
+      <ConfirmDialog
+        open={returnConfirmId !== null}
+        title={`Xác nhận nhận trả hàng đơn #${returnConfirmId ?? ""}?`}
+        description="Thao tác này sẽ ghi sổ hoàn tồn kho Single Pool trực tiếp vào cơ sở dữ liệu MySQL."
+        confirmLabel="Xác nhận hoàn kho"
+        cancelLabel="Hủy"
+        tone="danger"
+        loading={returning}
+        onConfirm={() => {
+          if (returnConfirmId !== null) void handleReturnOrder(returnConfirmId);
+        }}
+        onClose={() => setReturnConfirmId(null)}
+      />
     </div>
   );
 }

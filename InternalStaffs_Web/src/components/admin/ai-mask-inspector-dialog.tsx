@@ -14,7 +14,6 @@ import { Button } from "@/components/ui/button";
 import { Badge, inputClass } from "@/components/admin/shared";
 import {
   DEEPFASHION2_SUBTYPES,
-  SAMPLE_INSPECTOR_ITEMS,
   VTON_CATEGORY_OPTIONS,
   labelFor,
   type KMeansColor,
@@ -68,27 +67,20 @@ export function AiMaskInspectorDialog({
   onQuickUpdateVton,
   onReanalyze,
 }: AiMaskInspectorDialogProps) {
-  const resolvedItems: InspectorImageItem[] =
-    items.length > 0
-      ? items.map((item, idx) => {
-          const fallback = SAMPLE_INSPECTOR_ITEMS[idx % SAMPLE_INSPECTOR_ITEMS.length];
-          const isSampleItem = item.originalUrl.includes("/assets/samples/");
-          const hasLiveCutout = Boolean(item.cutoutUrl && !item.cutoutUrl.includes("/assets/samples/"));
-          const hasLiveMask = Boolean(item.maskUrl && !item.maskUrl.includes("/assets/samples/"));
-          return {
-            ...item,
-            cutoutUrl: item.cutoutUrl || (isSampleItem ? fallback.cutoutUrl : null),
-            maskUrl: item.maskUrl || (isSampleItem ? fallback.maskUrl : null),
-            r2CutoutKey: item.r2CutoutKey || (isSampleItem ? fallback.r2CutoutKey : null),
-            r2MaskKey: item.r2MaskKey || (isSampleItem ? fallback.r2MaskKey : null),
-            predictedVton: item.predictedVton ?? vtonCategory,
-            predictedSubtype: item.predictedSubtype ?? subtype,
-            bodyPositionNote: item.bodyPositionNote ?? (isSampleItem ? fallback.bodyPositionNote : undefined),
-            confidence: item.confidence ?? (isSampleItem ? fallback.confidence : undefined),
-            isSampleFallback: isSampleItem || (!hasLiveCutout && !hasLiveMask),
-          };
-        })
-      : SAMPLE_INSPECTOR_ITEMS.map((s) => ({ ...s, isSampleFallback: true }));
+  const resolvedItems: InspectorImageItem[] = items.map((item) => {
+    const hasLiveCutout = Boolean(item.cutoutUrl);
+    const hasLiveMask = Boolean(item.maskUrl);
+    return {
+      ...item,
+      cutoutUrl: item.cutoutUrl || null,
+      maskUrl: item.maskUrl || null,
+      r2CutoutKey: item.r2CutoutKey || null,
+      r2MaskKey: item.r2MaskKey || null,
+      predictedVton: item.predictedVton ?? vtonCategory,
+      predictedSubtype: item.predictedSubtype ?? subtype,
+      isSampleFallback: !hasLiveCutout && !hasLiveMask,
+    };
+  });
 
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [zoom, setZoom] = useState(100);
@@ -103,7 +95,7 @@ export function AiMaskInspectorDialog({
   const [savingVton, setSavingVton] = useState(false);
 
   const safeIndex = selectedIndex < resolvedItems.length ? selectedIndex : 0;
-  const current = resolvedItems[safeIndex] ?? resolvedItems[0];
+  const current = resolvedItems[safeIndex] ?? null;
 
   const handleApplyVton = async (nextVton: VtonCategory, nextSubtype: string) => {
     setSavingVton(true);
@@ -201,6 +193,12 @@ export function AiMaskInspectorDialog({
         )}
 
         {/* 3 khung so sánh: Ảnh gốc | PNG bóc tách nền | Agnostic Mask */}
+        {!current ? (
+          <div className="rounded-lg border border-dashed border-border bg-canvas px-6 py-12 text-center text-sm text-muted-foreground">
+            Sản phẩm này chưa có ảnh trang phục nào để soi Mask AI. Hãy tải ít nhất 1 ảnh sản phẩm trong khu vực biến thể màu rồi nhấn <kbd className="rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-xs">Ctrl + M</kbd>.
+          </div>
+        ) : (
+        <>
         <div className="grid gap-4 md:grid-cols-3">
           {/* Panel 1: Ảnh gốc */}
           <div className="flex flex-col rounded-lg border border-border bg-surface p-3">
@@ -446,6 +444,8 @@ export function AiMaskInspectorDialog({
             </div>
           </div>
         </div>
+        </>
+        )}
       </DialogContent>
     </Dialog>
   );

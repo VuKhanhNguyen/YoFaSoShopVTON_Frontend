@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Info,
+  Loader2,
   Lock,
   MessageSquare,
   Pencil,
@@ -13,6 +14,7 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
+  Sparkles,
   Star,
   Unlock,
 } from "lucide-react";
@@ -29,12 +31,10 @@ import {
   type VoucherKind,
 } from "@/lib/admin";
 import { vnd } from "@/lib/pos";
-import { api } from "@/lib/api";
+import { api, catalogImage } from "@/lib/api";
 import { pushToast } from "@/lib/feedback";
 import { vnLabel } from "@/lib/vietnamese-labels";
 import { Badge, Confirm, Field, PageHeading, SubTabs, TablePagination, inputClass } from "./shared";
-
-const fitting = "/assets/vton-fitting.jpg";
 
 type View = "orders" | "vouchers" | "reviews" | "customers";
 
@@ -129,6 +129,42 @@ export function AdminOperations({
   const [photo, setPhoto] = useState(false);
   const [currentPhoto, setCurrentPhoto] = useState<string | null>(null);
   const [replySaved, setReplySaved] = useState<string | null>(null);
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  const [savingReviewId, setSavingReviewId] = useState<string | null>(null);
+  const [aiAssistingId, setAiAssistingId] = useState<string | null>(null);
+  const [reviewAiMap, setReviewAiMap] = useState<
+    Record<
+      string,
+      {
+        sentiment: string;
+        flags: string[];
+        needsAttention: boolean;
+        suggestedReplies: string[];
+      }
+    >
+  >({});
+
+  const handleReviewAiAssist = async (reviewId: string) => {
+    setAiAssistingId(reviewId);
+    try {
+      const res = await api<{
+        sentiment: string;
+        flags: string[];
+        needsAttention: boolean;
+        suggestedReplies: string[];
+      }>("/admin/ai/review-assist", "POST", { reviewId });
+      setReviewAiMap((prev) => ({ ...prev, [reviewId]: res }));
+      pushToast({ tone: "success", title: "AI đã phân tích đánh giá và gợi ý câu trả lời" });
+    } catch (err) {
+      pushToast({
+        tone: "error",
+        title: "Không phân tích được đánh giá bằng AI",
+        detail: err instanceof Error ? err.message : undefined,
+      });
+    } finally {
+      setAiAssistingId(null);
+    }
+  };
 
   // Customer Management state (MySQL DB integrated)
   const [customers, setCustomers] = useState<AdminCustomer[]>([]);
@@ -529,9 +565,18 @@ export function AdminOperations({
         `${nextStatus === "KHOA_TAM_THOI" ? "Khóa" : "Mở khóa"} tài khoản khách hàng ${customerToToggle.username}`,
         `Cập nhật trạng thái người dùng ${customerToToggle.userId}`
       );
+      pushToast({
+        tone: "success",
+        title: nextStatus === "KHOA_TAM_THOI" ? "Đã khóa tài khoản khách hàng" : "Đã mở khóa tài khoản khách hàng",
+        detail: `${customerToToggle.fullName} (@${customerToToggle.username})`,
+      });
       setCustomerToToggle(null);
     } catch (err) {
-      console.error("Lỗi thay đổi trạng thái khách hàng:", err);
+      pushToast({
+        tone: "error",
+        title: "Không cập nhật được trạng thái khách hàng",
+        detail: err instanceof Error ? err.message : undefined,
+      });
     } finally {
       setTogglingStatus(false);
     }
@@ -580,9 +625,12 @@ export function AdminOperations({
         )
       );
       log(`Cập nhật đơn hàng #${editingOrder.id}`, `Người nhận: ${editRecipient.trim()}`);
+      pushToast({ tone: "success", title: `Đã cập nhật đơn hàng #${editingOrder.id}` });
       setEditingOrder(null);
     } catch (err: unknown) {
-      setEditOrderError(err instanceof Error ? err.message : "Cập nhật đơn hàng thất bại.");
+      const msg = err instanceof Error ? err.message : "Cập nhật đơn hàng thất bại.";
+      setEditOrderError(msg);
+      pushToast({ tone: "error", title: msg });
     } finally {
       setUpdatingOrder(false);
     }
@@ -650,8 +698,12 @@ export function AdminOperations({
     safeCustomerPage * CUSTOMER_PAGE_SIZE
   );
 
-  const updateReview = async (id: string, patch: Partial<AdminReview>) => {
-    setReviews(reviews.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const updateReview = async (
+    id: string,
+    patch: Partial<AdminReview>,
+    successTitle?: string
+  ): Promise<boolean> => {
+    setSavingReviewId(id);
     try {
       const target = reviews.find((r) => r.id === id);
       const nextStatus = patch.status
@@ -670,8 +722,22 @@ export function AdminOperations({
         status: nextStatus,
         reply: nextReply,
       });
+      setReviews((prev) =>
+        prev.map((r) => (r.id === id ? { ...r, ...patch, reply: nextReply } : r))
+      );
+      if (successTitle) {
+        pushToast({ tone: "success", title: successTitle });
+      }
+      return true;
     } catch (err) {
-      console.warn("Could not update review on backend:", err);
+      pushToast({
+        tone: "error",
+        title: "Không lưu được kiểm duyệt đánh giá",
+        detail: err instanceof Error ? err.message : undefined,
+      });
+      return false;
+    } finally {
+      setSavingReviewId(null);
     }
   };
 
@@ -1185,21 +1251,22 @@ export function AdminOperations({
                   <Star key={i} className="h-4 w-4 fill-current" />
                 ))}
               </div>
-              <p className="text-sm leading-relaxed">“{r.comment}”</p>
+              <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">“{r.comment}”</p>
               <div className="my-4 flex flex-wrap items-start gap-4">
                 {r.photoUrl && (
                   <Button
                     variant="catalog"
+                    className="h-auto p-1 shrink-0"
                     aria-label="Xem ảnh đánh giá thực tế"
                     onClick={() => {
-                      setCurrentPhoto(r.photoUrl || null);
+                      setCurrentPhoto(catalogImage(r.photoUrl));
                       setPhoto(true);
                     }}
                   >
                     <img
-                      src={r.photoUrl}
+                      src={catalogImage(r.photoUrl)}
                       alt="Ảnh thực tế sản phẩm"
-                      className="h-24 w-20 rounded object-cover"
+                      className="h-[72px] w-[72px] rounded-md border border-border object-cover"
                       loading="lazy"
                     />
                   </Button>
@@ -1207,48 +1274,135 @@ export function AdminOperations({
                 <div className="min-w-0 flex-1">
                   <Field label="Phản hồi chính thức từ YoFaSo">
                     <textarea
-                      className={`${inputClass} h-20 py-2`}
-                      value={r.reply}
-                      onChange={(e) => updateReview(r.id, { reply: e.target.value })}
+                      className={`${inputClass} h-20 py-2 break-words`}
+                      placeholder="Nhập phản hồi của shop dành cho khách hàng..."
+                      value={replyDrafts[r.id] ?? r.reply}
+                      onChange={(e) =>
+                        setReplyDrafts((prev) => ({ ...prev, [r.id]: e.target.value }))
+                      }
                     />
                   </Field>
-                  <Button
-                    className="mt-2"
-                    variant="outline"
-                    size="sm"
-                    disabled={!r.reply.trim()}
-                    onClick={() => {
-                      log(`Phản hồi đánh giá ${r.id}`, r.reply);
-                      setReplySaved(r.id);
-                    }}
-                  >
-                    <MessageSquare />
-                    Gửi phản hồi
-                  </Button>
-                  {replySaved === r.id && (
-                    <span role="status" className="ml-3 text-xs text-success">
-                      Đã gửi phản hồi
-                    </span>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={savingReviewId === r.id || !(replyDrafts[r.id] ?? r.reply).trim()}
+                      onClick={async () => {
+                        const replyText = (replyDrafts[r.id] ?? r.reply).trim();
+                        const ok = await updateReview(
+                          r.id,
+                          { reply: replyText },
+                          "Đã gửi phản hồi đánh giá cho khách hàng"
+                        );
+                        if (ok) {
+                          log(`Phản hồi đánh giá ${r.id}`, replyText);
+                          setReplySaved(r.id);
+                        }
+                      }}
+                    >
+                      <MessageSquare />
+                      Gửi phản hồi
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={aiAssistingId === r.id}
+                      onClick={() => void handleReviewAiAssist(r.id)}
+                    >
+                      {aiAssistingId === r.id ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-3.5 w-3.5 text-accent-hover" />
+                      )}
+                      AI Kiểm tra & Gợi ý trả lời
+                    </Button>
+                    {replySaved === r.id && (
+                      <span role="status" className="text-xs text-success">
+                        Đã gửi phản hồi
+                      </span>
+                    )}
+                  </div>
+                  {reviewAiMap[r.id] && (
+                    <div className="mt-3 rounded-lg border border-accent/35 bg-accent-subtle/40 p-3 text-xs">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge
+                          tone={
+                            reviewAiMap[r.id].sentiment === "TICH_CUC"
+                              ? "success"
+                              : reviewAiMap[r.id].sentiment === "TIEU_CUC"
+                              ? "danger"
+                              : "warning"
+                          }
+                        >
+                          Sắc thái:{" "}
+                          {reviewAiMap[r.id].sentiment === "TICH_CUC"
+                            ? "Tích cực"
+                            : reviewAiMap[r.id].sentiment === "TIEU_CUC"
+                            ? "Tiêu cực"
+                            : "Trung lập"}
+                        </Badge>
+                        {reviewAiMap[r.id].needsAttention && (
+                          <Badge tone="danger">Cần chú ý / Xử lý gấp</Badge>
+                        )}
+                      </div>
+                      {reviewAiMap[r.id].flags.length > 0 && (
+                        <ul className="mt-2 list-disc pl-4 text-destructive">
+                          {reviewAiMap[r.id].flags.map((flag, i) => (
+                            <li key={i}>{flag}</li>
+                          ))}
+                        </ul>
+                      )}
+                      {reviewAiMap[r.id].suggestedReplies.length > 0 && (
+                        <div className="mt-2 space-y-1.5">
+                          <p className="font-semibold text-muted-foreground">
+                            Bấm vào mẫu câu bên dưới để điền vào ô phản hồi (Admin tự duyệt gửi):
+                          </p>
+                          <div className="flex flex-col gap-1.5">
+                            {reviewAiMap[r.id].suggestedReplies.map((sug, i) => (
+                              <button
+                                key={i}
+                                type="button"
+                                onClick={() =>
+                                  setReplyDrafts((prev) => ({ ...prev, [r.id]: sug }))
+                                }
+                                className="rounded-md border border-border bg-surface px-2.5 py-1.5 text-left text-xs text-foreground hover:border-accent hover:bg-muted"
+                              >
+                                {sug}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button
                   variant="success"
-                  disabled={!r.verified || r.status === "HIEN_THI"}
-                  onClick={() => {
-                    void updateReview(r.id, { status: "HIEN_THI" });
-                    log(`Duyệt hiển thị đánh giá ${r.id}`, "Mua hàng xác thực");
+                  disabled={savingReviewId === r.id || !r.verified || r.status === "HIEN_THI"}
+                  onClick={async () => {
+                    const replyText = (replyDrafts[r.id] ?? r.reply).trim();
+                    const ok = await updateReview(
+                      r.id,
+                      { status: "HIEN_THI", ...(replyText ? { reply: replyText } : {}) },
+                      `Đã duyệt hiển thị đánh giá ${r.id}`
+                    );
+                    if (ok) log(`Duyệt hiển thị đánh giá ${r.id}`, "Mua hàng xác thực");
                   }}
                 >
                   Duyệt hiển thị
                 </Button>
                 <Button
                   variant="outline"
-                  disabled={r.status === "DA_AN"}
-                  onClick={() => {
-                    void updateReview(r.id, { status: "DA_AN" });
-                    log(`Ẩn đánh giá ${r.id}`, "Kiểm duyệt vi phạm");
+                  disabled={savingReviewId === r.id || r.status === "DA_AN"}
+                  onClick={async () => {
+                    const ok = await updateReview(
+                      r.id,
+                      { status: "DA_AN" },
+                      `Đã ẩn đánh giá vi phạm ${r.id}`
+                    );
+                    if (ok) log(`Ẩn đánh giá ${r.id}`, "Kiểm duyệt vi phạm");
                   }}
                 >
                   Ẩn vi phạm
@@ -1544,24 +1698,37 @@ export function AdminOperations({
               </Button>
               <Button
                 disabled={!address.trim()}
-                onClick={() => {
+                onClick={async () => {
                   if (!note.trim()) {
                     setError("Nhập giải trình cho thay đổi / khiếu nại.");
                     return;
                   }
-                  setOrders(
-                    orders.map((o) =>
-                      o.id === selected.id
-                        ? {
-                            ...o,
-                            address,
-                            history: [...o.history, `Chủ shop cập nhật: ${note}`],
-                          }
-                        : o
-                    )
-                  );
-                  log(`Cập nhật đơn ${selected.id}`, note);
-                  setDetail(null);
+                  try {
+                    await api(`/admin/orders/${selected.id}`, "PATCH", {
+                      recipientName: selected.customer,
+                      phone: selected.phone,
+                      address: address.trim(),
+                      note: note.trim(),
+                    });
+                    setOrders(
+                      orders.map((o) =>
+                        o.id === selected.id
+                          ? {
+                              ...o,
+                              address: address.trim(),
+                              history: [...o.history, `Chủ shop cập nhật: ${note.trim()}`],
+                            }
+                          : o
+                      )
+                    );
+                    log(`Cập nhật đơn ${selected.id}`, note.trim());
+                    pushToast({ tone: "success", title: `Đã lưu can thiệp đơn ${selected.id}` });
+                    setDetail(null);
+                  } catch (err) {
+                    const msg = err instanceof Error ? err.message : "Không thể cập nhật đơn hàng.";
+                    setError(msg);
+                    pushToast({ tone: "error", title: msg });
+                  }
                 }}
               >
                 Lưu can thiệp
@@ -1604,6 +1771,7 @@ export function AdminOperations({
               )
             );
             log(`Hủy đơn ${selected.id}`, note);
+            pushToast({ tone: "success", title: `Đã hủy đơn hàng ${selected.id}` });
             setCancel(false);
             setDetail(null);
           }}
@@ -1695,11 +1863,14 @@ export function AdminOperations({
                     endsAt: new Date(draft.expires + "T23:59:59Z").toISOString(),
                   });
                   await loadVouchers();
-                } catch {
-                  setVouchers([...vouchers, draft]);
+                  log(`Tạo voucher ${draft.code}`, draft.name);
+                  pushToast({ tone: "success", title: `Đã phát hành voucher ${draft.code}` });
+                  setNewVoucher(false);
+                } catch (err) {
+                  const msg = err instanceof Error ? err.message : "Không thể phát hành voucher.";
+                  setError(msg);
+                  pushToast({ tone: "error", title: msg });
                 }
-                log(`Tạo voucher ${draft.code}`, draft.name);
-                setNewVoucher(false);
               }}
             >
               Phát hành voucher
@@ -1867,14 +2038,18 @@ export function AdminOperations({
 
       {photo && (
         <Dialog open onOpenChange={setPhoto}>
-          <DialogContent>
+          <DialogContent className="max-w-2xl">
             <DialogTitle>Ảnh đánh giá thực tế</DialogTitle>
             <DialogDescription>Ảnh chụp thực tế từ khách hàng đánh giá đơn hàng.</DialogDescription>
-            <img
-              src={currentPhoto || fitting}
-              alt="Ảnh đánh giá thực tế"
-              className="max-h-96 w-full object-contain"
-            />
+            {currentPhoto ? (
+              <img
+                src={currentPhoto}
+                alt="Ảnh đánh giá thực tế"
+                className="mx-auto max-h-[75vh] w-auto max-w-full rounded-md object-contain"
+              />
+            ) : (
+              <p className="py-8 text-center text-sm text-muted-foreground">Không có ảnh đính kèm.</p>
+            )}
           </DialogContent>
         </Dialog>
       )}

@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Banknote, CreditCard, QrCode, CheckCircle2, Printer, Loader2, Download, FileText } from "lucide-react";
-import { QRCodeSVG } from "qrcode.react";
+import { Banknote, CreditCard, QrCode, CheckCircle2, Printer, Loader2, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Receipt } from "./receipt";
 import { cashChange, orderDue, type Method, type Order } from "@/lib/pos-workflows";
 import { vnd } from "@/lib/pos";
 import { exportReceiptPdf } from "@/lib/receipt-pdf";
+import { pushToast } from "@/lib/feedback";
 
 export function Payment({
   draft,
@@ -33,10 +33,19 @@ export function Payment({
     if (downloading) return;
     setDownloading(true);
     try {
-      await exportReceiptPdf(orderToPrint);
+      const filename = await exportReceiptPdf(orderToPrint);
+      pushToast({
+        tone: "success",
+        title: "Đã xuất hóa đơn POS (PDF A5)",
+        detail: `Đã lưu tự động vào Downloads: ${filename}`,
+      });
       onClose?.();
     } catch (err) {
-      console.error("Lỗi xuất PDF hóa đơn:", err);
+      pushToast({
+        tone: "error",
+        title: "Không thể xuất PDF hóa đơn",
+        detail: err instanceof Error ? err.message : "Vui lòng thử lại.",
+      });
     } finally {
       setDownloading(false);
     }
@@ -93,19 +102,19 @@ export function Payment({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <Button
             className="w-full gap-2 h-12 text-sm font-bold bg-primary hover:bg-primary/90 shadow-sm"
-            onClick={() => handleAutoPrint(completed)}
+            onClick={() => void handleAutoPrint(completed)}
             disabled={downloading}
           >
-            {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
-            In hóa đơn (Ctrl + P)
+            {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            Tải hóa đơn PDF A5 (Ctrl + P)
           </Button>
           <Button
             variant="outline"
             className="w-full gap-2 h-12 text-sm font-semibold"
             onClick={() => onPrint(completed)}
           >
-            <Download className="h-4 w-4" />
-            Tải hóa đơn (Tự chọn chỗ lưu)
+            <Printer className="h-4 w-4" />
+            In trực tiếp trình duyệt
           </Button>
         </div>
 
@@ -192,25 +201,28 @@ export function Payment({
         ) : method === "QR" ? (
           <div className="space-y-3 text-center rounded-xl border border-border p-4 bg-surface">
             <div className="relative inline-block">
-              <QRCodeSVG
-                value={`DEMO|NAPAS247|MBBANK|0987654321|${due}|POS ${draft.id}`}
-                size={220}
-                className="mx-auto max-w-full rounded-md border border-border bg-surface p-3"
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={`https://img.vietqr.io/image/TCB-19038917693011-compact2.png?amount=${Math.max(0, Math.round(due))}&addInfo=${encodeURIComponent(`YFS POS ${draft.id}`)}&accountName=NGUYEN%20VU%20KHANH`}
+                alt="Mã VietQR thanh toán YoFaSo Shop"
+                className="mx-auto h-60 w-auto max-w-full rounded-md border border-border bg-white p-2 object-contain"
               />
-              {!received && (
-                <div className="absolute inset-0 rounded-md border-2 border-accent animate-ping pointer-events-none opacity-25" />
-              )}
             </div>
             <p className="font-semibold text-base">
-              MBBank · <span className="font-mono text-accent-hover font-bold">0987654321</span>
+              Techcombank · <span className="font-mono text-accent-hover font-bold">19038917693011</span>
             </p>
-            <p className="font-mono text-sm text-muted-foreground">Nội dung chuyển khoản: POS {draft.id}</p>
-            <p className={received ? "text-success font-semibold" : "text-warning font-medium animate-pulse"}>
-              {received ? "Đã nhận xác nhận thanh toán Webhook Napas247" : "Đang chờ khách quét mã VietQR..."}
-            </p>
-            <Button variant="outline" disabled={received || submitting} onClick={() => setReceived(true)} className="w-full">
-              Mô phỏng nhận tiền thành công (Webhook)
-            </Button>
+            <p className="text-xs text-muted-foreground">Chủ tài khoản: NGUYEN VU KHANH</p>
+            <p className="font-mono text-sm text-muted-foreground">Nội dung chuyển khoản: YFS POS {draft.id}</p>
+            <label className="flex items-center justify-center gap-2 rounded-lg border border-border bg-surface-muted px-3 py-2.5 text-sm font-semibold cursor-pointer">
+              <input
+                type="checkbox"
+                checked={received}
+                disabled={submitting}
+                onChange={(e) => setReceived(e.target.checked)}
+                className="h-4 w-4 accent-[var(--color-success)]"
+              />
+              Thu ngân xác nhận đã nhận đủ tiền chuyển khoản vào tài khoản shop
+            </label>
           </div>
         ) : (
           <div className="space-y-4 rounded-xl border border-border p-5 bg-surface">

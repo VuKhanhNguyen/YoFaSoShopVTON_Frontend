@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Clipboard,
@@ -31,8 +31,24 @@ export default function CheckoutScreen() {
   const cart = useResource<Row[]>("/cart");
   const addresses = useResource<Row[]>("/me/addresses");
 
-  const params = useLocalSearchParams<{ paymentMethod?: string; voucher?: string }>();
+  const params = useLocalSearchParams<{
+    paymentMethod?: string;
+    voucher?: string;
+    selectedVariantIds?: string;
+  }>();
   const [selectedAddressId, setSelectedAddressId] = useState<string>("");
+  const [quote, setQuote] = useState<{
+    subtotal: number;
+    comboDiscount: number;
+    comboSessionId?: string | null;
+    voucherDiscount: number;
+    discount: number;
+    shippingFee: number;
+    shippingFreeReason?: string | null;
+    total: number;
+    discountDetails?: Array<{ code: string; label: string; kind: string; amount: number }>;
+  } | null>(null);
+  const [discountExpanded, setDiscountExpanded] = useState(true);
   const [quickPhone, setQuickPhone] = useState("");
   const [showPhoneInput, setShowPhoneInput] = useState(false);
   const [phoneBusy, setPhoneBusy] = useState(false);
@@ -135,27 +151,62 @@ export default function CheckoutScreen() {
     prevListRef.current = addressList;
   }, [addressList]);
 
-  const cartItems = cart.data || [];
-  const subtotal = cartItems.reduce(
+  const selectedFilterSet = useMemo(() => {
+    const raw = (params.selectedVariantIds || "").trim();
+    if (!raw) return null;
+    return new Set(raw.split(",").map((s) => s.trim()).filter(Boolean));
+  }, [params.selectedVariantIds]);
+
+  const cartItems = useMemo(() => {
+    const all = cart.data || [];
+    if (!selectedFilterSet) return all;
+    return all.filter((r) => selectedFilterSet.has(String(r.variantId)));
+  }, [cart.data, selectedFilterSet]);
+
+  const voucherCode = params.voucher;
+  const quoteKey = useMemo(
+    () =>
+      JSON.stringify({
+        items: cartItems.map((r) => ({ variantId: String(r.variantId), quantity: Number(r.quantity || 1) })),
+        voucher: voucherCode || "",
+      }),
+    [cartItems, voucherCode]
+  );
+
+  useEffect(() => {
+    if (cartItems.length === 0) {
+      setQuote(null);
+      return;
+    }
+    let cancelled = false;
+    api<NonNullable<typeof quote>>("/promotions/quote", "POST", {
+      items: cartItems.map((r) => ({ variantId: String(r.variantId), quantity: Number(r.quantity || 1) })),
+      ...(voucherCode ? { voucher: voucherCode } : {}),
+    })
+      .then((res) => {
+        if (!cancelled) setQuote(res);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [quoteKey, cartItems.length, voucherCode]);
+
+  const localSubtotal = cartItems.reduce(
     (sum, r) => sum + Number(r.unitPrice || 0) * Number(r.quantity || 1),
     0
   );
-  const voucherCode = params.voucher;
-  let discount = 0;
-  let shippingFee = subtotal > 1000000 || subtotal === 0 ? 0 : 30000;
-
-  if (voucherCode) {
-    if (voucherCode === "BIRTHDAY15") {
-      discount = Math.round(subtotal * 0.15);
-    } else if (voucherCode === "FREESHIP") {
-      if (subtotal >= 1000000) {
-        shippingFee = 0;
-      }
-    } else {
-      discount = Math.round(subtotal * 0.05);
-    }
-  }
-  const total = Math.max(0, subtotal - discount + shippingFee);
+  const subtotal = quote ? Number(quote.subtotal ?? localSubtotal) : localSubtotal;
+  const discount = quote ? Number(quote.discount ?? 0) : 0;
+  const shippingFee = quote
+    ? Number(quote.shippingFee ?? 0)
+    : localSubtotal >= 1000000 || localSubtotal === 0
+    ? 0
+    : 30000;
+  const total = quote
+    ? Number(quote.total ?? Math.max(0, subtotal - discount + shippingFee))
+    : Math.max(0, subtotal - discount + shippingFee);
+  const discountDetails = quote?.discountDetails || [];
 
   const handlePlaceOrder = async () => {
     if (cartItems.length === 0) {
@@ -187,6 +238,7 @@ export default function CheckoutScreen() {
               ? "VIETQR_CHUYEN_KHOAN_ONLINE"
               : "COD_TIEN_MAT_KHI_NHAN",
           voucher: voucherCode,
+          ...(quote?.comboSessionId ? { sessionId: quote.comboSessionId } : {}),
         },
         requestKey()
       );
@@ -537,20 +589,61 @@ export default function CheckoutScreen() {
         {/* Bill Breakdown */}
         <View style={st.breakdownCard}>
           <View style={st.breakdownRow}>
-            <Text style={st.breakdownLabel}>Tiền hàng</Text>
+            <Text style={st.breakdownLabel}>Tiền hàng ({cartItems.length} món)</Text>
             <Text style={st.breakdownVal}>{formatVND(subtotal)}</Text>
           </View>
-          <View style={st.breakdownRow}>
-            <Text style={st.breakdownLabel}>
-              Ưu đãi Voucher {voucherCode ? `(${voucherCode})` : ""}
-            </Text>
+          <Pressable
+            onPress={() => discountDetails.length > 0 && setDiscountExpanded((v) => !v)}
+            style={st.breakdownRow}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <Text style={st.breakdownLabel}>Tổng ưu đãi giảm giá</Text>
+              {discountDetails.length > 0 && (
+                <Ionicons
+                  name={discountExpanded ? "chevron-up" : "chevron-down"}
+                  size={13}
+                  color={Colors.champagneDeep}
+                />
+              )}
+            </View>
             <Text style={[st.breakdownVal, discount > 0 && { color: Colors.statusSuccess }]}>
               {discount > 0 ? `−${formatVND(discount)}` : "Không áp dụng"}
             </Text>
-          </View>
+          </Pressable>
+          {discountExpanded && discountDetails.length > 0 && (
+            <View
+              style={{
+                backgroundColor: Colors.surfaceMuted,
+                borderRadius: Radii.md,
+                borderWidth: 1,
+                borderColor: Colors.borderHairline,
+                padding: 10,
+                gap: 6,
+              }}
+            >
+              {discountDetails.map((d, i) => (
+                <View key={`${d.code}-${i}`} style={st.breakdownRow}>
+                  <Text
+                    style={{
+                      flex: 1,
+                      fontSize: 11.5,
+                      fontFamily: "Jakarta",
+                      color: Colors.textSecondary,
+                      paddingRight: 8,
+                    }}
+                  >
+                    • {d.label}
+                  </Text>
+                  <Text style={{ fontSize: 12, fontFamily: "Mono", color: Colors.statusSuccess }}>
+                    −{formatVND(Number(d.amount || 0))}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
           <View style={st.breakdownRow}>
             <Text style={st.breakdownLabel}>Phí vận chuyển giao tận nơi</Text>
-            <Text style={st.breakdownVal}>
+            <Text style={[st.breakdownVal, shippingFee === 0 && subtotal > 0 && { color: Colors.statusSuccess }]}>
               {shippingFee === 0 ? "Miễn phí" : formatVND(shippingFee)}
             </Text>
           </View>
@@ -666,7 +759,7 @@ export default function CheckoutScreen() {
             </View>
             <View style={st.bankInfoRow}>
               <Text style={st.bankInfoLabel}>Số tiền:</Text>
-              <Text style={[st.bankInfoValMono, { color: Colors.statusSuccess, fontWeight: "700" }]}>
+              <Text style={[st.bankInfoValMono, { color: Colors.statusSuccess }]}>
                 {formatVND(total)}
               </Text>
             </View>
@@ -802,7 +895,6 @@ const st = StyleSheet.create({
     fontSize: 13,
     fontFamily: "Mono",
     color: Colors.primary,
-    fontWeight: "600",
     marginTop: 4,
   },
   payCard: {
@@ -868,7 +960,6 @@ const st = StyleSheet.create({
   totalVal: {
     fontSize: 19,
     fontFamily: "Mono",
-    fontWeight: "700",
     color: Colors.statusSuccess,
   },
   vietQrContainer: {

@@ -11,11 +11,12 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { AlertTriangle, CheckCircle2, ChevronRight, Download, RefreshCw } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronRight, Download, Loader2, RefreshCw, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { vnd } from "@/lib/pos";
 import { api } from "@/lib/api";
+import { pushToast } from "@/lib/feedback";
 import { Badge, Field, Metric, PageHeading, inputClass } from "./shared";
 
 type Period = "today" | "week" | "month" | "all" | "custom";
@@ -113,10 +114,30 @@ const CUSTOMER_TIER_NAMES: Record<string, string> = {
   VANG_LAI: "Khách vãng lai",
 };
 
+interface ExecutiveAiSummary {
+  generatedAt: string;
+  summaryBullets: string[];
+  urgentAlerts: string[];
+  inventoryActions: string[];
+  lowStockCount?: number;
+  pendingReviews?: number;
+  pendingShifts?: number;
+  pendingOrders?: number;
+  modelUsed?: string;
+  usedRemote?: boolean;
+  cached?: boolean;
+}
+
+function isoDateDaysAgo(daysAgo: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - daysAgo);
+  return d.toISOString().slice(0, 10);
+}
+
 export function Finance() {
   const [period, setPeriod] = useState<Period>("month");
-  const [start, setStart] = useState("2026-09-01");
-  const [end, setEnd] = useState("2026-10-31");
+  const [start, setStart] = useState(() => isoDateDaysAgo(30));
+  const [end, setEnd] = useState(() => isoDateDaysAgo(0));
   const [channel, setChannel] = useState("all");
 
   // Dữ liệu từ MySQL thật
@@ -124,6 +145,31 @@ export function Finance() {
   const [loadingFinance, setLoadingFinance] = useState(false);
   const [activeFlowId, setActiveFlowId] = useState<string | null>(null);
   const [localFlows, setLocalFlows] = useState<MoneyFlowItem[]>([]);
+  const [aiSummary, setAiSummary] = useState<ExecutiveAiSummary | null>(null);
+  const [loadingAiSummary, setLoadingAiSummary] = useState(false);
+
+  const loadAiExecutiveSummary = async (forceRefresh = false) => {
+    setLoadingAiSummary(true);
+    try {
+      const data = await api<ExecutiveAiSummary>("/admin/ai/executive-summary", "POST", {
+        forceRefresh,
+      });
+      setAiSummary(data);
+      pushToast({
+        tone: "success",
+        title: "Đã tạo tóm tắt vận hành AI",
+        detail: data.cached ? "Dùng bản cache trong 10 phút gần nhất" : `Nguồn: ${data.modelUsed || "AI"}`,
+      });
+    } catch (err) {
+      pushToast({
+        tone: "error",
+        title: "Không tạo được tóm tắt AI",
+        detail: err instanceof Error ? err.message : undefined,
+      });
+    } finally {
+      setLoadingAiSummary(false);
+    }
+  };
 
   const loadFinanceReport = async () => {
     setLoadingFinance(true);
@@ -160,7 +206,7 @@ export function Finance() {
     if (dailyList.length > 0) {
       return dailyList[dailyList.length - 1].day;
     }
-    return "2026-10-28";
+    return isoDateDaysAgo(0);
   }, [dailyList]);
 
   // Cấu hình dữ liệu cho Line Chart đa kênh theo 5 tab lọc
@@ -383,6 +429,7 @@ export function Finance() {
     a.download = `yofaso-doi-soat-tai-chinh-${period}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+    pushToast({ tone: "success", title: "Đã tải file CSV đối soát tài chính" });
   };
 
   return (
@@ -494,6 +541,94 @@ export function Finance() {
           positive={(apiData?.returnRate || 0) <= 5}
         />
       </div>
+
+      {/* TRỢ LÝ AI TÓM TẮT KINH DOANH & CẢNH BÁO TỒN KHO (Phase 5) */}
+      <section className="mt-6 rounded-xl border border-accent/35 bg-accent-subtle/40 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-accent">
+              <Sparkles className="h-4 w-4" />
+            </span>
+            <div>
+              <h2 className="text-sm font-semibold text-foreground">
+                Trợ lý AI Tóm tắt kinh doanh & Cảnh báo tồn kho
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                Tổng hợp hành động ưu tiên từ số liệu doanh thu MySQL, tồn kho thấp và đầu việc chờ duyệt.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {aiSummary && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={loadingAiSummary}
+                onClick={() => void loadAiExecutiveSummary(true)}
+              >
+                <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loadingAiSummary ? "animate-spin" : ""}`} />
+                Phân tích mới
+              </Button>
+            )}
+            <Button
+              size="sm"
+              disabled={loadingAiSummary}
+              onClick={() => void loadAiExecutiveSummary(false)}
+            >
+              {loadingAiSummary ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              {aiSummary ? "Cập nhật tóm tắt AI" : "Phân tích AI tổng quan"}
+            </Button>
+          </div>
+        </div>
+
+        {aiSummary && (
+          <div className="mt-4 grid gap-4 md:grid-cols-3">
+            <div className="rounded-lg border border-border bg-surface p-3.5">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-accent-hover">
+                Điểm nhấn kinh doanh
+              </p>
+              <ul className="space-y-1.5 text-xs leading-relaxed text-foreground">
+                {aiSummary.summaryBullets.map((b, idx) => (
+                  <li key={idx} className="flex gap-2">
+                    <span className="text-accent-hover">•</span>
+                    <span>{b}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="rounded-lg border border-border bg-surface p-3.5">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-warning">
+                Cảnh báo cần xử lý ngay
+              </p>
+              <ul className="space-y-1.5 text-xs leading-relaxed text-foreground">
+                {aiSummary.urgentAlerts.map((a, idx) => (
+                  <li key={idx} className="flex gap-2">
+                    <span className="text-warning">•</span>
+                    <span>{a}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="rounded-lg border border-border bg-surface p-3.5">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-success">
+                Hành động tồn kho đề xuất
+              </p>
+              <ul className="space-y-1.5 text-xs leading-relaxed text-foreground">
+                {aiSummary.inventoryActions.map((act, idx) => (
+                  <li key={idx} className="flex gap-2">
+                    <span className="text-success">•</span>
+                    <span>{act}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
+      </section>
 
       {/* 2) BIỂU ĐỒ ĐƯỜNG DOANH THU ĐA KÊNH FULL WIDTH (LINE GRAPH CÓ CHẤM TRÒN) */}
       <section className="mt-7 w-full rounded-xl border border-border bg-surface p-5 shadow-sm">

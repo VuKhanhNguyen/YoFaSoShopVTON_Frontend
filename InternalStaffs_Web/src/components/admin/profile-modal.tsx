@@ -31,6 +31,7 @@ import {
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { api, ApiError } from "@/lib/api";
 import { useAuth, ACCOUNTS } from "@/lib/auth";
+import { pushToast } from "@/lib/feedback";
 
 interface UserProfileData {
   userId?: string;
@@ -160,6 +161,7 @@ export function ProfileModal({
     setLoggingOut(true);
     try {
       await logout();
+      pushToast({ tone: "info", title: "Đã đăng xuất khỏi YoFaSo Portal" });
       onClose();
       router.push("/login");
     } finally {
@@ -512,12 +514,12 @@ export function ProfileModal({
       }
 
       setMessage({ text: "Cập nhật thông tin cá nhân và địa chỉ thành công!", type: "success" });
+      pushToast({ tone: "success", title: "Đã cập nhật hồ sơ & địa chỉ thành công" });
       setEditOpen(false); // Đóng popup chỉnh sửa sau khi lưu thành công
     } catch (err: unknown) {
-      setMessage({
-        text: err instanceof ApiError ? err.message : "Cập nhật hồ sơ thất bại.",
-        type: "error",
-      });
+      const msg = err instanceof ApiError ? err.message : "Cập nhật hồ sơ thất bại.";
+      setMessage({ text: msg, type: "error" });
+      pushToast({ tone: "error", title: msg });
     } finally {
       setSaving(false);
     }
@@ -529,12 +531,16 @@ export function ProfileModal({
     if (!file) return;
 
     if (!file.type.includes("png") && !file.type.includes("jpeg")) {
-      setMessage({ text: "Chỉ chấp nhận file ảnh định dạng PNG hoặc JPEG.", type: "error" });
+      const msg = "Chỉ chấp nhận file ảnh định dạng PNG hoặc JPEG.";
+      setMessage({ text: msg, type: "error" });
+      pushToast({ tone: "warning", title: msg });
       return;
     }
 
     if (file.size > 10 * 1024 * 1024) {
-      setMessage({ text: "Dung lượng ảnh tối đa là 10 MB.", type: "error" });
+      const msg = "Dung lượng ảnh tối đa là 10 MB.";
+      setMessage({ text: msg, type: "error" });
+      pushToast({ tone: "warning", title: msg });
       return;
     }
 
@@ -560,11 +566,11 @@ export function ProfileModal({
         }
       }
       setMessage({ text: "Đã cập nhật ảnh đại diện lên Cloudflare R2 thành công!", type: "success" });
+      pushToast({ tone: "success", title: "Đã cập nhật ảnh đại diện thành công" });
     } catch (err: unknown) {
-      setMessage({
-        text: err instanceof ApiError ? err.message : "Tải ảnh đại diện thất bại.",
-        type: "error",
-      });
+      const msg = err instanceof ApiError ? err.message : "Tải ảnh đại diện thất bại.";
+      setMessage({ text: msg, type: "error" });
+      pushToast({ tone: "error", title: msg });
     } finally {
       setUploadingAvatar(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -590,11 +596,11 @@ export function ProfileModal({
         text: "Mã OTP đã được gửi đến email quản trị viên. Vui lòng kiểm tra hộp thư!",
         type: "success",
       });
+      pushToast({ tone: "success", title: "Đã gửi mã OTP đến email quản trị viên" });
     } catch (err: unknown) {
-      setMessage({
-        text: err instanceof ApiError ? err.message : "Không thể gửi mã OTP.",
-        type: "error",
-      });
+      const msg = err instanceof ApiError ? err.message : "Không thể gửi mã OTP.";
+      setMessage({ text: msg, type: "error" });
+      pushToast({ tone: "error", title: msg });
     }
   };
 
@@ -626,15 +632,15 @@ export function ProfileModal({
           text: "Đổi mật khẩu tài khoản quản trị thành công! Mật khẩu mới đã có hiệu lực.",
           type: "success",
         });
+        pushToast({ tone: "success", title: "Đổi mật khẩu quản trị thành công!" });
         setOtpSent(false);
         setOtp("");
         setNewPassword("");
         setConfirmPassword("");
       } catch (err: unknown) {
-        setMessage({
-          text: err instanceof ApiError ? err.message : "Đổi mật khẩu thất bại. Kiểm tra mã OTP.",
-          type: "error",
-        });
+        const msg = err instanceof ApiError ? err.message : "Đổi mật khẩu thất bại. Kiểm tra mã OTP.";
+        setMessage({ text: msg, type: "error" });
+        pushToast({ tone: "error", title: msg });
       }
     });
   };

@@ -25,6 +25,7 @@ const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 const SCORE_RING_CIRCUMFERENCE = 2 * Math.PI * 38;
 
 export type RecommendedTryOnItem = {
+  recommendationId?: string;
   productId: string;
   variantId: string;
   category: string;
@@ -65,7 +66,7 @@ export type OutfitScoringProps = {
   onTry?: (item: RecommendedTryOnItem) => void;
   onScoreUpdated?: (update: { total: number; tier?: string; tierLabel?: string }) => void;
   onSingleBuy?: () => void;
-  onComboBuy?: (secondVariantId?: string) => void;
+  onComboBuy?: (secondVariantId?: string, secondRecommendationId?: string) => void;
 };
 
 function tierVisual(total: number, rawTier?: string) {
@@ -264,14 +265,42 @@ export function OutfitScoring({
     pattern: String((score?.breakdown as any)?.pattern?.stylistNote || ""),
   };
 
+  function markLocalStatus(recommendationId: unknown, nextStatus: string) {
+    const recId = recommendationId ? String(recommendationId) : "";
+    if (!recId) return;
+    const rank: Record<string, number> = {
+      CHUA_XEM: 0,
+      DA_THU_THEM: 1,
+      DA_THEM_GIO_HANG: 2,
+      DA_MUA: 3,
+    };
+    setSuggestions((prev) =>
+      prev.map((item) => {
+        if (String(item.recommendationId || "") !== recId) return item;
+        const cur = String(item.status || "CHUA_XEM");
+        return (rank[nextStatus] ?? 0) > (rank[cur] ?? 0)
+          ? { ...item, status: nextStatus }
+          : item;
+      })
+    );
+  }
+
   function handleTrySuggestion(r: Row) {
     const prodId = String(r.productId || "");
     const varId = String(r.variantId || "");
+    const recId = r.recommendationId ? String(r.recommendationId) : undefined;
     if (!prodId || !varId || !onTry) return;
+    if (recId) {
+      markLocalStatus(recId, "DA_THU_THEM");
+      void api(`/scoring/recommendations/${recId}/interaction`, "PATCH", {
+        status: "DA_THU_THEM",
+      }).catch(() => {});
+    }
     const targetCategory = String(
       r.vtonCategory || (category === "upper_body" ? "lower_body" : "upper_body")
     );
     onTry({
+      recommendationId: recId,
       productId: prodId,
       variantId: varId,
       category: targetCategory,
@@ -282,7 +311,13 @@ export function OutfitScoring({
   }
 
   const highestScore = suggestions.length > 0 ? Number(suggestions[0].projectedScore || 0) : 0;
+  const comboTargetSuggestion = second
+    ? suggestions.find((s) => String(s.variantId) === second)
+    : suggestions[0];
   const comboTargetVariantId = second || (suggestions[0]?.variantId ? String(suggestions[0].variantId) : undefined);
+  const comboTargetRecId = comboTargetSuggestion?.recommendationId
+    ? String(comboTargetSuggestion.recommendationId)
+    : undefined;
   const ringStroke = visual.color;
 
   const reducedMotion = useReducedMotion();
@@ -517,9 +552,10 @@ export function OutfitScoring({
                               quantity: 1,
                             });
                             if (r.recommendationId) {
+                              markLocalStatus(r.recommendationId, "DA_THEM_GIO_HANG");
                               await api(`/scoring/recommendations/${r.recommendationId}/interaction`, "PATCH", {
                                 status: "DA_THEM_GIO_HANG",
-                              });
+                              }).catch(() => {});
                             }
                             Alert.alert("Đã thêm", `${r.name} đã vào túi đồ của bạn.`);
                           })
@@ -542,7 +578,13 @@ export function OutfitScoring({
           <Text style={st.singleBtnTitle}>Mua riêng món này</Text>
         </ScalePressable>
 
-        <ScalePressable style={st.comboBtn} onPress={() => onComboBuy?.(comboTargetVariantId)}>
+        <ScalePressable
+          style={st.comboBtn}
+          onPress={() => {
+            if (comboTargetRecId) markLocalStatus(comboTargetRecId, "DA_THEM_GIO_HANG");
+            onComboBuy?.(comboTargetVariantId, comboTargetRecId);
+          }}
+        >
           <Text style={st.comboBtnTitle}>Mua combo (-5%)</Text>
           <Text style={st.comboBtnSub}>Ưu đãi trọn bộ</Text>
         </ScalePressable>

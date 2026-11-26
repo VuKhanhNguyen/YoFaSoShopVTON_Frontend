@@ -14,6 +14,20 @@ import type {
 
 WebBrowser.maybeCompleteAuthSession();
 
+/** Khử trùng lặp đổi one-time OAuth code cấp module (ngăn race giữa WebBrowser và deep-link). */
+const OAUTH_EXCHANGE_TTL_MS = 2 * 60 * 1000;
+const oauthExchangeCache = new Map<string, { promise: Promise<OAuthStartResult>; at: number }>();
+let activeNativeOAuth: { target: "/auth" | "/settings"; startedAt: number } | null = null;
+let lastNativeOAuthTarget: "/auth" | "/settings" = "/auth";
+
+export function isNativeOAuthInProgress(): boolean {
+  return activeNativeOAuth !== null && Date.now() - activeNativeOAuth.startedAt < 5 * 60 * 1000;
+}
+
+export function getOAuthFallbackTarget(): "/auth" | "/settings" {
+  return activeNativeOAuth?.target ?? lastNativeOAuthTarget;
+}
+
 export type OAuthStartResult =
   | { status: "REDIRECTED" }
   | { status: "CANCELLED" }
@@ -65,27 +79,42 @@ export async function getOAuthProvidersStatus(): Promise<{
   return api<{ google: boolean; facebook: boolean }>("/auth/oauth/providers", "GET");
 }
 
-/** Đổi one-time code từ callback Backend lấy JWT phiên hoặc yêu cầu xác nhận liên kết trùng email. */
+/** Đổi one-time code từ callback Backend lấy JWT phiên hoặc yêu cầu xác nhận liên kết trùng email (đã khử trùng lặp). */
 export async function exchangeOAuthCode(code: string): Promise<OAuthStartResult> {
-  const res = await api<OAuthExchangeResponse>("/auth/oauth/exchange", "POST", { code });
-  if (res.status === "AUTHENTICATED") {
-    const user = await completeSession(res, true);
-    await AsyncStorage.setItem("yofaso.onboarding.v1", "seen").catch(() => {});
+  const cleanCode = code.trim();
+  const now = Date.now();
+  for (const [k, entry] of oauthExchangeCache.entries()) {
+    if (now - entry.at > OAUTH_EXCHANGE_TTL_MS) oauthExchangeCache.delete(k);
+  }
+  const existing = oauthExchangeCache.get(cleanCode);
+  if (existing) {
+    return existing.promise;
+  }
+
+  const promise = (async (): Promise<OAuthStartResult> => {
+    const res = await api<OAuthExchangeResponse>("/auth/oauth/exchange", "POST", { code: cleanCode });
+    if (res.status === "AUTHENTICATED") {
+      const user = await completeSession(res, true);
+      await AsyncStorage.setItem("yofaso.onboarding.v1", "seen").catch(() => {});
+      return {
+        status: "AUTHENTICATED",
+        user,
+        provider: res.provider,
+        isNewUser: res.isNewUser,
+      };
+    }
+    if (res.status === "LINK_REQUIRED") {
+      return res;
+    }
     return {
-      status: "AUTHENTICATED",
-      user,
+      status: "LINKED",
       provider: res.provider,
-      isNewUser: res.isNewUser,
+      linkedAccounts: res.linkedAccounts || [],
     };
-  }
-  if (res.status === "LINK_REQUIRED") {
-    return res;
-  }
-  return {
-    status: "LINKED",
-    provider: res.provider,
-    linkedAccounts: res.linkedAccounts || [],
-  };
+  })();
+
+  oauthExchangeCache.set(cleanCode, { promise, at: now });
+  return promise;
 }
 
 /** Xác nhận hoặc hủy gộp tài khoản khi email trùng với tài khoản YoFaSo hiện có. */
@@ -115,25 +144,33 @@ export async function startSocialAuth(provider: OAuthProvider): Promise<OAuthSta
     return { status: "REDIRECTED" };
   }
 
-  const result = await WebBrowser.openAuthSessionAsync(startUrl, returnUrl);
-  if (result.type !== "success" || !result.url) {
-    return { status: "CANCELLED" };
-  }
-
-  const { oauthCode, oauthError, oauthMessage } = parseCallbackParams(result.url);
-  if (oauthError) {
-    if (oauthError === "OAUTH_CANCELLED") {
+  lastNativeOAuthTarget = "/auth";
+  activeNativeOAuth = { target: "/auth", startedAt: Date.now() };
+  try {
+    const result = await WebBrowser.openAuthSessionAsync(startUrl, returnUrl);
+    if (result.type !== "success" || !result.url) {
       return { status: "CANCELLED" };
     }
-    throw new ApiError(
-      oauthMessage || `Không thể đăng nhập bằng ${formatProviderName(provider)}.`,
-      400,
-    );
+
+    const { oauthCode, oauthError, oauthMessage } = parseCallbackParams(result.url);
+    if (oauthError) {
+      if (oauthError === "OAUTH_CANCELLED") {
+        return { status: "CANCELLED" };
+      }
+      throw new ApiError(
+        oauthMessage || `Không thể đăng nhập bằng ${formatProviderName(provider)}.`,
+        400,
+      );
+    }
+    if (!oauthCode) {
+      throw new ApiError("Không nhận được mã xác thực từ máy chủ. Vui lòng thử lại.", 400);
+    }
+    return await exchangeOAuthCode(oauthCode);
+  } finally {
+    setTimeout(() => {
+      activeNativeOAuth = null;
+    }, 1200);
   }
-  if (!oauthCode) {
-    throw new ApiError("Không nhận được mã xác thực từ máy chủ. Vui lòng thử lại.", 400);
-  }
-  return exchangeOAuthCode(oauthCode);
 }
 
 /** Liên kết thêm Google hoặc Facebook từ màn hình Cài đặt (gọi POST có JWT để lấy authorizeUrl). */
@@ -152,25 +189,33 @@ export async function startLinkSocialFromSettings(
     return { status: "REDIRECTED" };
   }
 
-  const result = await WebBrowser.openAuthSessionAsync(authorizeUrl, returnUrl);
-  if (result.type !== "success" || !result.url) {
-    return { status: "CANCELLED" };
-  }
-
-  const { oauthCode, oauthError, oauthMessage } = parseCallbackParams(result.url);
-  if (oauthError) {
-    if (oauthError === "OAUTH_CANCELLED") {
+  lastNativeOAuthTarget = "/settings";
+  activeNativeOAuth = { target: "/settings", startedAt: Date.now() };
+  try {
+    const result = await WebBrowser.openAuthSessionAsync(authorizeUrl, returnUrl);
+    if (result.type !== "success" || !result.url) {
       return { status: "CANCELLED" };
     }
-    throw new ApiError(
-      oauthMessage || `Không thể liên kết tài khoản ${formatProviderName(provider)}.`,
-      400,
-    );
+
+    const { oauthCode, oauthError, oauthMessage } = parseCallbackParams(result.url);
+    if (oauthError) {
+      if (oauthError === "OAUTH_CANCELLED") {
+        return { status: "CANCELLED" };
+      }
+      throw new ApiError(
+        oauthMessage || `Không thể liên kết tài khoản ${formatProviderName(provider)}.`,
+        400,
+      );
+    }
+    if (!oauthCode) {
+      throw new ApiError("Không nhận được mã xác thực liên kết. Vui lòng thử lại.", 400);
+    }
+    return await exchangeOAuthCode(oauthCode);
+  } finally {
+    setTimeout(() => {
+      activeNativeOAuth = null;
+    }, 1200);
   }
-  if (!oauthCode) {
-    throw new ApiError("Không nhận được mã xác thực liên kết. Vui lòng thử lại.", 400);
-  }
-  return exchangeOAuthCode(oauthCode);
 }
 
 export async function fetchLinkedAccounts(): Promise<{

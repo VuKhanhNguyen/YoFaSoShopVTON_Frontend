@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
-import { AlertTriangle, FileText, Package, Printer, XCircle } from "lucide-react";
+import { AlertTriangle, FileText, Loader2, Printer, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { buildPickList, countItems, type WhOrder, type WhStatus } from "@/lib/warehouse";
+import { exportPickListPdf } from "@/lib/receipt-pdf";
+import { pushToast } from "@/lib/feedback";
 
 const STATUS_LABEL: Record<WhStatus, { label: string; cls: string }> = {
   CHO_XAC_NHAN: { label: "Chờ nhặt hàng", cls: "bg-warning-subtle text-warning" },
@@ -26,7 +28,6 @@ const DAY_LABEL: Record<string, string> = {
 /** UC_WH_01 — Bảng điều phối đơn online & sinh Phiếu nhặt hàng theo cụm giá kệ. RBAC: ẩn 100% giá bán/doanh thu. */
 export function PickListBoard({
   orders,
-  onPrint,
 }: {
   orders: WhOrder[];
   onPrint?: () => void;
@@ -34,6 +35,7 @@ export function PickListBoard({
   const [selected, setSelected] = useState<string[]>([]);
   const [showPick, setShowPick] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
+  const [downloading, setDownloading] = useState(false);
 
   const active = orders.filter((o) => o.status === "CHO_XAC_NHAN" && (o.payment !== "VIETQR" || o.paymentStatus === "DA_THANH_TOAN"));
   const cancelled = orders.filter((o) => o.status === "DA_HUY" || o.status === "TRA_HANG");
@@ -42,6 +44,28 @@ export function PickListBoard({
 
   const toggle = (id: string) => setSelected((ds) => (ds.includes(id) ? ds.filter((x) => x !== id) : [...ds, id]));
   const togglePick = (key: string) => setPicked((ds) => (ds.includes(key) ? ds.filter((x) => x !== key) : [...ds, key]));
+
+  const handleExportPdf = async () => {
+    if (downloading || groups.length === 0) return;
+    setDownloading(true);
+    try {
+      const filename = await exportPickListPdf(chosen, groups);
+      pushToast({
+        tone: "success",
+        title: "Đã tải Phiếu Nhặt Hàng (PDF A4)",
+        detail: `Đã lưu tự động: ${filename}`,
+      });
+      setShowPick(false);
+    } catch (err) {
+      pushToast({
+        tone: "error",
+        title: "Không thể xuất PDF phiếu nhặt hàng",
+        detail: err instanceof Error ? err.message : "Vui lòng thử lại.",
+      });
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -112,7 +136,17 @@ export function PickListBoard({
             <span className="font-mono font-bold">{countItems(chosen)}</span> món đồ)
           </span>
           <div className="ml-auto flex items-center gap-2">
-            <Button className="h-12 gap-2 px-6 text-sm font-bold" onClick={() => { setPicked([]); setShowPick(true); }}>
+            <Button
+              className="h-12 gap-2 px-6 text-sm font-bold"
+              onClick={() => {
+                setPicked([]);
+                setShowPick(true);
+                pushToast({
+                  tone: "info",
+                  title: `Đã sinh Pick List cho ${chosen.length} đơn (${countItems(chosen)} món)`,
+                });
+              }}
+            >
               <FileText className="h-5 w-5" />
               SINH PHIẾU NHẶT HÀNG TỔNG HỢP (PICK LIST)
             </Button>
@@ -169,8 +203,9 @@ export function PickListBoard({
           </div>
           <div className="flex justify-end gap-2 border-t border-border pt-3">
             <Button variant="outline" onClick={() => setShowPick(false)}>Đóng</Button>
-            <Button onClick={() => { setShowPick(false); onPrint?.(); }}>
-              <Printer className="h-4 w-4" /> In phiếu nhặt hàng
+            <Button disabled={downloading || groups.length === 0} onClick={() => void handleExportPdf()} className="gap-2">
+              {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+              {downloading ? "Đang tạo PDF…" : "In / Tải PDF phiếu nhặt hàng (A4)"}
             </Button>
           </div>
         </DialogContent>

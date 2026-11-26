@@ -15,11 +15,6 @@ interface ShipperItem {
   route: string;
 }
 
-const DEFAULT_SHIPPERS: ShipperItem[] = [
-  { id: "ND00000013", name: "Nguyễn Văn Hùng", phone: "0912345678", route: "Tuyến Quận Hải Châu, Đà Nẵng" },
-  { id: "ND00000014", name: "Lê Văn Hải", phone: "0923456789", route: "Tuyến Quận Thanh Khê, Đà Nẵng" },
-];
-
 const CHECKLIST = [
   "Hộp niêm phong còn nguyên vẹn?",
   "Quần áo còn nguyên tem thẻ bài và túi zip?",
@@ -57,15 +52,15 @@ function Handover({
   orders: WhOrder[];
   onRefresh?: () => void;
 }) {
-  const { data: dbShippers } = useResource<ShipperItem[]>("/staff/shippers");
-  const shippers = dbShippers && dbShippers.length > 0 ? dbShippers : DEFAULT_SHIPPERS;
+  const { data: dbShippers, loading: loadingShippers } = useResource<ShipperItem[]>("/staff/shippers");
+  const shippers = dbShippers ?? [];
 
   const ready = orders.filter(
     (o) =>
       o.status === "CHO_SHIPPER" ||
       (o.status === "DANG_DONG_GOI" && (!o.shipperId || o.shipper === "Chưa phân công")),
   );
-  const [shipper, setShipper] = useState<string>(shippers[0]?.id ?? "ND00000013");
+  const [shipper, setShipper] = useState<string>("");
   const [code, setCode] = useState("");
   const [scanned, setScanned] = useState<string[]>([]);
   const [error, setError] = useState("");
@@ -149,7 +144,7 @@ function Handover({
   const shipperInfo = shippers.find((s) => s.id === shipper) ?? shippers[0];
 
   const confirm = async () => {
-    if (scanned.length === 0) return;
+    if (scanned.length === 0 || !shipper) return;
     setSaving(true);
     const failed: string[] = [];
     let successCount = 0;
@@ -167,7 +162,7 @@ function Handover({
     if (failed.length) setScanned(failed);
     if (successCount > 0) pushToast({
       tone: "success",
-      title: `Đã bàn giao ${successCount} kiện cho ${shipperInfo.name}!`,
+      title: `Đã bàn giao ${successCount} kiện cho ${shipperInfo?.name || shipper}!`,
     });
     onRefresh?.();
   };
@@ -176,20 +171,28 @@ function Handover({
     <div className="space-y-4">
       <div className="rounded-xl border border-border bg-surface p-4">
         <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Chọn nhân viên Shipper nội bộ</p>
-        <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          {shippers.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              aria-pressed={shipper === s.id}
-              onClick={() => setShipper(s.id)}
-              className={`rounded-lg border-2 px-4 py-3 text-left transition-colors ${shipper === s.id ? "border-primary bg-accent-subtle" : "border-border bg-surface hover:border-accent"}`}
-            >
-              <p className="text-sm font-bold">{s.name}</p>
-              <p className="font-mono text-[11px] text-muted-foreground">MaNguoiGiaoHang: {s.id} · Tuyến: {s.route}</p>
-            </button>
-          ))}
-        </div>
+        {loadingShippers ? (
+          <p className="mt-2 text-xs text-muted-foreground">Đang tải danh sách Shipper từ cơ sở dữ liệu…</p>
+        ) : shippers.length === 0 ? (
+          <p className="mt-2 rounded-lg border border-dashed border-border p-3 text-xs text-muted-foreground">
+            Chưa có tài khoản Shipper hoạt động trong hệ thống. Vui lòng tạo tài khoản Shipper ở mục Quản trị.
+          </p>
+        ) : (
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            {shippers.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                aria-pressed={shipper === s.id}
+                onClick={() => setShipper(s.id)}
+                className={`rounded-lg border-2 px-4 py-3 text-left transition-colors ${shipper === s.id ? "border-primary bg-accent-subtle" : "border-border bg-surface hover:border-accent"}`}
+              >
+                <p className="text-sm font-bold">{s.name}</p>
+                <p className="font-mono text-[11px] text-muted-foreground">MaNguoiGiaoHang: {s.id} · Tuyến: {s.route}</p>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="rounded-xl border border-border bg-surface p-4">
@@ -258,10 +261,10 @@ function Handover({
         {confirmed ? (
           <p className="mt-4 flex items-center gap-2 rounded-md bg-success-subtle px-3 py-3 text-sm font-bold text-success">
             <CheckCircle2 className="h-5 w-5" />
-            Đã bàn giao {scanned.length} kiện cho {shipperInfo.name} — toàn bộ đơn đã chuyển sang ĐANG GIAO HÀNG.
+            Đã bàn giao {scanned.length} kiện cho {shipperInfo?.name || shipper} — toàn bộ đơn đã chuyển sang ĐANG GIAO HÀNG.
           </p>
         ) : (
-          <Button variant="success" disabled={scanned.length === 0 || saving} onClick={confirm} className="mt-4 h-14 w-full gap-2 text-base font-bold">
+          <Button variant="success" disabled={!shipper || scanned.length === 0 || saving} onClick={confirm} className="mt-4 h-14 w-full gap-2 text-base font-bold">
             <PackageCheck className="h-5 w-5" />
             {saving ? "Đang lưu…" : `XÁC NHẬN BÀN GIAO ${scanned.length} KIỆN HÀNG CHO SHIPPER (ENTER)`}
           </Button>
@@ -375,7 +378,9 @@ function ReturnIntake({
       });
       onRefresh?.();
     } catch (e: any) {
-      setError(e.message || "Không thể thực hiện nhận hoàn.");
+      const msg = e.message || "Không thể thực hiện nhận hoàn.";
+      setError(msg);
+      pushToast({ tone: "error", title: msg });
     }
   };
 

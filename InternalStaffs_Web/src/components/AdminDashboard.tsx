@@ -18,10 +18,9 @@ import { StaffHeader } from "@/components/staff-header";
 import { useAuth, useRequireAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import {
-  ADMIN_ORDERS,
-  ADMIN_VOUCHERS,
-  ADMIN_REVIEWS,
-  AUDIT_LOGS,
+  type AdminOrder,
+  type AdminVoucher,
+  type AdminReview,
   type AuditEntry,
 } from "@/lib/admin";
 import { Finance } from "@/components/admin/finance";
@@ -52,10 +51,10 @@ export function AdminDashboard({ initialTab = "finance" }: { initialTab?: Tab })
 
   const [tab, setTab] = useState<Tab>(initialTab);
   const [chatUnread, setChatUnread] = useState(0);
-  const [orders, setOrders] = useState(ADMIN_ORDERS);
-  const [vouchers, setVouchers] = useState(ADMIN_VOUCHERS);
-  const [reviews, setReviews] = useState(ADMIN_REVIEWS);
-  const [logs, setLogs] = useState<AuditEntry[]>(AUDIT_LOGS);
+  const [orders, setOrders] = useState<AdminOrder[]>([]);
+  const [vouchers, setVouchers] = useState<AdminVoucher[]>([]);
+  const [reviews, setReviews] = useState<AdminReview[]>([]);
+  const [logs, setLogs] = useState<AuditEntry[]>([]);
 
   useEffect(() => {
     if (!ready || !user || user.role !== "ROLE_SHOP_ADMIN") return;

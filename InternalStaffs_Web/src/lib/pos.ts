@@ -12,6 +12,7 @@ export type BienThe = {
   ton: number; // SoLuongTonKho (Single Pool)
   img?: string;
   shelf?: string;
+  sessionId?: string;
 };
 
 export type Dong = {
@@ -26,6 +27,7 @@ export type Dong = {
   soLuong: number;
   ton?: number;
   shelf?: string;
+  sessionId?: string;
 };
 
 export const thanhTien = (d: Dong) => d.soLuong * d.donGia;
@@ -39,7 +41,9 @@ export function themVaoDon(ds: Dong[], p: BienThe): Dong[] {
   if (i >= 0) {
     const existing = ds[i];
     if (!existing || existing.soLuong >= p.ton) return ds;
-    return ds.map((d, k) => (k === i ? { ...d, soLuong: d.soLuong + 1 } : d));
+    return ds.map((d, k) =>
+      k === i ? { ...d, soLuong: d.soLuong + 1, sessionId: p.sessionId ?? d.sessionId } : d
+    );
   }
   if (p.ton <= 0) return ds;
   return [
@@ -56,15 +60,9 @@ export function themVaoDon(ds: Dong[], p: BienThe): Dong[] {
       soLuong: 1,
       ton: p.ton,
       shelf: p.shelf,
+      sessionId: p.sessionId,
     },
   ];
 }
-
-export const VOUCHERS: Record<string, { label: string; tinh: (tong: number) => number }> = {
-  YOFASO10: { label: "Giảm 10% đơn từ 300k (tối đa 100k)", tinh: (t) => (t >= 300000 ? Math.min(100000, Math.round(t * 0.1)) : 0) },
-  FREESHIP50: { label: "Miễn phí vận chuyển 30.000 đ", tinh: () => 30000 },
-  YOFASO50: { label: "Giảm 50.000 đ", tinh: () => 50000 },
-  VIP10: { label: "Chiết khấu 10%", tinh: (t) => Math.round(t * 0.1) },
-};
 
 export const vnd = (n: number) => n.toLocaleString("vi-VN") + " đ";

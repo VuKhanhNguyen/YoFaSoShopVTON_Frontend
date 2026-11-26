@@ -156,6 +156,12 @@ export const chatImageSource = (messageId: string, sessionId?: string) => ({
     ? { Authorization: `Bearer ${current.accessToken}` }
     : undefined,
 });
+export const authImageSource = (url: string) => ({
+  uri: publicUrl(url),
+  headers: current
+    ? { Authorization: `Bearer ${current.accessToken}` }
+    : undefined,
+});
 export const publicUrl = (url: string) =>
   url.startsWith("/api/v1/") ? BASE_URL.replace(/\/api\/v1$/, "") + url : url;
 export async function api<T>(

@@ -138,40 +138,6 @@ export const MATERIAL_PRESETS = [
   "Vải linen tự nhiên thoáng mát",
 ];
 
-export const FALLBACK_CATEGORIES: CategoryOption[] = [
-  { value: "DM000001", label: "Thời trang Nam", parentId: null },
-  { value: "DM000002", label: "Thời trang Nữ", parentId: null },
-  { value: "DM000003", label: "Áo nam", parentId: "DM000001" },
-  { value: "DM000004", label: "Quần nam", parentId: "DM000001" },
-  { value: "DM000005", label: "Áo nữ", parentId: "DM000002" },
-  { value: "DM000006", label: "Quần nữ", parentId: "DM000002" },
-  { value: "DM000007", label: "Đầm & Chân váy", parentId: "DM000002" },
-  { value: "DM000008", label: "Áo gile & Vest nam", parentId: "DM000003" },
-  { value: "DM000009", label: "Áo len & Cardigan nam", parentId: "DM000003" },
-  { value: "DM000010", label: "Áo nỉ & Hoodie nam", parentId: "DM000003" },
-  { value: "DM000011", label: "Áo polo nam", parentId: "DM000003" },
-  { value: "DM000012", label: "Áo sơ mi nam", parentId: "DM000003" },
-  { value: "DM000013", label: "Áo thun nam", parentId: "DM000003" },
-  { value: "DM000014", label: "Quần jeans nam", parentId: "DM000004" },
-  { value: "DM000015", label: "Quần jogger & Thể thao nam", parentId: "DM000004" },
-  { value: "DM000016", label: "Quần kaki & Chinos nam", parentId: "DM000004" },
-  { value: "DM000017", label: "Quần short nam", parentId: "DM000004" },
-  { value: "DM000018", label: "Quần tây âu nam", parentId: "DM000004" },
-  { value: "DM000019", label: "Áo gile & Croptop nữ", parentId: "DM000005" },
-  { value: "DM000020", label: "Áo kiểu & Blouses nữ", parentId: "DM000005" },
-  { value: "DM000021", label: "Áo len & Dệt kim nữ", parentId: "DM000005" },
-  { value: "DM000022", label: "Áo nỉ & Hoodie nữ", parentId: "DM000005" },
-  { value: "DM000023", label: "Áo sơ mi nữ", parentId: "DM000005" },
-  { value: "DM000024", label: "Áo thun & Polo nữ", parentId: "DM000005" },
-  { value: "DM000025", label: "Quần jeans nữ", parentId: "DM000006" },
-  { value: "DM000026", label: "Quần ống rộng & Suông nữ", parentId: "DM000006" },
-  { value: "DM000027", label: "Quần short nữ", parentId: "DM000006" },
-  { value: "DM000028", label: "Quần tây công sở nữ", parentId: "DM000006" },
-  { value: "DM000029", label: "Quần legging & Thể thao nữ", parentId: "DM000006" },
-  { value: "DM000030", label: "Chân váy nữ", parentId: "DM000007" },
-  { value: "DM000031", label: "Đầm liền thân", parentId: "DM000007" },
-];
-
 export function labelFor(options: { value: string; label: string }[], value: string | null | undefined): string {
   if (!value) return "—";
   return options.find((o) => o.value === value)?.label ?? value;
@@ -262,46 +228,6 @@ export interface InspectorSampleItem {
   bodyPositionNote: string;
   confidence: string;
 }
-
-/** Dữ liệu mẫu thực tế từ Gile_Croptop3 (SP00000003) dùng khi GPU Worker chưa bật. */
-export const SAMPLE_INSPECTOR_ITEMS: InspectorSampleItem[] = [
-  {
-    id: "sample-img01",
-    label: "Ảnh 01 · Kem phối be",
-    colorName: "Kem",
-    dominantHex: "#CAD8D4",
-    palette: [
-      { name: "kem", hex: "#CAD8D4", share: 0.555 },
-      { name: "be", hex: "#BBC9C6", share: 0.332 },
-      { name: "trắng", hex: "#F1EBDF", share: 0.113 },
-    ],
-    originalUrl: "/assets/samples/croptop-img01-original.png",
-    cutoutUrl: "/assets/samples/croptop-img01-cutout.png",
-    maskUrl: "/assets/samples/croptop-img01-mask.png",
-    r2CutoutKey: "catalog/products/w-ao-Xuan-He-dang-croptop/w-ao-Xuan-He-dang-croptop--img01--v01--cutout.png",
-    r2MaskKey: "catalog-processing/products/w-ao-Xuan-He-dang-croptop/w-ao-Xuan-He-dang-croptop--img01--v01--mask.png",
-    predictedVton: "upper_body",
-    predictedSubtype: "short_sleeved_shirt",
-    bodyPositionNote: "chạm eo (body_position=0.683 · IoU=0.9965)",
-    confidence: "high (score upper_body=1.899)",
-  },
-  {
-    id: "sample-img02",
-    label: "Ảnh 02 · Be tự nhiên",
-    colorName: "Be",
-    dominantHex: "#CABEB2",
-    palette: [{ name: "be", hex: "#CABEB2", share: 1.0 }],
-    originalUrl: "/assets/samples/croptop-img02-original.png",
-    cutoutUrl: "/assets/samples/croptop-img02-cutout.png",
-    maskUrl: "/assets/samples/croptop-img02-mask.png",
-    r2CutoutKey: "catalog/products/w-ao-Xuan-He-dang-croptop/w-ao-Xuan-He-dang-croptop--img02--v01--cutout.png",
-    r2MaskKey: "catalog-processing/products/w-ao-Xuan-He-dang-croptop/w-ao-Xuan-He-dang-croptop--img02--v01--mask.png",
-    predictedVton: "upper_body",
-    predictedSubtype: "short_sleeved_shirt",
-    bodyPositionNote: "chạm eo (auto_extended · +1.9%)",
-    confidence: "high (support=2)",
-  },
-];
 
 /**
  * Nhận diện giới tính thời trang (Nam / Nữ) từ mã hoặc tên danh mục

@@ -54,10 +54,19 @@ export function Receipt({ order }: { order: Order }) {
         </tbody>
       </table>
       <dl className="space-y-1.5 border-t border-dashed border-border pt-3">
-        <div className="flex justify-between">
-          <dt className="text-muted-foreground">Giảm giá voucher/điểm</dt>
-          <dd className="text-destructive font-bold">-{vnd(order.discount || 0)}</dd>
-        </div>
+        {order.discountDetails && order.discountDetails.length > 0 ? (
+          order.discountDetails.map((d, idx) => (
+            <div key={`${d.type}-${idx}`} className="flex justify-between">
+              <dt className="text-muted-foreground">{d.label}</dt>
+              <dd className="text-destructive font-bold">-{vnd(d.amount)}</dd>
+            </div>
+          ))
+        ) : (
+          <div className="flex justify-between">
+            <dt className="text-muted-foreground">Giảm giá voucher/điểm</dt>
+            <dd className="text-destructive font-bold">-{vnd(order.discount || 0)}</dd>
+          </div>
+        )}
         <div className="flex justify-between text-sm font-bold border-t border-border pt-1">
           <dt>TỔNG CỘNG</dt>
           <dd className="text-accent-hover">{vnd(due)}</dd>

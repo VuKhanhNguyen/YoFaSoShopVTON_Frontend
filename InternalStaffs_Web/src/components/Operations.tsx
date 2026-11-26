@@ -394,7 +394,7 @@ export function Reviews() {
                   path: `/admin/reviews/${r.reviewId}`,
                   method: "PATCH",
                   schema: "Moderation",
-                  initial: { status: r.status, reply: r.shopReply || "" },
+                  initial: { status: r.status, reply: r.reply || r.shopReply || "" },
                 })
               }
             >

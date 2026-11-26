@@ -9,7 +9,7 @@ import {
   FileText,
   FolderPlus,
   ImagePlus,
-  Keyboard,
+  Loader2,
   PauseCircle,
   Plus,
   RefreshCw,
@@ -60,13 +60,11 @@ const toast = {
 import {
   DEEPFASHION2_SUBTYPES,
   DEFAULT_SHELF_CODES,
-  FALLBACK_CATEGORIES,
   FIT_OPTIONS,
   LENGTH_OPTIONS,
   MATERIAL_PRESETS,
   PATTERN_OPTIONS,
   PRODUCT_STATUS_OPTIONS,
-  SAMPLE_INSPECTOR_ITEMS,
   VTON_CATEGORY_OPTIONS,
   WAIST_OPTIONS,
   buildSku,
@@ -530,7 +528,7 @@ export function ProductCrudStudio({
 }) {
   const [view, setView] = useState<"list" | "editor">("list");
   const [products, setProducts] = useState<AdminProductRow[]>([]);
-  const [categories, setCategories] = useState<CategoryOption[]>(FALLBACK_CATEGORIES);
+  const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [shelves, setShelves] = useState<string[]>(DEFAULT_SHELF_CODES);
   const [loadingList, setLoadingList] = useState(true);
   const [backendOffline, setBackendOffline] = useState(false);
@@ -546,8 +544,9 @@ export function ProductCrudStudio({
 
   // Form tạo/sửa sản phẩm
   const [form, setForm] = useState<EditorFormState>(() =>
-    emptyEditorForm(FALLBACK_CATEGORIES[6]?.value ?? "DM000019")
+    emptyEditorForm("")
   );
+  const [generatingDesc, setGeneratingDesc] = useState(false);
   const [editorParentCategory, setEditorParentCategory] = useState<string>("DM000001");
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [detailProduct, setDetailProduct] = useState<AdminProductDetail | null>(null);
@@ -606,7 +605,7 @@ export function ProductCrudStudio({
       api<CategoryOption[]>("/catalog/categories").catch(() => []),
     ]);
     const loadedCats =
-      filterRes?.categories?.length ? filterRes.categories : catRes.length ? catRes : FALLBACK_CATEGORIES;
+      filterRes?.categories?.length ? filterRes.categories : catRes.length ? catRes : [];
     const mergedShelves = Array.from(
       new Set([
         ...DEFAULT_SHELF_CODES,
@@ -838,7 +837,7 @@ export function ProductCrudStudio({
     setInspectorVton(form.vtonCategory);
     setInspectorSubtype(form.subtype);
     setInspectorItems(items);
-    setInspectorRefUrl(coverRef?.url ?? "/assets/samples/croptop-ref01.png");
+    setInspectorRefUrl(coverRef?.url ?? null);
     setAnalysisMessage(null);
     setInspectorOpen(true);
 
@@ -855,58 +854,66 @@ export function ProductCrudStudio({
     }
   }, [form, runGarmentSegmentation]);
 
-  const openInspectorForProductRow = useCallback(async (row: AdminProductRow) => {
-    setInspectorProductId(row.productId);
-    setInspectorProductName(row.name);
-    setInspectorVton(row.vtonCategory);
-    setInspectorSubtype(row.subtype);
-    setAnalysisMessage(null);
-
-    try {
-      const detail = await api<AdminProductDetail>(`/admin/products/${encodeURIComponent(row.productId)}`);
-      const areas = buildAreasFromDetail(detail);
-      setInspectorItems(
-        areas.map((a, idx) => ({
-          id: a.areaId,
-          label: `Ảnh ${String(idx + 1).padStart(2, "0")} · ${a.colorName}`,
-          colorName: a.colorName,
-          dominantHex: a.dominantHex,
-          palette: a.palette,
-          originalUrl: a.originalUrl,
-          cutoutUrl: a.cutoutUrl,
-          maskUrl: detail.maskUrl ? catalogImage(detail.maskUrl) : null,
-          r2MaskKey: detail.maskPath ?? null,
-          predictedVton: detail.vtonCategory,
-          predictedSubtype: detail.subtype,
-        }))
-      );
-      setInspectorRefUrl(null);
-    } catch {
-      setInspectorItems(SAMPLE_INSPECTOR_ITEMS.map((s) => ({ ...s, isSampleFallback: true })));
-      setInspectorRefUrl("/assets/samples/croptop-ref01.png");
-    }
-    setInspectorOpen(true);
-  }, []);
-
-  // Phím tắt Ctrl + M mở Popup xem kết quả bóc tách nền & Agnostic Mask
+  // Phím tắt bí mật Ctrl + M: CHỈ hoạt động trong chế độ thêm/sửa sản phẩm (view === "editor"); chặn ngầm ở danh sách sản phẩm (không hiện thông báo)
   useEffect(() => {
     if (!isActive) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "m") {
         e.preventDefault();
-        if (view === "editor") {
-          openInspectorForEditor();
-        } else if (products[0]) {
-          void openInspectorForProductRow(products[0]);
-        } else {
-          setInspectorItems(SAMPLE_INSPECTOR_ITEMS.map((s) => ({ ...s, isSampleFallback: true })));
-          setInspectorOpen(true);
-        }
+        if (view !== "editor") return;
+        openInspectorForEditor();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isActive, view, products, openInspectorForEditor, openInspectorForProductRow]);
+  }, [isActive, view, openInspectorForEditor]);
+
+  const handleAiGenerateDescription = async () => {
+    if (!form.name.trim()) {
+      toast.warning({ title: "Vui lòng nhập tên sản phẩm trước khi gọi AI viết mô tả." });
+      return;
+    }
+    setGeneratingDesc(true);
+    try {
+      const colorList = form.areas
+        .map((a) => a.colorName)
+        .filter(Boolean)
+        .join(", ");
+      const res = await api<{ description: string; highlights?: string[]; modelUsed?: string }>(
+        "/admin/ai/generate-description",
+        "POST",
+        {
+          name: form.name.trim(),
+          material: form.material.trim(),
+          vtonCategory: form.vtonCategory,
+          fit: form.fit,
+          length: form.length,
+          pattern: form.pattern,
+          colors: colorList,
+          gender: form.gender,
+        }
+      );
+      const highlightsText =
+        Array.isArray(res.highlights) && res.highlights.length > 0
+          ? "\n\nĐiểm nổi bật:\n" + res.highlights.map((h) => `• ${h}`).join("\n")
+          : "";
+      setForm((prev) => ({
+        ...prev,
+        description: `${res.description || ""}${highlightsText}`.trim(),
+      }));
+      toast.success({
+        title: "AI đã tạo mô tả sản phẩm",
+        detail: res.modelUsed ? `Model: ${res.modelUsed}` : undefined,
+      });
+    } catch (err) {
+      toast.error({
+        title: "Không sinh được mô tả bằng AI",
+        detail: err instanceof Error ? err.message : undefined,
+      });
+    } finally {
+      setGeneratingDesc(false);
+    }
+  };
 
   const getRootCategoryId = useCallback(
     (catId: string): string => {
@@ -1711,24 +1718,6 @@ export function ProductCrudStudio({
         detail="Quản trị danh mục, biến thể màu × size, giá kệ và kiểm định phân loại VTON."
       >
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              view === "editor"
-                ? openInspectorForEditor()
-                : products[0]
-                  ? void openInspectorForProductRow(products[0])
-                  : setInspectorOpen(true)
-            }
-            title="Phím tắt Ctrl + M"
-          >
-            <Keyboard className="h-3.5 w-3.5 text-accent-hover" />
-            <span>Soi Mask AI</span>
-            <kbd className="rounded border border-border bg-canvas px-1.5 py-0.5 font-mono text-[10px]">
-              Ctrl + M
-            </kbd>
-          </Button>
           {view === "list" ? (
             <>
               <Button variant="outline" size="sm" onClick={() => setCategoryModalOpen(true)}>
@@ -2457,23 +2446,40 @@ export function ProductCrudStudio({
                   <span className="text-xs font-semibold text-muted-foreground">
                     Mô tả chi tiết sản phẩm
                   </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() =>
-                      setForm((prev) => ({
-                        ...prev,
-                        description: buildYoFaSoDescriptionTemplate(
-                          prev.name,
-                          prev.material,
-                          prev.fit
-                        ),
-                      }))
-                    }
-                  >
-                    <FileText className="h-3.5 w-3.5" />
-                    Áp dụng khung mô tả mẫu
-                  </Button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={generatingDesc}
+                      onClick={() => void handleAiGenerateDescription()}
+                    >
+                      {generatingDesc ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-3.5 w-3.5 text-accent-hover" />
+                      )}
+                      {generatingDesc ? "AI đang viết…" : "AI Viết mô tả"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        setForm((prev) => ({
+                          ...prev,
+                          description: buildYoFaSoDescriptionTemplate(
+                            prev.name,
+                            prev.material,
+                            prev.fit
+                          ),
+                        }))
+                      }
+                    >
+                      <FileText className="h-3.5 w-3.5" />
+                      Áp dụng khung mô tả mẫu
+                    </Button>
+                  </div>
                 </div>
                 <textarea
                   rows={8}

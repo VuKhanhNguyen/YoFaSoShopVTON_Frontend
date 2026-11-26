@@ -1,50 +1,83 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Bell, CheckCheck, Package, AlertTriangle, Receipt, Truck, ClipboardCheck, QrCode } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  AlertTriangle,
+  Bell,
+  CheckCheck,
+  ClipboardCheck,
+  Package,
+  RefreshCw,
+  Sparkles,
+  Tag,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Role } from "@/lib/auth";
+import { api } from "@/lib/api";
+import { pushToast } from "@/lib/feedback";
 import {
-  NOTIFICATIONS,
   filterByTab,
+  mapApiNotification,
   markAllRead,
   markRead,
   unreadCount,
-  visibleForRole,
+  type ApiNotificationRow,
   type NotifTab,
   type NotifType,
   type StaffNotification,
 } from "@/lib/notifications";
 
 const TYPE_ICON: Record<NotifType, typeof Package> = {
-  CANH_BAO_TON_KHO: AlertTriangle,
-  DON_HANG_MOI: Package,
-  YEU_CAU_DUYET_CA: ClipboardCheck,
-  YEU_CAU_DUYET_KIEM_KE: ClipboardCheck,
-  VIETQR_THANH_CONG: QrCode,
-  CHUYEN_GIAO_MOI: Truck,
+  CANH_BAO_KHO: AlertTriangle,
+  DON_HANG: Package,
+  THU_DO_VTON: Sparkles,
+  KHUYEN_MAI: Tag,
+  HE_THONG: ClipboardCheck,
 };
 
 const TABS: { k: NotifTab; l: string }[] = [
   { k: "all", l: "Tất cả" },
   { k: "stock", l: "Tồn kho" },
   { k: "orders", l: "Đơn hàng" },
-  { k: "approvals", l: "Phê duyệt" },
+  { k: "approvals", l: "Hệ thống / Duyệt" },
 ];
 
-export function StaffNotificationPopover({ role }: { role: Role }) {
+export function StaffNotificationPopover({ role: _role }: { role: Role }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<NotifTab>("all");
-  const [items, setItems] = useState<StaffNotification[]>(NOTIFICATIONS);
+  const [items, setItems] = useState<StaffNotification[]>([]);
+  const [loading, setLoading] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  const visible = visibleForRole(items, role);
-  const list = filterByTab(visible, tab);
-  const unread = unreadCount(visible);
-  const hasUrgent = visible.some((n) => !n.read && n.urgent);
+  const loadNotifications = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
+    try {
+      const data = await api<ApiNotificationRow[]>("/notifications?page=0&size=30");
+      if (Array.isArray(data)) {
+        setItems(data.map(mapApiNotification));
+      }
+    } catch {
+      // Keep current list on transient error
+    } finally {
+      if (!silent) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadNotifications(false);
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void loadNotifications(true);
+      }
+    }, 30000);
+    return () => clearInterval(timer);
+  }, [loadNotifications]);
 
   useEffect(() => {
     if (!open) return;
+    void loadNotifications(true);
     const onDown = (e: MouseEvent) => {
       if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
     };
@@ -57,7 +90,41 @@ export function StaffNotificationPopover({ role }: { role: Role }) {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, [open, loadNotifications]);
+
+  const list = filterByTab(items, tab);
+  const unread = unreadCount(items);
+  const hasUrgent = items.some((n) => !n.read && n.urgent);
+
+  const handleMarkOne = async (n: StaffNotification) => {
+    if (!n.read) {
+      setItems((prev) => markRead(prev, n.id));
+      try {
+        await api(`/notifications/${encodeURIComponent(n.id)}/read`, "POST", {});
+      } catch {
+        void loadNotifications(true);
+      }
+    }
+    if (n.link && n.link.startsWith("/") && !n.link.startsWith("/orders/")) {
+      setOpen(false);
+      router.push(n.link);
+    }
+  };
+
+  const handleMarkAll = async () => {
+    if (unread === 0) return;
+    setItems((prev) => markAllRead(prev));
+    try {
+      await api("/notifications/read-all", "POST", {});
+      pushToast({ tone: "success", title: "Đã đánh dấu tất cả thông báo là đã đọc" });
+    } catch (err) {
+      pushToast({
+        tone: "error",
+        title: err instanceof Error ? err.message : "Không thể cập nhật trạng thái thông báo.",
+      });
+      void loadNotifications(true);
+    }
+  };
 
   return (
     <div ref={rootRef} className="relative">
@@ -76,16 +143,15 @@ export function StaffNotificationPopover({ role }: { role: Role }) {
               hasUrgent ? "motion-safe:animate-pulse" : ""
             }`}
           >
-            {unread}
+            {unread > 99 ? "99+" : unread}
           </span>
         )}
       </Button>
 
       {open && (
         <div className="absolute right-0 top-11 z-50 flex max-h-[560px] w-[420px] max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-modal">
-          {/* Sticky header + tabs */}
           <div className="shrink-0 border-b border-border">
-            <div className="flex items-center justify-between px-4 pt-3 pb-2">
+            <div className="flex items-center justify-between px-4 pb-2 pt-3">
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-bold text-foreground">Thông báo Vận hành</h2>
                 {unread > 0 && (
@@ -94,16 +160,28 @@ export function StaffNotificationPopover({ role }: { role: Role }) {
                   </span>
                 )}
               </div>
-              <Button
-                variant="ghost"
-                className="h-7 gap-1 px-2 text-xs text-muted-foreground"
-                onClick={() => setItems((ds) => markAllRead(ds))}
-              >
-                <CheckCheck className="h-3.5 w-3.5" />
-                Đánh dấu tất cả đã đọc
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground"
+                  title="Làm mới thông báo"
+                  onClick={() => void loadNotifications(false)}
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="h-7 gap-1 px-2 text-xs text-muted-foreground"
+                  disabled={unread === 0}
+                  onClick={() => void handleMarkAll()}
+                >
+                  <CheckCheck className="h-3.5 w-3.5" />
+                  Đọc tất cả
+                </Button>
+              </div>
             </div>
-            <div className="flex gap-1 px-3 pb-2">
+            <div className="flex flex-wrap gap-1 px-3 pb-2">
               {TABS.map((t) => (
                 <Button
                   key={t.k}
@@ -118,61 +196,68 @@ export function StaffNotificationPopover({ role }: { role: Role }) {
             </div>
           </div>
 
-          {/* Scrollable feed */}
           <div className="min-h-0 flex-1 overflow-y-auto">
-            {list.length === 0 && (
-              <p className="py-12 text-center text-sm text-muted-foreground">Không có thông báo nào trong mục này.</p>
-            )}
-            {list.map((n) => {
-              const Icon = TYPE_ICON[n.type];
-              return (
-                <button
-                  key={n.id}
-                  type="button"
-                  onClick={() => setItems((ds) => markRead(ds, n.id))}
-                  className={`flex w-full items-start gap-3 border-b border-border px-4 py-3 text-left transition-colors hover:bg-muted ${
-                    n.read ? "bg-surface" : "bg-accent-subtle"
-                  }`}
-                >
-                  <span
-                    className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
-                      n.urgent && !n.read ? "bg-warning-subtle text-warning" : "bg-muted text-muted-foreground"
+            {loading && items.length === 0 ? (
+              <p className="py-12 text-center text-sm text-muted-foreground">Đang đồng bộ thông báo từ máy chủ...</p>
+            ) : list.length === 0 ? (
+              <p className="py-12 text-center text-sm text-muted-foreground">
+                Chưa có thông báo nào trong mục này.
+              </p>
+            ) : (
+              list.map((n) => {
+                const Icon = TYPE_ICON[n.type] || ClipboardCheck;
+                return (
+                  <button
+                    key={n.id}
+                    type="button"
+                    onClick={() => void handleMarkOne(n)}
+                    className={`flex w-full items-start gap-3 border-b border-border px-4 py-3 text-left transition-colors hover:bg-muted ${
+                      n.read ? "bg-surface" : "bg-accent-subtle"
                     }`}
                   >
-                    <Icon className="h-4.5 w-4.5" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="flex items-start justify-between gap-2">
-                      <span className={`text-sm leading-snug ${n.read ? "font-medium" : "font-bold text-foreground"}`}>
-                        {n.title}
-                      </span>
-                      {!n.read && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-success" aria-label="Chưa đọc" />}
+                    <span
+                      className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
+                        n.urgent && !n.read
+                          ? "bg-warning-subtle text-warning"
+                          : "bg-muted text-muted-foreground"
+                      }`}
+                    >
+                      <Icon className="h-4.5 w-4.5" />
                     </span>
-                    <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">{n.body}</span>
-                    <span className="mt-1.5 flex items-center justify-between gap-2">
-                      <span className="font-mono text-[11px] text-text-muted">{n.time}</span>
-                      {n.action && (
-                        <span className="rounded-md border border-accent px-2 py-0.5 text-[11px] font-semibold text-accent-hover">
-                          {n.action}
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-start justify-between gap-2">
+                        <span
+                          className={`text-sm leading-snug ${
+                            n.read ? "font-medium" : "font-bold text-foreground"
+                          }`}
+                        >
+                          {n.title}
                         </span>
-                      )}
+                        {!n.read && (
+                          <span
+                            className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-success"
+                            aria-label="Chưa đọc"
+                          />
+                        )}
+                      </span>
+                      <span className="mt-0.5 block break-words text-xs leading-relaxed text-muted-foreground">
+                        {n.body}
+                      </span>
+                      <span className="mt-1.5 flex items-center justify-between gap-2">
+                        <span className="font-mono text-[11px] text-text-muted">{n.time}</span>
+                      </span>
                     </span>
-                  </span>
-                </button>
-              );
-            })}
+                  </button>
+                );
+              })
+            )}
           </div>
 
-          {/* Footer */}
-          <div className="shrink-0 border-t border-border px-4 py-2.5 text-center">
-            <span className="cursor-pointer text-xs font-semibold text-accent-hover hover:underline">
-              Xem tất cả lịch sử thông báo hệ thống →
-            </span>
+          <div className="shrink-0 border-t border-border px-4 py-2 text-center text-[11px] text-muted-foreground">
+            Đồng bộ thời gian thực từ bảng <code>ThongBao</code> (MySQL)
           </div>
         </div>
       )}
     </div>
   );
 }
-
-void Receipt;

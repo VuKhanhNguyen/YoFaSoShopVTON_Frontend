@@ -732,17 +732,34 @@ export default function SessionResultScreen() {
                       }
                     })()
                   }
-                  onComboBuy={(secondVariantId) =>
+                  onComboBuy={(secondVariantId, secondRecommendationId) =>
                     void (async () => {
                       try {
                         await api("/cart/items", "PUT", { variantId: session.variantId, quantity: 1 });
                         if (secondVariantId && secondVariantId !== session.variantId) {
                           await api("/cart/items", "PUT", { variantId: secondVariantId, quantity: 1 });
-                          Alert.alert("Đã thêm combo", "Đã thêm cả 2 món phối vào túi đồ với ưu đãi -5%.");
+                          if (secondRecommendationId) {
+                            await api(`/scoring/recommendations/${secondRecommendationId}/interaction`, "PATCH", {
+                              status: "DA_THEM_GIO_HANG",
+                            }).catch(() => {});
+                          }
+                          if (Platform.OS === "web") {
+                            showToast("Đã thêm trọn bộ combo (-5%) vào túi đồ!");
+                            router.push("/cart");
+                          } else {
+                            Alert.alert(
+                              "Đã thêm combo (-5%)",
+                              "Cả 2 món phối đã vào túi đồ và sẽ tự động áp dụng ưu đãi Combo VTON -5% khi chọn thanh toán chung.",
+                              [
+                                { text: "Xem tiếp", style: "cancel" },
+                                { text: "Mở túi đồ", onPress: () => router.push("/cart") },
+                              ]
+                            );
+                          }
                         } else {
                           Alert.alert(
                             "Đã thêm",
-                            `${session.productName} đã vào túi đồ. Hãy chọn thêm món phối để tạo combo.`
+                            `${session.productName} đã vào túi đồ. Hãy chọn thêm món phối để tạo combo (-5%).`
                           );
                         }
                       } catch (e) {

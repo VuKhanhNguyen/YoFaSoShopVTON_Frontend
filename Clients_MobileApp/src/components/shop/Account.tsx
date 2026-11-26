@@ -378,13 +378,27 @@ export const Account = memo(function Account() {
               </View>
 
               <View style={st.statusIconsRow}>
-                {[
-                  { icon: "card-outline" as const, label: "Chờ thanh toán", count: 0 },
-                  { icon: "cube-outline" as const, label: "Đang đóng gói", count: (ordersState.data?.length ?? 0) > 0 ? 1 : 0 },
-                  { icon: "bicycle-outline" as const, label: "Đang giao", count: 0 },
-                  { icon: "star-outline" as const, label: "Chờ đánh giá", count: 0 },
-                  { icon: "repeat-outline" as const, label: "Đổi trả / Hủy", count: 0 },
-                ].map((s, idx) => (
+                {(() => {
+                  const waitingConfirmCount = orders.filter((o) => o.status === "CHO_XAC_NHAN").length;
+                  const packingCount = orders.filter((o) => o.status === "DANG_DONG_GOI").length;
+                  const shippingCount = orders.filter((o) => o.status === "DANG_GIAO_HANG").length;
+                  const pendingReviewCount = orders
+                    .filter((o) => o.status === "HOAN_TAT")
+                    .reduce((sum, o) => {
+                      const lines = Array.isArray(o.items) ? (o.items as any[]) : [];
+                      return sum + lines.filter((it) => !it.reviewId).length;
+                    }, 0);
+                  const cancelReturnCount = orders.filter(
+                    (o) => o.status === "DA_HUY" || o.status === "TRA_HANG"
+                  ).length;
+                  return [
+                    { icon: "card-outline" as const, label: "Chờ xác nhận", count: waitingConfirmCount },
+                    { icon: "cube-outline" as const, label: "Đang đóng gói", count: packingCount },
+                    { icon: "bicycle-outline" as const, label: "Đang giao", count: shippingCount },
+                    { icon: "star-outline" as const, label: "Chờ đánh giá", count: pendingReviewCount },
+                    { icon: "repeat-outline" as const, label: "Đổi trả / Hủy", count: cancelReturnCount },
+                  ];
+                })().map((s, idx) => (
                   <ScalePressable key={idx} activeScale={0.92} onPress={() => router.push("/orders")} style={st.statusIconItem}>
                     <View style={st.statusIconCircle}>
                       <Ionicons name={s.icon} size={18} color={Colors.primary} />

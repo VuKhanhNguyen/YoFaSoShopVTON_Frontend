@@ -1,6 +1,6 @@
 import type { BienThe } from "@/lib/pos";
 
-/** Phân hệ kho YoFaSo — dữ liệu mô phỏng đồng bộ DonHang / ChiTietDonHang / BienDongKho. */
+/** Phân hệ kho YoFaSo — kiểu dữ liệu & hàm nghiệp vụ đồng bộ MySQL DonHang / ChiTietDonHang / BienDongKho. */
 
 export type WhStatus = "CHO_XAC_NHAN" | "DANG_DONG_GOI" | "CHO_SHIPPER" | "DANG_GIAO_HANG" | "DA_HUY" | "TRA_HANG" | "HOAN_TAT";
 
@@ -54,103 +54,6 @@ export interface WhOrder {
   cancelReason?: string;
   lines: WhLine[];
 }
-
-const SHELF = {
-  A01: { day: "A", ke: "A-01", tang: 2 } as Shelf,
-  A02: { day: "A", ke: "A-02", tang: 1 } as Shelf,
-  B03: { day: "B", ke: "B-03", tang: 1 } as Shelf,
-  C02: { day: "C", ke: "C-02", tang: 1 } as Shelf,
-  D01: { day: "D", ke: "D-01", tang: 3 } as Shelf,
-};
-
-export const WH_ORDERS: WhOrder[] = [
-  {
-    id: "DH00000001",
-    placedAt: "08:12 · 19/10",
-    shipper: "Shipper nội bộ",
-    payment: "COD",
-    cod: 880_000,
-    receiver: "Trần Thu Hà",
-    phone: "0912.***.789",
-    address: "48 Cao Thắng, Hải Châu, Đà Nẵng",
-    status: "CHO_XAC_NHAN",
-    lines: [
-      { sku: "SM01-TRANG-M", barcode: "SKU-SM01-TRANG-M", ten: "Áo Sơ Mi Lụa Trắng", size: "M", mau: "Trắng", shelf: SHELF.A01, qty: 1 },
-      { sku: "QT02-DEN-L", barcode: "SKU-QT02-DEN-L", ten: "Quần Tây Suông Đen", size: "L", mau: "Đen", shelf: SHELF.B03, qty: 1 },
-    ],
-  },
-  {
-    id: "DH00000002",
-    placedAt: "08:40 · 19/10",
-    shipper: "Shipper nội bộ",
-    payment: "VIETQR",
-    cod: 0,
-    receiver: "Phạm Quốc Bảo",
-    phone: "0905.***.112",
-    address: "12 Nguyễn Văn Linh, Thanh Khê, Đà Nẵng",
-    status: "CHO_XAC_NHAN",
-    lines: [
-      { sku: "OX01-XANH-L", barcode: "SKU-OX01-XANH-L", ten: "Áo Sơ Mi Oxford Xanh", size: "L", mau: "Xanh", shelf: SHELF.A02, qty: 2 },
-    ],
-  },
-  {
-    id: "DH00000003",
-    placedAt: "09:05 · 19/10",
-    shipper: "Shipper nội bộ",
-    payment: "VIETQR",
-    cod: 0,
-    receiver: "Lê Thu Trang",
-    phone: "0932.***.456",
-    address: "205 Hai Bà Trưng, Cẩm Lệ, Đà Nẵng",
-    status: "DANG_DONG_GOI",
-    lines: [
-      { sku: "DM01-HOA-S", barcode: "SKU-DM01-HOA-S", ten: "Đầm Liền Hoa Nhí", size: "S", mau: "Hoa", shelf: SHELF.D01, qty: 1 },
-    ],
-  },
-  {
-    id: "DH00000004",
-    placedAt: "09:31 · 19/10",
-    shipper: "Shipper nội bộ",
-    payment: "COD",
-    cod: 425_000,
-    receiver: "Ngô Bảo Châu",
-    phone: "0987.***.220",
-    address: "77 Phan Châu Trinh, Hải Châu, Đà Nẵng",
-    status: "CHO_XAC_NHAN",
-    lines: [
-      { sku: "SM01-TRANG-M", barcode: "SKU-SM01-TRANG-M", ten: "Áo Sơ Mi Lụa Trắng", size: "M", mau: "Trắng", shelf: SHELF.A01, qty: 1 },
-    ],
-  },
-  {
-    id: "DH00000005",
-    placedAt: "09:48 · 19/10",
-    shipper: "Shipper nội bộ",
-    payment: "VIETQR",
-    cod: 0,
-    receiver: "Vũ Ngọc Mai",
-    phone: "0918.***.335",
-    address: "15 Lê Duẩn, Hải Châu, Đà Nẵng",
-    status: "DA_HUY",
-    cancelReason: "Khách hàng vừa hủy đơn — dừng nhặt đồ ngay",
-    lines: [
-      { sku: "CV02-DEN-M", barcode: "SKU-CV02-DEN-M", ten: "Chân Váy Xếp Ly Midi", size: "M", mau: "Đen", shelf: SHELF.C02, qty: 1 },
-    ],
-  },
-  {
-    id: "DH00000006",
-    placedAt: "10:02 · 19/10",
-    shipper: "Shipper nội bộ",
-    payment: "COD",
-    cod: 590_000,
-    receiver: "Đặng Hữu Phúc",
-    phone: "0903.***.818",
-    address: "30 Trần Phú, Hải Châu, Đà Nẵng",
-    status: "CHO_SHIPPER",
-    lines: [
-      { sku: "QT02-DEN-L", barcode: "SKU-QT02-DEN-L", ten: "Quần Tây Suông Đen", size: "L", mau: "Đen", shelf: SHELF.B03, qty: 1 },
-    ],
-  },
-];
 
 /* ---------- UC_WH_01: Pick List tổng hợp tối ưu lộ trình kệ ---------- */
 
@@ -240,23 +143,13 @@ export function scanProgress(lines: WhLine[], scanned: Record<string, number>): 
 
 /* ---------- UC_LOG: Bàn giao shipper & nhận hàng hoàn ---------- */
 
-export interface ReturnCase {
-  orderId: string;
-  reason: string;
-  receiver: string;
-}
-
-export const RETURN_CASES: Record<string, ReturnCase> = {
-  DH00000007: { orderId: "DH00000007", reason: "Khách hẹn lại quá 3 lần không liên lạc được", receiver: "Trương Mỹ Linh" },
-};
-
 export function returnDecision(restock: boolean): { movement: "NHAP_KHO_HANG_HOAN" | "NHAP_KHO_HANG_LOI"; restoreStock: boolean } {
   return restock
     ? { movement: "NHAP_KHO_HANG_HOAN", restoreStock: true }
     : { movement: "NHAP_KHO_HANG_LOI", restoreStock: false };
 }
 
-/* ---------- UC_WH_AUDIT: Kiểm kê & báo cáo XNT ---------- */
+/* ---------- UC_WH_AUDIT: Kiểm kê & báo cáo xuất - nhập - tồn ---------- */
 
 export interface AuditItem {
   ke: string;
@@ -268,25 +161,6 @@ export interface AuditItem {
   book: number;
   revision?: number;
 }
-
-export const AUDIT_ZONES: Record<string, { label: string; items: AuditItem[] }> = {
-  A: {
-    label: "DÃY KỆ A (ÁO TOPS)",
-    items: [
-      { ke: "A-01", sku: "SKU-SM01-TRANG-M", ten: "Áo Sơ Mi Lụa Trắng", size: "M", mau: "Trắng", book: 12 },
-      { ke: "A-01", sku: "SKU-SM01-TRANG-L", ten: "Áo Sơ Mi Lụa Trắng", size: "L", mau: "Trắng", book: 9 },
-      { ke: "A-02", sku: "SKU-PL02-DEN-L", ten: "Áo Polo Đen", size: "L", mau: "Đen", book: 8 },
-      { ke: "A-02", sku: "SKU-OX01-XANH-L", ten: "Áo Sơ Mi Oxford Xanh", size: "L", mau: "Xanh", book: 15 },
-    ],
-  },
-  B: {
-    label: "DÃY KỆ B (QUẦN BOTTOMS)",
-    items: [
-      { ke: "B-03", sku: "SKU-QT02-DEN-L", ten: "Quần Tây Suông Đen", size: "L", mau: "Đen", book: 10 },
-      { ke: "B-03", sku: "SKU-QT02-DEN-M", ten: "Quần Tây Suông Đen", size: "M", mau: "Đen", book: 7 },
-    ],
-  },
-};
 
 export function variance(book: number, counted: number): number {
   return counted - book;
@@ -315,9 +189,6 @@ export function auditSummary(items: AuditItem[], counts: Record<string, number>)
   }
   return { checked, matched, mismatched, totalDiff };
 }
-
-/** Báo cáo Xuất — Nhập — Tồn trong kỳ (mô phỏng). */
-export const XNT = { tonDau: 520, nhapMoi: 150, xuatBan: 240, tonCuoi: 430 } as const;
 
 export const LOW_STOCK_THRESHOLD = 5;
 

@@ -101,10 +101,12 @@ export type Review = {
   stars: number;
   comment: string;
   shopReply?: string;
+  status?: "CHO_DUYET" | "DA_HIEN_THI" | "DA_AN_VI_PHAM" | string;
+  isOwn?: boolean;
   createdAt: string;
-  photoUrl?: string;
+  photoUrl?: string | null;
   userName?: string;
-  userAvatar?: string;
+  userAvatar?: string | null;
   size?: string;
   colorName?: string;
   sku?: string;

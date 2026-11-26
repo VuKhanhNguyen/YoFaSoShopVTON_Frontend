@@ -103,6 +103,11 @@ function SettingsContent() {
     if (Platform.OS === "web" && typeof window !== "undefined") {
       window.history.replaceState({}, "", window.location.pathname);
     }
+    router.setParams({
+      oauthCode: undefined,
+      oauthError: undefined,
+      oauthMessage: undefined,
+    });
 
     if (errStr) {
       if (errStr !== "OAUTH_CANCELLED") {

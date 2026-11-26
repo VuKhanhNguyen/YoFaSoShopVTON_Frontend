@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  Dimensions,
+  Image,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
   Share,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { router, Stack, useLocalSearchParams } from "expo-router";
@@ -16,7 +18,7 @@ import Animated, {
   ZoomIn,
   useReducedMotion,
 } from "react-native-reanimated";
-import { api, publicUrl } from "@/lib/api";
+import { api, authImageSource, publicUrl } from "@/lib/api";
 import { useResource } from "@/hooks/use-resource";
 import { useSession } from "@/lib/session";
 import { type Product, type Review, type Row } from "@/lib/models";
@@ -28,11 +30,10 @@ import {
   vtonHint,
 } from "@/lib/catalog-data";
 import { Sheet } from "@/components/shop/ui";
+import { PrivateImage } from "@/components/shop/PrivateImage";
 import { CartActionButton } from "@/components/shop/ShopHeader";
 import { ScalePressable } from "@/components/shop/MotionPrimitives";
 import { ProductDetailSkeleton, SmartImage } from "@/components/shop/Skeleton";
-
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 const matchColor = (a?: string, b?: string): boolean => {
   if (!a || !b) return false;
@@ -117,6 +118,8 @@ interface GallerySlideItem {
 export default function ProductDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useSession();
+  const { width: screenWidth } = useWindowDimensions();
+  const galleryHeight = Math.min(Math.round(screenWidth * 1.15), 520);
 
   // Fetch product from backend API
   const state = useResource<Product>(`/catalog/products/${encodeURIComponent(id)}`);
@@ -138,6 +141,8 @@ export default function ProductDetailScreen() {
   const [sizeGuideTab, setSizeGuideTab] = useState<keyof typeof SIZE_GUIDES>("AO_NU");
   const [cartSuccess, setCartSuccess] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [zoomReviewPhoto, setZoomReviewPhoto] = useState<string | null>(null);
+  const [brokenReviewAvatars, setBrokenReviewAvatars] = useState<Record<string, boolean>>({});
 
   const galleryRef = useRef<ScrollView>(null);
 
@@ -329,7 +334,7 @@ export default function ProductDetailScreen() {
       }
       if (slideIndex !== -1 && galleryRef.current) {
         galleryRef.current.scrollTo({
-          x: slideIndex * SCREEN_WIDTH,
+          x: slideIndex * screenWidth,
           animated: true,
         });
         setActiveSlide(slideIndex);
@@ -339,7 +344,7 @@ export default function ProductDetailScreen() {
 
   // Handle swipe on gallery -> auto-activate corresponding color swatch (Requirement 8)
   const handleGalleryMomentumEnd = (e: any) => {
-    const slide = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+    const slide = Math.round(e.nativeEvent.contentOffset.x / Math.max(screenWidth, 1));
     if (slide >= 0 && slide < gallerySlides.length) {
       setActiveSlide(slide);
       const targetSlide = gallerySlides[slide];
@@ -433,7 +438,7 @@ export default function ProductDetailScreen() {
         contentContainerStyle={{ paddingBottom: 110 }}
       >
         {/* Horizontal Paging Gallery with Bidirectional Sync */}
-        <View style={st.galleryContainer}>
+        <View style={[st.galleryContainer, { width: screenWidth, height: galleryHeight }]}>
           <ScrollView
             ref={galleryRef}
             horizontal
@@ -443,7 +448,7 @@ export default function ProductDetailScreen() {
             scrollEventThrottle={16}
           >
             {gallerySlides.map((slide, i) => (
-              <View key={i} style={st.imageSlide}>
+              <View key={i} style={[st.imageSlide, { width: screenWidth, height: galleryHeight }]}>
                 <SmartImage
                   source={slide.uri}
                   style={st.slideImage}
@@ -763,20 +768,42 @@ export default function ProductDetailScreen() {
 
                 {/* List of Reviews */}
                 <View style={st.reviewsList}>
-                  {reviews.map((rev) => (
+                  {reviews.map((rev) => {
+                    const isPendingOwn = rev.status === "CHO_DUYET";
+                    const avatarUri = rev.userAvatar ? publicUrl(rev.userAvatar) : null;
+                    const showAvatarImg = Boolean(avatarUri && !brokenReviewAvatars[rev.reviewId]);
+                    const dateLabel = rev.createdAt
+                      ? new Date(String(rev.createdAt).replace(" ", "T")).toLocaleDateString("vi-VN")
+                      : "";
+                    return (
                     <View key={rev.reviewId} style={st.reviewCard}>
                       <View style={st.reviewTopRow}>
                         <View style={st.reviewerInfo}>
-                          <View style={st.avatarCircle}>
-                            <Text style={st.avatarInitial}>
-                              {rev.userName ? rev.userName.charAt(0) : "K"}
+                          {showAvatarImg && avatarUri ? (
+                            <Image
+                              source={{ uri: avatarUri }}
+                              style={st.avatarCircleImg}
+                              onError={() =>
+                                setBrokenReviewAvatars((prev) => ({ ...prev, [rev.reviewId]: true }))
+                              }
+                            />
+                          ) : (
+                            <View style={st.avatarCircle}>
+                              <Text style={st.avatarInitial}>
+                                {rev.userName ? rev.userName.charAt(0).toUpperCase() : "K"}
+                              </Text>
+                            </View>
+                          )}
+                          <View style={{ flexShrink: 1 }}>
+                            <Text style={st.reviewerName} numberOfLines={1}>
+                              {rev.userName || "Khách hàng YoFaSo"}
                             </Text>
-                          </View>
-                          <View>
-                            <Text style={st.reviewerName}>{rev.userName || "Khách hàng YoFaSo"}</Text>
                             <View style={st.verifiedBadgeRow}>
                               <Ionicons name="checkmark-circle" size={11} color={Colors.statusSuccess} />
                               <Text style={st.verifiedText}>Đã mua hàng</Text>
+                              {!!dateLabel && (
+                                <Text style={st.reviewDateText}>· {dateLabel}</Text>
+                              )}
                             </View>
                           </View>
                         </View>
@@ -793,6 +820,15 @@ export default function ProductDetailScreen() {
                         </View>
                       </View>
 
+                      {isPendingOwn && (
+                        <View style={st.pendingReviewPill}>
+                          <Ionicons name="time-outline" size={11} color="#B45309" />
+                          <Text style={st.pendingReviewPillText}>
+                            Đang chờ duyệt · Chỉ mình bạn thấy
+                          </Text>
+                        </View>
+                      )}
+
                       {/* Purchased variant info */}
                       {(rev.size || rev.colorName) && (
                         <Text style={st.variantPurchasedText}>
@@ -801,7 +837,24 @@ export default function ProductDetailScreen() {
                       )}
 
                       {/* Comment text */}
-                      <Text style={st.reviewCommentText}>{rev.comment}</Text>
+                      {!!rev.comment && (
+                        <Text style={st.reviewCommentText}>{rev.comment}</Text>
+                      )}
+
+                      {/* Fixed-size review photo thumbnail with lightbox */}
+                      {!!rev.photoUrl && (
+                        <Pressable
+                          onPress={() => setZoomReviewPhoto(rev.photoUrl!)}
+                          style={st.reviewThumbWrap}
+                          accessibilityLabel="Phóng to ảnh đánh giá"
+                        >
+                          <PrivateImage
+                            customSource={authImageSource(rev.photoUrl)}
+                            style={st.reviewThumb}
+                            resizeMode="cover"
+                          />
+                        </Pressable>
+                      )}
 
                       {/* Shop Reply Box if present */}
                       {rev.shopReply && (
@@ -814,7 +867,8 @@ export default function ProductDetailScreen() {
                         </View>
                       )}
                     </View>
-                  ))}
+                    );
+                  })}
                 </View>
               </>
             )}
@@ -915,6 +969,34 @@ export default function ProductDetailScreen() {
           </Text>
         </View>
       </Sheet>
+
+      {/* Review Photo Lightbox */}
+      <Modal
+        visible={Boolean(zoomReviewPhoto)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setZoomReviewPhoto(null)}
+      >
+        <Pressable
+          style={st.lightboxBackdrop}
+          onPress={() => setZoomReviewPhoto(null)}
+        >
+          <Pressable
+            onPress={() => setZoomReviewPhoto(null)}
+            style={st.lightboxCloseBtn}
+            accessibilityLabel="Đóng ảnh phóng to"
+          >
+            <Ionicons name="close" size={22} color="#FFFFFF" />
+          </Pressable>
+          {zoomReviewPhoto && (
+            <PrivateImage
+              customSource={authImageSource(zoomReviewPhoto)}
+              style={st.lightboxImage}
+              resizeMode="contain"
+            />
+          )}
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -925,15 +1007,10 @@ const st = StyleSheet.create({
     backgroundColor: Colors.canvas,
   },
   galleryContainer: {
-    width: SCREEN_WIDTH,
-    height: SCREEN_WIDTH * 1.25,
     backgroundColor: Colors.surfaceMuted,
     position: "relative",
   },
-  imageSlide: {
-    width: SCREEN_WIDTH,
-    height: SCREEN_WIDTH * 1.25,
-  },
+  imageSlide: {},
   slideImage: {
     width: "100%",
     height: "100%",
@@ -974,7 +1051,6 @@ const st = StyleSheet.create({
     fontSize: 9,
     fontFamily: "Mono",
     color: "#FFFFFF",
-    fontWeight: "700",
   },
   vtonReadyBadge: {
     position: "absolute",
@@ -1042,7 +1118,6 @@ const st = StyleSheet.create({
     fontSize: 11,
     fontFamily: "Mono",
     color: Colors.primary,
-    fontWeight: "700",
   },
   ratingBadge: {
     flexDirection: "row",
@@ -1085,7 +1160,6 @@ const st = StyleSheet.create({
     fontSize: 22,
     fontFamily: "Mono",
     color: Colors.primary,
-    fontWeight: "700",
   },
   discountPill: {
     backgroundColor: "#FEEBC8", // Gentle apricot badge per User Image 1
@@ -1097,7 +1171,6 @@ const st = StyleSheet.create({
     fontSize: 11,
     fontFamily: "Mono",
     color: "#B45309",
-    fontWeight: "700",
   },
   originalPriceText: {
     fontSize: 13,
@@ -1344,7 +1417,6 @@ const st = StyleSheet.create({
     fontSize: 32,
     fontFamily: "Editorial",
     color: Colors.primary,
-    fontWeight: "700",
   },
   starsRow: {
     flexDirection: "row",
@@ -1355,7 +1427,6 @@ const st = StyleSheet.create({
     fontSize: 9.5,
     fontFamily: "Mono",
     color: Colors.champagneDeep,
-    fontWeight: "700",
   },
   ratingDivider: {
     width: 1,
@@ -1394,7 +1465,6 @@ const st = StyleSheet.create({
     fontSize: 14,
     color: Colors.textPrimary,
     marginTop: 8,
-    fontWeight: "600",
   },
   emptyReviewsSub: {
     fontFamily: Fonts.sans,
@@ -1429,10 +1499,76 @@ const st = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  avatarCircleImg: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.surfaceMuted,
+  },
   avatarInitial: {
     fontSize: 13,
     fontFamily: "JakartaSemiBold",
     color: Colors.champagneDeep,
+  },
+  reviewDateText: {
+    fontSize: 10,
+    fontFamily: "Jakarta",
+    color: Colors.textMuted,
+    marginLeft: 2,
+  },
+  pendingReviewPill: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#FEF3C7",
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: Radii.full,
+    marginTop: 8,
+  },
+  pendingReviewPillText: {
+    fontSize: 10.5,
+    fontFamily: "JakartaSemiBold",
+    color: "#B45309",
+  },
+  reviewThumbWrap: {
+    alignSelf: "flex-start",
+    marginTop: 8,
+    borderRadius: Radii.md,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: Colors.borderHairline,
+  },
+  reviewThumb: {
+    width: 76,
+    height: 76,
+    backgroundColor: Colors.surfaceMuted,
+  },
+  lightboxBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(15, 23, 42, 0.92)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 16,
+  },
+  lightboxCloseBtn: {
+    position: "absolute",
+    top: Platform.OS === "ios" ? 54 : 28,
+    right: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.16)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 10,
+  },
+  lightboxImage: {
+    width: "92%",
+    height: "75%",
   },
   reviewerName: {
     fontSize: 13,

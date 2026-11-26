@@ -88,7 +88,7 @@ export function WarehouseFulfillment() {
           ))}
         </nav>
 
-        {tab === "pick" && <PickListBoard orders={orders} onPrint={() => window.print()} />}
+        {tab === "pick" && <PickListBoard orders={orders} />}
         {tab === "pack" && <PackingStation orders={orders} onRefresh={reloadOrders} />}
         {tab === "handover" && <HandoverReturn orders={orders} onRefresh={reloadOrders} />}
         {tab === "audit" && <AuditReport onRefresh={reloadOrders} />}

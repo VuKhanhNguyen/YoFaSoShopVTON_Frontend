@@ -141,6 +141,11 @@ export default function AuthScreen() {
       const cleanUrl = `${window.location.pathname}${returnToFitting === "1" ? "?returnToFitting=1" : ""}`;
       window.history.replaceState({}, "", cleanUrl);
     }
+    router.setParams({
+      oauthCode: undefined,
+      oauthError: undefined,
+      oauthMessage: undefined,
+    });
 
     if (errStr) {
       if (errStr !== "OAUTH_CANCELLED") {
