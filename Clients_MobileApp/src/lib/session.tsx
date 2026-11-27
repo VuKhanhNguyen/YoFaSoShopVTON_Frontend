@@ -18,6 +18,13 @@ import {
   updateSessionUser,
 } from "./api";
 import type { User } from "./models";
+const signOutCleanups = new Set<() => Promise<void> | void>();
+export function registerSignOutCleanup(fn: () => Promise<void> | void) {
+  signOutCleanups.add(fn);
+  return () => {
+    signOutCleanups.delete(fn);
+  };
+}
 const Context = createContext<{
   user: User | null;
   setUser: (u: User | null) => void;
@@ -80,6 +87,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
   const signOut = async () => {
     try {
+      await Promise.allSettled(Array.from(signOutCleanups).map((fn) => Promise.resolve(fn())));
       await logout();
     } finally {
       setUser(null);

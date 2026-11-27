@@ -20,7 +20,15 @@
         "backgroundColor": "#FAFAF9",
         "foregroundImage": "./assets/brand/app-icon.png"
       },
-      "predictiveBackGestureEnabled": false
+      "package": "com.yofaso.shop",
+      "googleServicesFile": "./google-services.json",
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.READ_MEDIA_IMAGES"
+      ]
     },
     "web": {
       "output": "static",
@@ -47,6 +55,15 @@
       ],
       "expo-sharing",
       [
+        "expo-notifications",
+        {
+          "icon": "./assets/brand/app-icon.png",
+          "color": "#C9A227",
+          "defaultChannel": "default",
+          "enableRemoteNotifications": true
+        }
+      ],
+      [
         "expo-media-library",
         {
           "photosPermission": "Cho phép YoFaSo truy cập ảnh bạn chọn.",
@@ -60,6 +77,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "72324a07-e5c6-4bf1-b4fc-f360cac6d721"
+      }
+    },
+    "owner": "khanhkhiemton2k4"
   }
 }

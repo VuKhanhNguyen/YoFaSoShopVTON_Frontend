@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   BarChart3,
   ChartNoAxesCombined,
@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { StaffHeader } from "@/components/staff-header";
 import { useAuth, useRequireAuth } from "@/lib/auth";
+import { useStaffNotifications } from "@/lib/notification-context";
 import { api } from "@/lib/api";
 import {
   type AdminOrder,
@@ -44,17 +45,64 @@ const TABS = [
   { key: "governance", label: "Phê duyệt & Phân quyền", icon: ShieldCheck },
 ] as const;
 
+type OpsView = "orders" | "vouchers" | "reviews" | "customers";
+type GovView = "shift" | "stock" | "staff" | "logs";
+
+const VALID_TABS: readonly Tab[] = ["finance", "analytics", "studio", "operations", "livechat", "governance"];
+const VALID_OPS_VIEWS: readonly OpsView[] = ["orders", "vouchers", "reviews", "customers"];
+const VALID_GOV_VIEWS: readonly GovView[] = ["shift", "stock", "staff", "logs"];
+
+function AdminSearchParamsSync({
+  onSync,
+}: {
+  onSync: (params: { tab?: Tab; opsView?: OpsView; govView?: GovView; order?: string | null }) => void;
+}) {
+  const sp = useSearchParams();
+  const tabParam = sp.get("tab");
+  const viewParam = sp.get("view");
+  const orderParam = sp.get("order");
+
+  useEffect(() => {
+    const nextTab = VALID_TABS.includes(tabParam as Tab) ? (tabParam as Tab) : undefined;
+    const nextOps = VALID_OPS_VIEWS.includes(viewParam as OpsView) ? (viewParam as OpsView) : undefined;
+    const nextGov = VALID_GOV_VIEWS.includes(viewParam as GovView) ? (viewParam as GovView) : undefined;
+    if (nextTab || nextOps || nextGov || orderParam) {
+      onSync({ tab: nextTab, opsView: nextOps, govView: nextGov, order: orderParam });
+    }
+  }, [tabParam, viewParam, orderParam, onSync]);
+
+  return null;
+}
+
 export function AdminDashboard({ initialTab = "finance" }: { initialTab?: Tab }) {
   const { user, ready } = useRequireAuth(["ROLE_SHOP_ADMIN"]);
   const { logout } = useAuth();
+  const { chatPingCount } = useStaffNotifications();
   const router = useRouter();
 
   const [tab, setTab] = useState<Tab>(initialTab);
+  const [opsView, setOpsView] = useState<OpsView | undefined>(undefined);
+  const [opsOrder, setOpsOrder] = useState<string | null>(null);
+  const [govView, setGovView] = useState<GovView | undefined>(undefined);
   const [chatUnread, setChatUnread] = useState(0);
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [vouchers, setVouchers] = useState<AdminVoucher[]>([]);
   const [reviews, setReviews] = useState<AdminReview[]>([]);
   const [logs, setLogs] = useState<AuditEntry[]>([]);
+
+  const handleSearchSync = useCallback(
+    (p: { tab?: Tab; opsView?: OpsView; govView?: GovView; order?: string | null }) => {
+      if (p.tab) setTab(p.tab);
+      if (p.opsView) setOpsView(p.opsView);
+      if (p.govView) setGovView(p.govView);
+      if (p.order) {
+        setTab("operations");
+        setOpsView("orders");
+        setOpsOrder(p.order);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!ready || !user || user.role !== "ROLE_SHOP_ADMIN") return;
@@ -73,7 +121,7 @@ export function AdminDashboard({ initialTab = "finance" }: { initialTab?: Tab })
       active = false;
       clearInterval(timer);
     };
-  }, [ready, user]);
+  }, [ready, user, chatPingCount]);
 
   // Modals for sidebar bottom
   const [profileOpen, setProfileOpen] = useState(false);
@@ -113,6 +161,9 @@ export function AdminDashboard({ initialTab = "finance" }: { initialTab?: Tab })
 
   return (
     <div className="flex min-h-dvh flex-col bg-canvas text-foreground">
+      <Suspense fallback={null}>
+        <AdminSearchParamsSync onSync={handleSearchSync} />
+      </Suspense>
       <StaffHeader title="ADMIN" className="h-14 py-0 flex-nowrap">
         <span className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex">
           <CheckCircle2 className="h-3.5 w-3.5 text-success" />
@@ -198,13 +249,15 @@ export function AdminDashboard({ initialTab = "finance" }: { initialTab?: Tab })
                 reviews={reviews}
                 setReviews={setReviews}
                 log={log}
+                initialView={opsView}
+                highlightOrderId={opsOrder}
               />
             </div>
             <div hidden={tab !== "livechat"}>
               <LiveChatCSKH isActive={tab === "livechat"} onUnreadChange={setChatUnread} />
             </div>
             <div hidden={tab !== "governance"}>
-              <Governance logs={logs} log={log} />
+              <Governance logs={logs} log={log} initialView={govView} />
             </div>
           </div>
         </main>

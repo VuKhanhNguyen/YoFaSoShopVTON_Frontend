@@ -7,6 +7,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -17,6 +18,10 @@ import { File as ExpoFile } from "expo-file-system";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors, Fonts, Radii, Shadows, Spacing } from "@/constants/theme";
 import { api, publicUrl } from "@/lib/api";
+import {
+  useNotifications,
+  type NotificationPrefKey,
+} from "@/lib/notifications";
 import {
   exchangeOAuthCode,
   fetchLinkedAccounts,
@@ -40,6 +45,17 @@ export default function SettingsScreen() {
 
 function SettingsContent() {
   const { user, setUser, signOut } = useSession();
+  const {
+    pushToken,
+    permissionStatus,
+    expoGoLimited,
+    preferences,
+    enablePushNotifications,
+    disablePushNotifications,
+    updatePreference,
+  } = useNotifications();
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushFeedback, setPushFeedback] = useState<{ text: string; error: boolean } | null>(null);
   const { oauthCode, oauthError, oauthMessage } = useLocalSearchParams<{
     oauthCode?: string;
     oauthError?: string;
@@ -695,6 +711,132 @@ function SettingsContent() {
           })}
         </View>
 
+        {/* Notification & Push Preferences Panel */}
+        <View style={st.panel}>
+          <View style={st.panelHeader}>
+            <Ionicons name="notifications-outline" size={18} color={Colors.champagneDeep} />
+            <Text style={st.panelTitle}>Cài đặt thông báo & Push</Text>
+          </View>
+
+          {!!pushFeedback && (
+            <View
+              style={[
+                st.messageBanner,
+                pushFeedback.error ? st.messageBannerError : st.messageBannerSuccess,
+              ]}
+            >
+              <Text style={st.messageBannerText}>{pushFeedback.text}</Text>
+            </View>
+          )}
+
+          <View style={st.linkedRow}>
+            <View style={st.linkedIconCircle}>
+              <Ionicons
+                name={pushToken ? "notifications" : "notifications-off-outline"}
+                size={18}
+                color={pushToken ? "#059669" : Colors.muted}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={st.linkedTitle}>Thông báo đẩy</Text>
+              <Text
+                style={[
+                  st.linkedSub,
+                  pushToken && { color: Colors.statusSuccess },
+                ]}
+              >
+                {Platform.OS === "web"
+                  ? "Khả dụng trên ứng dụng Android/iOS"
+                  : expoGoLimited
+                    ? "Cần cài bản EAS Development APK"
+                    : pushToken
+                      ? "Đang hoạt động trên thiết bị này"
+                      : permissionStatus === "denied"
+                        ? "Đã bị chặn trong cài đặt điện thoại"
+                        : "Chưa kích hoạt trên thiết bị này"}
+              </Text>
+            </View>
+            {Platform.OS !== "web" && !expoGoLimited && (
+              <Pressable
+                disabled={pushBusy}
+                onPress={async () => {
+                  setPushBusy(true);
+                  setPushFeedback(null);
+                  try {
+                    if (pushToken) {
+                      await disablePushNotifications();
+                      setPushFeedback({ text: "Đã tắt thông báo đẩy trên thiết bị này.", error: false });
+                    } else {
+                      const res = await enablePushNotifications();
+                      setPushFeedback({ text: res.message, error: !res.ok });
+                    }
+                  } finally {
+                    setPushBusy(false);
+                  }
+                }}
+                style={({ pressed }) => [
+                  pushToken ? st.unlinkBtn : st.linkBtn,
+                  (pressed || pushBusy) && { opacity: 0.7 },
+                ]}
+              >
+                {pushBusy ? (
+                  <ActivityIndicator
+                    size="small"
+                    color={pushToken ? Colors.statusDanger : Colors.primary}
+                  />
+                ) : (
+                  <Text style={pushToken ? st.unlinkBtnText : st.linkBtnText}>
+                    {pushToken ? "Tắt Push" : "Bật Push"}
+                  </Text>
+                )}
+              </Pressable>
+            )}
+          </View>
+
+          {(
+            [
+              {
+                key: "DON_HANG" as NotificationPrefKey,
+                title: "Cập nhật đơn hàng",
+                sub: "Thanh toán VietQR, đóng gói, shipper giao hàng, hủy/hoàn",
+              },
+              {
+                key: "THU_DO_VTON" as NotificationPrefKey,
+                title: "Kết quả thử đồ AI (VTON)",
+                sub: "Báo ngay khi ảnh ướm thử và điểm thẩm mỹ hoàn tất",
+              },
+              {
+                key: "KHUYEN_MAI" as NotificationPrefKey,
+                title: "Ưu đãi & Voucher thành viên",
+                sub: "Mã giảm giá mới, quà sinh nhật, thông báo khuyến mãi",
+              },
+              {
+                key: "LIVE_CHAT" as NotificationPrefKey,
+                title: "Tin nhắn từ Chủ shop",
+                sub: "Thông báo đẩy khi Chủ shop phản hồi hội thoại trực tuyến",
+              },
+              {
+                key: "HE_THONG" as NotificationPrefKey,
+                title: "Thông báo hệ thống & Đánh giá",
+                sub: "Phản hồi đánh giá sản phẩm và cập nhật tài khoản",
+              },
+            ] as const
+          ).map((item) => (
+            <View key={item.key} style={st.notifPrefRow}>
+              <View style={{ flex: 1, paddingRight: 10 }}>
+                <Text style={st.linkedTitle}>{item.title}</Text>
+                <Text style={st.linkedSub}>{item.sub}</Text>
+              </View>
+              <Switch
+                value={preferences[item.key]}
+                onValueChange={(val) => void updatePreference(item.key, val)}
+                trackColor={{ false: Colors.hairline, true: Colors.champagne }}
+                thumbColor={preferences[item.key] ? Colors.primary : "#FFFFFF"}
+              />
+            </View>
+          ))}
+        </View>
+
         {/* Password Security Panel */}
         <View style={st.panel}>
           <View style={st.panelHeader}>
@@ -1174,5 +1316,13 @@ const st = StyleSheet.create({
     fontFamily: Fonts.sansSemiBold,
     fontSize: 12,
     color: "#DC2626",
+  },
+  notifPrefRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: Colors.hairline,
   },
 });

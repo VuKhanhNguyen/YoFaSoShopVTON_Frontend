@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
+import { StaffNotificationProvider } from "@/lib/notification-context";
 import { DesktopToastStack, ServerOfflineBanner } from "@/components/feedback";
 
 const fontSans = localFont({
@@ -31,6 +32,16 @@ export const metadata: Metadata = {
   description:
     "Hệ thống vận hành bán hàng, thu ngân POS, quản lý kho bãi, giao vận shipper và dashboard quản trị chủ shop YoFaSo Omnichannel VTON Platform.",
   icons: { icon: "/brand/YoFaSo_logo.ico" },
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    title: "YoFaSo Staff",
+    statusBarStyle: "default",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#1C1917",
 };
 
 export default function RootLayout({
@@ -54,9 +65,11 @@ export default function RootLayout({
       </head>
       <body className="min-h-dvh bg-background text-foreground antialiased selection:bg-accent selection:text-primary" suppressHydrationWarning>
         <AuthProvider>
-          <ServerOfflineBanner />
-          {children}
-          <DesktopToastStack />
+          <StaffNotificationProvider>
+            <ServerOfflineBanner />
+            {children}
+            <DesktopToastStack />
+          </StaffNotificationProvider>
         </AuthProvider>
       </body>
     </html>

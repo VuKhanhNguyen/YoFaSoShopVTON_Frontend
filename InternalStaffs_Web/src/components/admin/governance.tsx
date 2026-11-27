@@ -92,14 +92,27 @@ const ROLE_OPTIONS = [
 export function Governance({
   logs,
   log,
+  initialView,
 }: {
   staff?: AdminStaff[];
   setStaff?: (staff: AdminStaff[]) => void;
   logs: AuditEntry[];
   log: (action: string, reason: string) => void;
+  initialView?: View;
 }) {
-  const [view, setView] = useState<View>("shift");
+  const [view, setView] = useState<View>(initialView || "shift");
   const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    if (!initialView) return;
+    let active = true;
+    void Promise.resolve().then(() => {
+      if (active) setView(initialView);
+    });
+    return () => {
+      active = false;
+    };
+  }, [initialView]);
 
   // Real MySQL Staff state
   const [staffList, setStaffList] = useState<RealStaffUser[]>([]);

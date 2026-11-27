@@ -79,7 +79,7 @@ function Handover({
   const scan = async () => {
     const raw = code.trim();
     if (!raw) return;
-    const c = raw.toUpperCase().replace(/^#/, "").replace(/^YFS/, "");
+    const c = raw.toUpperCase().replace(/^#/, "").replace(/^YFS(?!-)/, "");
     const numericId = c.match(/^\d+$/) ? `DH${c.padStart(8, "0")}` : "";
 
     // 1. Tìm trong danh sách chờ bàn giao theo mã đơn, đuôi mã đơn, hoặc mã SKU / Barcode
@@ -205,7 +205,7 @@ function Handover({
               value={code}
               onChange={(e) => setCode(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && scan()}
-              placeholder="Quét mã vạch hoặc nhập mã SKU, mã vạch hoặc mã đơn hàng… (VD: DH00000001, 1, SKU-001)"
+              placeholder="Quét mã vạch hoặc nhập mã SKU, mã vạch hoặc mã đơn hàng… (VD: DH00000001, 1, YFS-W-AGC-001-DEN-S)"
               disabled={confirmed}
               className="h-12 w-full rounded-md border-2 border-primary bg-muted pl-11 pr-4 font-mono text-sm outline-none focus:bg-surface disabled:opacity-50"
             />
@@ -297,7 +297,7 @@ function ReturnIntake({
   const scan = async (explicitCode?: string) => {
     const raw = (explicitCode ?? code).trim();
     if (!raw) return;
-    const c = raw.toUpperCase().replace(/^#/, "").replace(/^YFS/, "");
+    const c = raw.toUpperCase().replace(/^#/, "").replace(/^YFS(?!-)/, "");
     const numericId = c.match(/^\d+$/) ? `DH${c.padStart(8, "0")}` : "";
 
     setError("");

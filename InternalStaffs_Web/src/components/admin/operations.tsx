@@ -8,12 +8,14 @@ import {
   Info,
   Loader2,
   Lock,
+  Megaphone,
   MessageSquare,
   Pencil,
   Plus,
   RefreshCw,
   RotateCcw,
   Search,
+  Send,
   Sparkles,
   Star,
   Unlock,
@@ -93,6 +95,8 @@ export function AdminOperations({
   reviews,
   setReviews,
   log,
+  initialView,
+  highlightOrderId,
 }: {
   orders: AdminOrder[];
   setOrders: Dispatch<SetStateAction<AdminOrder[]>>;
@@ -101,11 +105,63 @@ export function AdminOperations({
   reviews: AdminReview[];
   setReviews: Dispatch<SetStateAction<AdminReview[]>>;
   log: (action: string, reason: string) => void;
+  initialView?: View;
+  highlightOrderId?: string | null;
 }) {
-  const [view, setView] = useState<View>("orders");
+  const [view, setView] = useState<View>(initialView || "orders");
   const [channel, setChannel] = useState("ALL");
   const [status, setStatus] = useState("ALL");
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(highlightOrderId || "");
+
+  // Admin Broadcast Notification Dialog
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
+  const [broadcastTitle, setBroadcastTitle] = useState("");
+  const [broadcastContent, setBroadcastContent] = useState("");
+  const [broadcastType, setBroadcastType] = useState<"KHUYEN_MAI" | "HE_THONG">("KHUYEN_MAI");
+  const [broadcastTier, setBroadcastTier] = useState<"ALL" | "DONG" | "BAC" | "VANG" | "KIM_CUONG">("ALL");
+  const [broadcastLink, setBroadcastLink] = useState("/promotions");
+  const [broadcastSending, setBroadcastSending] = useState(false);
+
+  const handleSendBroadcast = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const title = broadcastTitle.trim();
+    const content = broadcastContent.trim();
+    if (!title || !content) {
+      pushToast({ tone: "error", title: "Vui lòng nhập đầy đủ tiêu đề và nội dung thông báo." });
+      return;
+    }
+    setBroadcastSending(true);
+    try {
+      const res = await api<{ sentCount: number; targetTier: string }>(
+        "/admin/notifications/broadcast",
+        "POST",
+        {
+          title,
+          content,
+          type: broadcastType,
+          targetTier: broadcastTier,
+          link: broadcastLink.trim() || "/promotions",
+        },
+      );
+      pushToast({
+        tone: "success",
+        title: `Đã gửi thông báo tới ${res.sentCount} khách hàng`,
+        detail: `Nhóm đối tượng: ${res.targetTier === "ALL" ? "Toàn bộ khách hàng" : `Hạng ${res.targetTier}`}`,
+      });
+      log("Phát thông báo hàng loạt", `${title} (${res.sentCount} khách hàng · ${broadcastTier})`);
+      setBroadcastOpen(false);
+      setBroadcastTitle("");
+      setBroadcastContent("");
+    } catch (err) {
+      pushToast({
+        tone: "error",
+        title: "Không thể phát thông báo hàng loạt",
+        detail: err instanceof Error ? err.message : undefined,
+      });
+    } finally {
+      setBroadcastSending(false);
+    }
+  };
 
   const [detail, setDetail] = useState<string | null>(null);
   const [address, setAddress] = useState("");
@@ -180,6 +236,31 @@ export function AdminOperations({
   // Orders State & Filters
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [orderPage, setOrderPage] = useState(1);
+
+  useEffect(() => {
+    if (!initialView) return;
+    let active = true;
+    void Promise.resolve().then(() => {
+      if (active) setView(initialView);
+    });
+    return () => {
+      active = false;
+    };
+  }, [initialView]);
+
+  useEffect(() => {
+    if (!highlightOrderId) return;
+    let active = true;
+    void Promise.resolve().then(() => {
+      if (!active) return;
+      setView("orders");
+      setSearch(highlightOrderId);
+      setOrderPage(1);
+    });
+    return () => {
+      active = false;
+    };
+  }, [highlightOrderId]);
   const ORDER_PAGE_SIZE = 10;
   const [editingOrder, setEditingOrder] = useState<AdminOrder | null>(null);
   const [editRecipient, setEditRecipient] = useState("");
@@ -749,16 +830,27 @@ export function AdminOperations({
         detail="Quản trị đa kênh · Quản lý đơn hàng, mã giảm giá, kiểm duyệt đánh giá và hồ sơ khách hàng"
       />
 
-      <SubTabs
-        tabs={[
-          { key: "orders", label: "Đơn hàng đa kênh" },
-          { key: "vouchers", label: "Khuyến mãi & Voucher" },
-          { key: "reviews", label: "Kiểm duyệt đánh giá" },
-          { key: "customers", label: "Khách hàng" },
-        ]}
-        active={view}
-        setActive={setView}
-      />
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+        <SubTabs
+          tabs={[
+            { key: "orders", label: "Đơn hàng đa kênh" },
+            { key: "vouchers", label: "Khuyến mãi & Voucher" },
+            { key: "reviews", label: "Kiểm duyệt đánh giá" },
+            { key: "customers", label: "Khách hàng" },
+          ]}
+          active={view}
+          setActive={setView}
+        />
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setBroadcastOpen(true)}
+          className="mb-4 gap-1.5"
+        >
+          <Megaphone className="h-3.5 w-3.5 text-accent-hover" />
+          Phát thông báo khách hàng
+        </Button>
+      </div>
 
       {/* SUBTAB 1: ORDERS */}
       {view === "orders" && (
@@ -2029,6 +2121,102 @@ export function AdminOperations({
                 </Button>
                 <Button type="submit" disabled={updatingOrder}>
                   {updatingOrder ? "Đang lưu..." : "Lưu thay đổi"}
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {broadcastOpen && (
+        <Dialog open onOpenChange={setBroadcastOpen}>
+          <DialogContent className="max-w-lg">
+            <DialogTitle className="flex items-center gap-2">
+              <Megaphone className="h-4.5 w-4.5 text-accent-hover" />
+              Phát thông báo hàng loạt (Broadcast)
+            </DialogTitle>
+            <DialogDescription>
+              Lưu vào bảng <code>ThongBao</code>, đồng bộ realtime và gửi Push Notification tới app khách hàng.
+            </DialogDescription>
+            <form onSubmit={handleSendBroadcast} className="space-y-3 pt-1">
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Nhóm thông báo">
+                  <select
+                    className={inputClass}
+                    value={broadcastType}
+                    onChange={(e) => setBroadcastType(e.target.value as "KHUYEN_MAI" | "HE_THONG")}
+                  >
+                    <option value="KHUYEN_MAI">Khuyến mãi &amp; Ưu đãi</option>
+                    <option value="HE_THONG">Thông báo hệ thống</option>
+                  </select>
+                </Field>
+                <Field label="Đối tượng nhận">
+                  <select
+                    className={inputClass}
+                    value={broadcastTier}
+                    onChange={(e) =>
+                      setBroadcastTier(
+                        e.target.value as "ALL" | "DONG" | "BAC" | "VANG" | "KIM_CUONG",
+                      )
+                    }
+                  >
+                    <option value="ALL">Tất cả khách hàng</option>
+                    <option value="DONG">Hạng Đồng</option>
+                    <option value="BAC">Hạng Bạc</option>
+                    <option value="VANG">Hạng Vàng</option>
+                    <option value="KIM_CUONG">Hạng Kim Cương</option>
+                  </select>
+                </Field>
+              </div>
+
+              <Field label="Tiêu đề thông báo">
+                <input
+                  required
+                  maxLength={150}
+                  placeholder="vd: Ưu đãi cuối tuần — Giảm 15% BST mới"
+                  className={inputClass}
+                  value={broadcastTitle}
+                  onChange={(e) => setBroadcastTitle(e.target.value)}
+                />
+              </Field>
+
+              <Field label="Nội dung chi tiết">
+                <textarea
+                  required
+                  rows={4}
+                  maxLength={1000}
+                  placeholder="Nhập nội dung đầy đủ hiển thị trong hộp thư khách hàng..."
+                  className={`${inputClass} h-24 py-2`}
+                  value={broadcastContent}
+                  onChange={(e) => setBroadcastContent(e.target.value)}
+                />
+              </Field>
+
+              <Field label="Đường dẫn điều hướng khi bấm vào (tùy chọn)">
+                <input
+                  placeholder="/promotions hoặc /product/SP00000001"
+                  className={inputClass}
+                  value={broadcastLink}
+                  onChange={(e) => setBroadcastLink(e.target.value)}
+                />
+              </Field>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setBroadcastOpen(false)}
+                  disabled={broadcastSending}
+                >
+                  Hủy
+                </Button>
+                <Button type="submit" disabled={broadcastSending} className="gap-1.5">
+                  {broadcastSending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Send className="h-3.5 w-3.5" />
+                  )}
+                  {broadcastSending ? "Đang gửi..." : "Gửi thông báo ngay"}
                 </Button>
               </div>
             </form>

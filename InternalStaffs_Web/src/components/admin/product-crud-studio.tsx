@@ -69,9 +69,10 @@ import {
   WAIST_OPTIONS,
   buildSku,
   buildYoFaSoDescriptionTemplate,
-  detectCategoryGender,
+  finalizeVariantSku,
   labelFor,
   pickDominantColor,
+  resolveCategoryGender,
   type CategoryOption,
   type GarmentLength,
   type KMeansColor,
@@ -184,7 +185,7 @@ function emptyEditorForm(defaultCategoryId: string): EditorFormState {
     status: "BAN_NHAP",
     name: "",
     categoryId: defaultCategoryId,
-    gender: detectCategoryGender(defaultCategoryId),
+    gender: resolveCategoryGender(defaultCategoryId),
     material: "",
     description: "",
     fit: "SUONG_VUA",
@@ -923,7 +924,7 @@ export function ProductCrudStudio({
         if (!p) break;
         current = p;
       }
-      return current?.value || (detectCategoryGender(catId) === "MALE" ? "DM000001" : "DM000002");
+      return current?.value || (resolveCategoryGender(catId, categories) === "MALE" ? "DM000001" : "DM000002");
     },
     [categories]
   );
@@ -1030,7 +1031,7 @@ export function ProductCrudStudio({
         status: detail.status || row.status,
         name: detail.name || row.name,
         categoryId: detail.categoryId || row.categoryId,
-        gender: detectCategoryGender(detail.categoryId || row.categoryId),
+        gender: resolveCategoryGender(detail.categoryId || row.categoryId, categories),
         material: detail.material ?? row.material ?? "",
         description: detail.description ?? "",
         fit: detail.fit || row.fit || "OM_SAT",
@@ -1120,6 +1121,27 @@ export function ProductCrudStudio({
         }
       }
 
+      const activeCategoryName = categories.find((c) => c.value === form.categoryId)?.label;
+      const activeGender = resolveCategoryGender(form.categoryId, categories);
+      const usedSkus = new Set(
+        [
+          ...form.areas.flatMap((a) => a.variants.map((v) => v.sku)),
+          ...createdAreas.flatMap((a) => a.variants.map((v) => v.sku)),
+        ].map((s) => s.trim().toUpperCase())
+      );
+      const suggestedSku = finalizeVariantSku(
+        buildSku({
+          gender: activeGender,
+          categoryId: form.categoryId,
+          categoryName: activeCategoryName,
+          productIdOrSeq: form.productId,
+          colorName: dominant.name,
+          size: "M",
+        }),
+        form.productId ?? 0,
+        usedSkus
+      );
+
       createdAreas.push({
         areaId: `area-${Date.now()}-${i}`,
         assetId,
@@ -1131,7 +1153,7 @@ export function ProductCrudStudio({
         variants: [
           {
             size: "M",
-            sku: buildSku(form.name || "SANPHAM", dominant.name, "M", form.areas.length + i + 1),
+            sku: suggestedSku,
             price: "350000",
             salePrice: "",
             stock: "20",
@@ -1183,24 +1205,51 @@ export function ProductCrudStudio({
           hex: p.hex,
           share: p.share ?? 1,
         }));
-        setForm((prev) => ({
-          ...prev,
-          vtonCategory: result.vtonCategory || prev.vtonCategory,
-          subtype: result.subtype || prev.subtype,
-          areas: prev.areas.map((a) => {
-            if (a.areaId !== areaId) return a;
-            return {
-              ...a,
-              colorName: result.dominantColor!.name,
-              dominantHex: result.dominantColor!.hex,
-              palette: nextPalette,
-              variants: a.variants.map((v, vIdx) => ({
-                ...v,
-                sku: buildSku(prev.name || "SANPHAM", result.dominantColor!.name, v.size, vIdx + 1),
-              })),
-            };
-          }),
-        }));
+        setForm((prev) => {
+          const catName = categories.find((c) => c.value === prev.categoryId)?.label;
+          const resolvedGender = resolveCategoryGender(prev.categoryId, categories);
+          const usedSkus = new Set(
+            prev.areas
+              .filter((a) => a.areaId !== areaId)
+              .flatMap((a) => a.variants.map((v) => v.sku.trim().toUpperCase()))
+          );
+          const targetArea = prev.areas.find((a) => a.areaId === areaId);
+          targetArea?.variants.forEach((v) => {
+            if (v.variantId) usedSkus.add(v.sku.trim().toUpperCase());
+          });
+          return {
+            ...prev,
+            vtonCategory: result.vtonCategory || prev.vtonCategory,
+            subtype: result.subtype || prev.subtype,
+            areas: prev.areas.map((a) => {
+              if (a.areaId !== areaId) return a;
+              return {
+                ...a,
+                colorName: result.dominantColor!.name,
+                dominantHex: result.dominantColor!.hex,
+                palette: nextPalette,
+                variants: a.variants.map((v) => ({
+                  ...v,
+                  // Chỉ tự sinh gợi ý SKU cho biến thể mới chưa lưu DB; giữ nguyên SKU đã lưu
+                  sku: v.variantId
+                    ? v.sku
+                    : finalizeVariantSku(
+                        buildSku({
+                          gender: resolvedGender,
+                          categoryId: prev.categoryId,
+                          categoryName: catName,
+                          productIdOrSeq: prev.productId,
+                          colorName: result.dominantColor!.name,
+                          size: v.size,
+                        }),
+                        prev.productId ?? 0,
+                        usedSkus
+                      ),
+                })),
+              };
+            }),
+          };
+        });
         toast.success({
           title: `AI đã nhận diện lại màu: ${result.dominantColor.name}`,
           detail: `Mã màu HEX: ${result.dominantColor.hex}`,
@@ -1262,6 +1311,7 @@ export function ProductCrudStudio({
     }
     const seenSkus = new Set<string>();
     const seenVariants = new Set<string>();
+    const previewSeq = form.productId ?? 999999;
     for (const area of form.areas) {
       if (!area.colorName.trim()) return "Mỗi area ảnh cần có tên màu sắc.";
       for (const v of area.variants) {
@@ -1269,9 +1319,11 @@ export function ProductCrudStudio({
         const combination = JSON.stringify([area.colorName.trim().toLocaleLowerCase("vi"), v.size]);
         if (seenVariants.has(combination)) return `Màu ${area.colorName} đã có size ${v.size}.`;
         seenVariants.add(combination);
-        const skuUpper = v.sku.trim().toUpperCase();
-        if (seenSkus.has(skuUpper)) return `Mã SKU "${v.sku}" bị trùng lặp.`;
-        seenSkus.add(skuUpper);
+        const normalizedSku = (
+          v.variantId ? v.sku.trim() : finalizeVariantSku(v.sku, previewSeq)
+        ).toUpperCase();
+        if (seenSkus.has(normalizedSku)) return `Mã SKU "${v.sku}" bị trùng lặp.`;
+        seenSkus.add(normalizedSku);
         const price = Number(v.price);
         const stock = Number(v.stock);
         if (!Number.isFinite(price) || price <= 0)
@@ -1348,8 +1400,6 @@ export function ProductCrudStudio({
       savedId = pid;
       setForm((prev) => ({ ...prev, productId: pid, status: savedProduct.status }));
       step = "biến thể";
-      const prodNum = parseInt(pid.replace(/\D/g, ""), 10) || 1;
-      const prodNumStr = prodNum >= 100 ? String(prodNum) : String(prodNum).padStart(3, "0");
 
       // 2. Xóa các biến thể đã gỡ (nếu sửa sản phẩm cũ)
       for (const removedId of form.removedVariantIds) {
@@ -1361,12 +1411,18 @@ export function ProductCrudStudio({
         if (removed.discontinued) toast.info({ title: "Đã ngừng bán biến thể có lịch sử giao dịch" });
       }
 
-      // 3. Tạo / cập nhật từng biến thể màu x size với SKU đuôi theo mã sản phẩm
+      // 3. Tạo / cập nhật từng biến thể màu x size với SKU chuẩn YFS-{W|M}-{DM}-{SO}-{MAU}-{SIZE}
+      const usedSkusInSave = new Set<string>(
+        form.areas
+          .flatMap((a) => a.variants)
+          .filter((v) => Boolean(v.variantId))
+          .map((v) => v.sku.trim().toUpperCase())
+      );
       for (const area of form.areas) {
         const colorsCsv = area.palette.map((c) => c.hex).join(",") || area.dominantHex;
         for (const v of area.variants) {
           const baseSku = v.sku.trim();
-          const cleanSku = v.variantId ? baseSku : baseSku.replace(/(-\d+)?$/, `-${prodNumStr}`);
+          const cleanSku = v.variantId ? baseSku : finalizeVariantSku(baseSku, pid, usedSkusInSave);
           const vPayload = {
             sku: cleanSku,
             size: v.size,
@@ -1393,7 +1449,7 @@ export function ProductCrudStudio({
               ...prev,
               areas: prev.areas.map((a) => a.areaId === area.areaId ? {
                 ...a,
-                variants: a.variants.map((item) => item.size === v.size ? { ...item, variantId } : item),
+                variants: a.variants.map((item) => item.size === v.size ? { ...item, variantId, sku: cleanSku } : item),
               } : a),
             }));
           }
@@ -2081,7 +2137,7 @@ export function ProductCrudStudio({
                           setForm((prev) => ({
                             ...prev,
                             categoryId: firstChild.value,
-                            gender: detectCategoryGender(firstChild.value),
+                            gender: resolveCategoryGender(firstChild.value, categories),
                           }));
                         }
                       }}
@@ -2104,7 +2160,7 @@ export function ProductCrudStudio({
                           setForm((prev) => ({
                             ...prev,
                             categoryId: newCat,
-                            gender: detectCategoryGender(newCat),
+                            gender: resolveCategoryGender(newCat, categories),
                           }));
                         }}
                         className={inputClass}
@@ -2552,7 +2608,11 @@ export function ProductCrudStudio({
                     key={area.areaId}
                     area={area}
                     index={idx}
-                    productName={form.name || "SANPHAM"}
+                    productId={form.productId}
+                    categoryId={form.categoryId}
+                    categoryName={categories.find((c) => c.value === form.categoryId)?.label}
+                    gender={resolveCategoryGender(form.categoryId, categories)}
+                    existingSkus={form.areas.flatMap((a) => a.variants.map((v) => v.sku))}
                     shelfOptions={shelves}
                     onChange={(updated) => {
                       setForm((prev) => ({

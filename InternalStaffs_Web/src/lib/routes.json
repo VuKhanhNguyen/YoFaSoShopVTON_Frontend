@@ -57,6 +57,10 @@
   },
   {
     "method": "POST",
+    "path": "/admin/notifications/broadcast"
+  },
+  {
+    "method": "POST",
     "path": "/admin/orders/{id}/cancel"
   },
   {
@@ -402,6 +406,38 @@
   {
     "method": "GET",
     "path": "/notifications"
+  },
+  {
+    "method": "GET",
+    "path": "/notifications/unread-count"
+  },
+  {
+    "method": "GET",
+    "path": "/notifications/stream"
+  },
+  {
+    "method": "GET",
+    "path": "/notifications/web-push/public-key"
+  },
+  {
+    "method": "POST",
+    "path": "/notifications/devices"
+  },
+  {
+    "method": "DELETE",
+    "path": "/notifications/devices"
+  },
+  {
+    "method": "POST",
+    "path": "/notifications/devices/unregister"
+  },
+  {
+    "method": "GET",
+    "path": "/notifications/preferences"
+  },
+  {
+    "method": "PUT",
+    "path": "/notifications/preferences"
   },
   {
     "method": "POST",

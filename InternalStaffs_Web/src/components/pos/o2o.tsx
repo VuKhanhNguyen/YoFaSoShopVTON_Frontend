@@ -229,8 +229,8 @@ export function O2O({
       setSessionId(cleanSession);
     }
 
-    // Auto-switch to product lookup if cashier enters SP... / SKU-... / BT... into session field
-    if (cleanSession && !cleanPhone && /^(SP|SKU|BT)/i.test(cleanSession)) {
+    // Auto-switch to product lookup if cashier enters SP... / SKU-... / YFS-... / BT... into session field
+    if (cleanSession && !cleanPhone && /^(SP|SKU|YFS|BT)/i.test(cleanSession)) {
       setMode("product");
       setProductQuery(cleanSession);
       void lookupProductOrSku(cleanSession);
@@ -532,7 +532,7 @@ export function O2O({
               <Input
                 autoFocus
                 aria-label="Mã sản phẩm hoặc SKU"
-                placeholder="VD: SP00000001, SKU-SM01-TRANG-M, BT00000001 hoặc Áo sơ mi..."
+                placeholder="VD: SP00000001, YFS-W-AGC-001-DEN-S, BT00000001 hoặc Áo sơ mi..."
                 value={productQuery}
                 onChange={(e) => {
                   setProductQuery(e.target.value);

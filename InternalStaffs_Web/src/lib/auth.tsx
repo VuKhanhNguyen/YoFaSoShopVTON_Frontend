@@ -87,6 +87,15 @@ export function authenticateDemo(email: string, pass: string): StaffUser | null 
 }
 
 const STORAGE_KEY = "yofaso-staff-session";
+const logoutCleanupListeners = new Set<() => Promise<void> | void>();
+
+/** Đăng ký tác vụ dọn dẹp (ví dụ hủy Web Push subscription) chạy ngay trước khi xóa cookie đăng xuất. */
+export function registerStaffLogoutCleanup(fn: () => Promise<void> | void): () => void {
+  logoutCleanupListeners.add(fn);
+  return () => {
+    logoutCleanupListeners.delete(fn);
+  };
+}
 
 interface AuthContextValue {
   user: StaffUser | null;
@@ -213,6 +222,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
+    // Hủy subscription Web Push và đóng SSE trước khi cookie HttpOnly bị xóa
+    await Promise.allSettled(Array.from(logoutCleanupListeners).map((fn) => fn()));
     setUser(null);
     window.localStorage.removeItem(STORAGE_KEY);
     try {

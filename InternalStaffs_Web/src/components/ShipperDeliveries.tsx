@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   ArrowRight,
   Banknote,
+  BellRing,
   Camera,
   CheckCircle2,
   Download,
@@ -21,6 +23,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { StaffHeader } from "@/components/staff-header";
 import { useRequireAuth, type StaffUser } from "@/lib/auth";
+import { useStaffNotifications } from "@/lib/notification-context";
 import { vnd } from "@/lib/pos";
 import { useResource } from "@/hooks/use-resource";
 import { api } from "@/lib/api";
@@ -48,12 +51,22 @@ const STATUS_UI: Record<ShipStatus, { label: string; cls: string }> = {
   HOAN_TRA: { label: "HOÀN TRẢ KHO", cls: "bg-danger-subtle text-destructive" },
 };
 
+function ShipperSearchParamsSync({ onOrder }: { onOrder: (orderId: string) => void }) {
+  const sp = useSearchParams();
+  const orderParam = sp.get("order");
+  useEffect(() => {
+    if (orderParam) onOrder(orderParam);
+  }, [orderParam, onOrder]);
+  return null;
+}
+
 export function ShipperDeliveries() {
   const { user, ready } = useRequireAuth(["ROLE_STAFF_SHIPPER", "ROLE_SHOP_ADMIN"]);
   const { data: dbOrders, reload: reloadOrders, loading } = useResource<any[]>("/staff/orders?size=100");
   const [route, setRoute] = useState<Stop[]>([]);
   const [view, setView] = useState<View>("route");
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [deepLinkOrder, setDeepLinkOrder] = useState<string | null>(null);
   const [settled, setSettled] = useState(false);
 
   useEffect(() => {
@@ -69,6 +82,22 @@ export function ShipperDeliveries() {
       setRoute(relevant.map(mapOrderToStop));
     }
   }, [dbOrders, user]);
+
+  useEffect(() => {
+    if (!deepLinkOrder || route.length === 0) return;
+    const found = route.find((r) => r.maDon === deepLinkOrder);
+    if (!found) return;
+    let active = true;
+    void Promise.resolve().then(() => {
+      if (!active) return;
+      setActiveId(found.maDon);
+      setView("stop");
+      setDeepLinkOrder(null);
+    });
+    return () => {
+      active = false;
+    };
+  }, [deepLinkOrder, route]);
 
   if (!ready || !user) {
     return (
@@ -87,6 +116,9 @@ export function ShipperDeliveries() {
 
   return (
     <div className="min-h-dvh bg-surface-muted">
+      <Suspense fallback={null}>
+        <ShipperSearchParamsSync onOrder={setDeepLinkOrder} />
+      </Suspense>
       <div className="mx-auto flex min-h-dvh max-w-md flex-col bg-canvas shadow-modal">
         <StaffHeader title="GIAO VẬN">
           {loading && (
@@ -146,6 +178,7 @@ export function ShipperDeliveries() {
 type InstallEvt = Event & { prompt: () => Promise<void> };
 
 function PwaBanner() {
+  const { webPushState, webPushBusy, enableWebPush } = useStaffNotifications();
   const [evt, setEvt] = useState<InstallEvt | null>(null);
   const [hidden, setHidden] = useState(false);
   const [hint, setHint] = useState(false);
@@ -162,11 +195,25 @@ function PwaBanner() {
   if (hidden) return null;
 
   return (
-    <div className="flex items-center gap-2 border-b border-border bg-primary px-3 py-2 text-primary-foreground">
+    <div className="flex flex-wrap items-center gap-2 border-b border-border bg-primary px-3 py-2 text-primary-foreground">
       <Download className="h-4 w-4 shrink-0 text-accent" />
-      <p className="flex-1 text-xs font-semibold">
-        {hint ? "Mở menu trình duyệt → “Thêm vào màn hình chính”." : "Cài đặt App Shipper về màn hình chính (PWA)"}
+      <p className="min-w-[140px] flex-1 text-xs font-semibold">
+        {hint
+          ? "Mở menu trình duyệt → “Thêm vào màn hình chính”."
+          : "Cài đặt App Shipper (PWA) & bật thông báo đẩy nhận đơn"}
       </p>
+      {webPushState === "disabled" && (
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={webPushBusy}
+          onClick={() => void enableWebPush()}
+          className="h-7 gap-1 border-accent/40 bg-transparent px-2 text-xs text-primary-foreground hover:bg-primary-foreground/10"
+        >
+          <BellRing className="h-3 w-3 text-accent" />
+          {webPushBusy ? "Đang bật…" : "Bật Push"}
+        </Button>
+      )}
       <Button
         size="sm"
         variant="accent"
@@ -363,7 +410,7 @@ function ScanView({
   const { data: pendingParcels, reload: reloadPending } = useResource<any[]>("/staff/shipper/pending-parcels");
 
   const submit = async (raw: string) => {
-    const c = raw.trim().toUpperCase().replace(/^#/, "").replace(/^YFS/, "");
+    const c = raw.trim().toUpperCase().replace(/^#/, "").replace(/^YFS(?!-)/, "");
     if (!c) return;
     if (route.some((r) => r.maDon === c)) {
       const text = "Kiện đã có trong lộ trình chuyến đi.";

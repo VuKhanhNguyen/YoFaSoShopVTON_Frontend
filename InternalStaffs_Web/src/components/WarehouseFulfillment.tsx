@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { ClipboardList, Package, Truck, ClipboardCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StaffHeader } from "@/components/staff-header";
@@ -20,6 +21,19 @@ const TABS: { k: Tab; l: string; icon: typeof Package }[] = [
   { k: "handover", l: "Bàn giao & Hoàn kho", icon: Truck },
   { k: "audit", l: "Kiểm kê & Báo cáo", icon: ClipboardCheck },
 ];
+
+const VALID_WAREHOUSE_TABS: readonly Tab[] = ["pick", "pack", "handover", "audit"];
+
+function WarehouseSearchParamsSync({ onTab }: { onTab: (tab: Tab) => void }) {
+  const sp = useSearchParams();
+  const tabParam = sp.get("tab");
+  useEffect(() => {
+    if (tabParam && VALID_WAREHOUSE_TABS.includes(tabParam as Tab)) {
+      onTab(tabParam as Tab);
+    }
+  }, [tabParam, onTab]);
+  return null;
+}
 
 export function WarehouseFulfillment() {
   const { user, ready } = useRequireAuth(["ROLE_STAFF_WAREHOUSE", "ROLE_SHOP_ADMIN"]);
@@ -43,6 +57,9 @@ export function WarehouseFulfillment() {
 
   return (
     <div className="flex min-h-dvh flex-col bg-canvas text-foreground">
+      <Suspense fallback={null}>
+        <WarehouseSearchParamsSync onTab={setTab} />
+      </Suspense>
       <StaffHeader title="KHO">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
           <span>

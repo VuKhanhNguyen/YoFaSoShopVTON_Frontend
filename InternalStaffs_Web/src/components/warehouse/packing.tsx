@@ -58,7 +58,7 @@ export function PackingStation({
   const openOrder = () => {
     const raw = orderId.trim();
     if (!raw) return;
-    const id = raw.toUpperCase().replace(/^#/, "").replace(/^YFS/, "");
+    const id = raw.toUpperCase().replace(/^#/, "").replace(/^YFS(?!-)/, "");
     const numericId = id.match(/^\d+$/) ? `DH${id.padStart(8, "0")}` : "";
 
     const found = packable.find((o) => {

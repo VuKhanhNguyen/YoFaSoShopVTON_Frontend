@@ -9,6 +9,7 @@ import {
   ALL_SIZES,
   VARIANT_STATUS_OPTIONS,
   buildSku,
+  finalizeVariantSku,
   type KMeansColor,
   type VariantSize,
   type VariantStatus,
@@ -43,7 +44,11 @@ export interface ProductColorArea {
 interface ProductColorAreaCardProps {
   area: ProductColorArea;
   index: number;
-  productName: string;
+  productId?: string | null;
+  categoryId?: string;
+  categoryName?: string;
+  gender?: "FEMALE" | "MALE";
+  existingSkus?: string[];
   shelfOptions: string[];
   onChange: (updated: ProductColorArea) => void;
   onRemoveArea: () => void;
@@ -54,7 +59,11 @@ interface ProductColorAreaCardProps {
 export function ProductColorAreaCard({
   area,
   index,
-  productName,
+  productId,
+  categoryId,
+  categoryName,
+  gender,
+  existingSkus,
   shelfOptions,
   onChange,
   onRemoveArea,
@@ -73,9 +82,24 @@ export function ProductColorAreaCard({
       if (checkedSizes.has(size)) return;
       const fallbackPrice = area.variants[0]?.price || "350000";
       const fallbackShelf = area.variants[0]?.shelf || shelfOptions[0] || "KE-F01";
+      const usedSkus = new Set(
+        [...(existingSkus ?? []), ...area.variants.map((v) => v.sku)].map((s) => s.trim().toUpperCase())
+      );
+      const suggestedSku = finalizeVariantSku(
+        buildSku({
+          gender,
+          categoryId,
+          categoryName,
+          productIdOrSeq: productId,
+          colorName: area.colorName,
+          size,
+        }),
+        productId ?? 0,
+        usedSkus
+      );
       const nextRow: AreaVariantRow = {
         size,
-        sku: buildSku(productName, area.colorName, size, area.variants.length + 1),
+        sku: suggestedSku,
         price: fallbackPrice,
         salePrice: "",
         stock: "10",

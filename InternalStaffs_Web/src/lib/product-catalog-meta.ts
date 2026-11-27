@@ -170,41 +170,107 @@ export function buildYoFaSoDescriptionTemplate(name: string, material: string, f
   ].join("\n");
 }
 
-function slugToken(input: string, maxLen: number): string {
-  const normalized = input
+function stripVietnameseAccents(input: string): string {
+  return input
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/đ/g, "d")
-    .replace(/Đ/g, "D")
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, "");
-  return (normalized || "SP").slice(0, maxLen);
+    .replace(/Đ/g, "D");
 }
 
-export function buildSku(
-  productName: string,
-  colorName: string,
-  size: string,
-  productIdOrSeq: string | number = 1
-): string {
-  const p = slugToken(productName, 8);
-  const c = slugToken(colorName, 6);
-  const s = slugToken(size, 4);
-  let numStr = "01";
-  if (productIdOrSeq !== undefined && productIdOrSeq !== null && productIdOrSeq !== "") {
-    if (typeof productIdOrSeq === "number") {
-      numStr = productIdOrSeq >= 100 ? String(productIdOrSeq) : String(productIdOrSeq).padStart(3, "0");
-    } else {
-      const match = String(productIdOrSeq).match(/\d+/);
-      if (match) {
-        const n = parseInt(match[0], 10);
-        numStr = n >= 100 ? String(n) : String(n).padStart(3, "0");
-      } else {
-        numStr = String(productIdOrSeq);
-      }
-    }
+/** Lấy chữ cái đầu in hoa của từng từ trong danh mục con (bỏ 'nam'/'nữ' cuối và ký tự '&'). */
+export function buildCategoryCode(categoryName?: string | null): string {
+  if (!categoryName || !categoryName.trim()) return "SP";
+  const withoutGender = categoryName.trim().replace(/\s+(nam|nữ|nu)\s*$/i, "").trim();
+  const words = stripVietnameseAccents(withoutGender || categoryName)
+    .toUpperCase()
+    .match(/[A-Z0-9]+/g);
+  if (!words?.length) return "SP";
+  return words.map((w) => w[0]).join("");
+}
+
+/** Chuẩn hóa phân đoạn màu: bỏ dấu tiếng Việt, viết hoa dính liền, tối đa 15 ký tự. */
+export function buildColorSkuToken(colorName: string, maxLen = 15): string {
+  const normalized = stripVietnameseAccents(colorName)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "");
+  return (normalized || "DEF").slice(0, maxLen);
+}
+
+/** Định dạng mã số sản phẩm: 3 chữ số cho 001..999, tự mở rộng 4+ chữ số khi > 999. */
+export function formatProductSeq(productIdOrSeq?: string | number | null): string {
+  if (productIdOrSeq === undefined || productIdOrSeq === null || productIdOrSeq === "") {
+    return "000";
   }
-  return `SKU-${p}-${c}-${s}-${numStr}`;
+  if (typeof productIdOrSeq === "number") {
+    const n = Number.isFinite(productIdOrSeq) && productIdOrSeq >= 0 ? Math.trunc(productIdOrSeq) : 0;
+    return String(n).padStart(3, "0");
+  }
+  const match = String(productIdOrSeq).match(/\d+/);
+  if (!match) return "000";
+  const n = parseInt(match[0], 10);
+  return Number.isFinite(n) ? String(n).padStart(3, "0") : "000";
+}
+
+export interface BuildSkuInput {
+  gender?: "FEMALE" | "MALE";
+  categoryId?: string;
+  categoryName?: string;
+  productIdOrSeq?: string | number | null;
+  colorName: string;
+  size: string;
+}
+
+/**
+ * Sinh gợi ý mã SKU chuẩn YoFaSo cho biến thể mới:
+ * YFS-{W|M}-{DM}-{SO}-{MAU}-{SIZE}
+ */
+export function buildSku({
+  gender,
+  categoryId,
+  categoryName,
+  productIdOrSeq,
+  colorName,
+  size,
+}: BuildSkuInput): string {
+  const resolvedGender = gender ?? detectCategoryGender(categoryId || categoryName);
+  const g = resolvedGender === "MALE" ? "M" : "W";
+  const dm = buildCategoryCode(categoryName);
+  const seq = formatProductSeq(productIdOrSeq);
+  const col = buildColorSkuToken(colorName, 15);
+  const sz =
+    stripVietnameseAccents(size)
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, "")
+      .slice(0, 10) || "M";
+  return `YFS-${g}-${dm}-${seq}-${col}-${sz}`;
+}
+
+/**
+ * Hoàn thiện mã SKU cho biến thể mới khi đã có mã sản phẩm thật:
+ * - Thay vị trí số tạm `-000-` bằng `prodSeq` (không chạm SKU thủ công/đã lưu).
+ * - Nếu trùng với `usedSkus`, tự gắn hậu tố `-V02`, `-V03`... (tối đa 50 ký tự).
+ */
+export function finalizeVariantSku(
+  rawSku: string,
+  productIdOrSeq: string | number,
+  usedSkus?: Set<string>
+): string {
+  const trimmed = rawSku.trim();
+  const prodSeq = formatProductSeq(productIdOrSeq);
+  const base = /^(YFS-[WM]-[A-Z0-9]+-)000(-.+)$/i.test(trimmed)
+    ? trimmed.replace(/^(YFS-[WM]-[A-Z0-9]+-)000(-.+)$/i, `$1${prodSeq}$2`).toUpperCase()
+    : trimmed;
+  if (!usedSkus) return base;
+  let candidate = base.slice(0, 50);
+  let suffix = 1;
+  while (usedSkus.has(candidate.toUpperCase())) {
+    suffix += 1;
+    const tag = `-V${String(suffix).padStart(2, "0")}`;
+    candidate = `${base.slice(0, 50 - tag.length)}${tag}`;
+  }
+  usedSkus.add(candidate.toUpperCase());
+  return candidate;
 }
 
 export function pickDominantColor(palette: KMeansColor[]): KMeansColor {
@@ -249,6 +315,25 @@ export function detectCategoryGender(categoryIdOrLabel?: string): "FEMALE" | "MA
     return "FEMALE";
   }
   return "MALE";
+}
+
+export function resolveCategoryGender(
+  categoryId?: string,
+  categories?: CategoryOption[]
+): "FEMALE" | "MALE" {
+  if (categoryId && categories?.length) {
+    let cur = categories.find((c) => c.value === categoryId);
+    const seen = new Set<string>();
+    while (cur && !seen.has(cur.value)) {
+      seen.add(cur.value);
+      if (cur.value === "DM000001") return "MALE";
+      if (cur.value === "DM000002") return "FEMALE";
+      cur = cur.parentId ? categories.find((c) => c.value === cur!.parentId) : undefined;
+    }
+    const label = categories.find((c) => c.value === categoryId)?.label;
+    if (label) return detectCategoryGender(label);
+  }
+  return detectCategoryGender(categoryId);
 }
 
 /**

@@ -49,3 +49,5 @@ example
 /dist-native-check/
 /test-results/
 .env
+google-services.json
+yofasoshop-vton-firebase-adminsdk-fbsvc-216df8ab2e.json

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { createPortal } from "react-dom";
 import {
@@ -56,6 +57,15 @@ const SHORTCUTS = [
   ["F9", "Thanh toán"],
   ["F12", "Kết ca"],
 ] as const;
+
+function PosSearchParamsSync({ onOpenShift }: { onOpenShift: () => void }) {
+  const sp = useSearchParams();
+  const panelParam = sp.get("panel");
+  useEffect(() => {
+    if (panelParam === "shift") onOpenShift();
+  }, [panelParam, onOpenShift]);
+  return null;
+}
 
 export function PosTerminal() {
   const { user, ready } = useRequireAuth(["ROLE_STAFF_CASHIER", "ROLE_SHOP_ADMIN"]);
@@ -754,6 +764,11 @@ export function PosTerminal() {
     return () => window.removeEventListener("keydown", onKey);
   }, [panel]);
 
+  const handleOpenShiftFromParam = useCallback(() => {
+    setOperationsTab("shift");
+    setPanel("operations");
+  }, []);
+
   if (!ready || !user) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-canvas text-sm text-muted-foreground gap-2">
@@ -784,6 +799,9 @@ export function PosTerminal() {
 
   return (
     <div className="flex h-dvh min-h-0 flex-col bg-canvas text-foreground select-none">
+      <Suspense fallback={null}>
+        <PosSearchParamsSync onOpenShift={handleOpenShiftFromParam} />
+      </Suspense>
       {/* Top Status Bar */}
       <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-x-5 gap-y-2 border-b border-border bg-surface px-4 py-2 z-10">
         <div className="flex items-center gap-2">

@@ -322,7 +322,7 @@ export async function exportReceiptPdf(order: Order): Promise<string> {
     }
     ctx.fillStyle = "#64748b";
     ctx.font = `400 15px ${FONT_MONO}`;
-    ctx.fillText(subLine, innerL + 16, ty);
+    ctx.fillText(subLine, innerL + 16, ty, innerW - 360);
 
     ctx.textAlign = "center";
     ctx.fillStyle = "#0f172a";
@@ -496,14 +496,14 @@ export async function exportPickListPdf(orders: WhOrder[], groups: PickGroup[]):
     ctx.fillText("KIỂM", padX + 42, y + 11);
     ctx.textAlign = "left";
     ctx.fillText("MÃ BARCODE / SKU", padX + 100, y + 11);
-    ctx.fillText("TÊN HÀNG · SIZE · MÀU", padX + 430, y + 11);
+    ctx.fillText("TÊN HÀNG · SIZE · MÀU", padX + 530, y + 11);
     ctx.fillText("CHO ĐƠN", padX + 1060, y + 11);
     ctx.textAlign = "right";
     ctx.fillText("SL LẤY", W - padX - 24, y + 11);
     y += 44;
 
     for (const item of g.items) {
-      const nameLines = wrapText(ctx, `${item.ten} (Size ${item.size} · ${item.mau})`, 600);
+      const nameLines = wrapText(ctx, `${item.ten} (Size ${item.size} · ${item.mau})`, 500);
       const rowH = Math.max(60, nameLines.length * 24 + 26);
 
       // Checkbox square
@@ -512,12 +512,12 @@ export async function exportPickListPdf(orders: WhOrder[], groups: PickGroup[]):
       ctx.textAlign = "left";
       ctx.fillStyle = "#0f172a";
       ctx.font = `600 18px ${FONT_MONO}`;
-      ctx.fillText(item.barcode, padX + 100, y + 18);
+      ctx.fillText(item.barcode, padX + 100, y + 18, 410);
 
       ctx.font = `600 19px ${FONT_SANS}`;
       let ny = y + 14;
       for (const nl of nameLines) {
-        ctx.fillText(nl, padX + 430, ny);
+        ctx.fillText(nl, padX + 530, ny);
         ny += 24;
       }
 
@@ -967,7 +967,7 @@ export async function exportO2OPickingPdf(
     }
     ctx.fillStyle = "#64748b";
     ctx.font = `500 15px ${FONT_MONO}`;
-    ctx.fillText(`Size ${item.size} · ${item.mau} · ${item.sku}`, innerL + 16, ny + 2);
+    ctx.fillText(`Size ${item.size} · ${item.mau} · ${item.sku}`, innerL + 16, ny + 2, innerW - 290);
 
     // Shelf badge
     drawRoundedRect(ctx, innerR - 260, y + 12, 120, 34, 8, "#f8f5ef", "#c5a880", 1.5);

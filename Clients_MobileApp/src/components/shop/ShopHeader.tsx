@@ -20,13 +20,13 @@ import Animated, {
   useReducedMotion,
   useSharedValue,
   withDelay,
-  withRepeat,
   withSequence,
   withSpring,
   withTiming,
 } from "react-native-reanimated";
 import { Colors } from "@/constants/theme";
 import { useResource } from "@/hooks/use-resource";
+import { useNotifications } from "@/lib/notifications";
 import { useSession } from "@/lib/session";
 import type { Row } from "@/lib/models";
 import {
@@ -50,8 +50,10 @@ export interface ShopHeaderProps {
   showCart?: boolean;
   /** Số lượng giỏ hàng truyền từ ngoài vào nếu cha đã query, nếu undefined component sẽ tự fetch */
   cartCount?: number;
-  /** Trạng thái có thông báo chưa đọc, nếu undefined component sẽ tự fetch */
+  /** Trạng thái hoặc số lượng thông báo chưa đọc, nếu undefined component sẽ đọc live từ NotificationProvider */
   unreadNotif?: boolean;
+  /** Số đếm thông báo chưa đọc truyền từ ngoài (tùy chọn) */
+  unreadNotifCount?: number;
   /** Các nút hành động bổ sung bên phải (ví dụ icon cài đặt) */
   rightActions?: ReactNode;
   /** Nội dung con phía dưới header (ô tìm kiếm, bộ lọc, tab phân loại...) */
@@ -63,19 +65,21 @@ export interface ShopHeaderProps {
 }
 
 const NotificationActionButton = memo(function NotificationActionButton({
+  count,
   unread,
   onPress,
 }: {
+  count: number;
   unread: boolean;
   onPress: () => void;
 }) {
   const isFocused = useIsFocused();
   const reducedMotion = useReducedMotion();
   const [appActive, setAppActive] = useState(AppState.currentState === "active");
+  const prevCountRef = useRef(count);
 
   const bellRotation = useSharedValue(0);
-  const radarScale = useSharedValue(1);
-  const radarOpacity = useSharedValue(0);
+  const badgeScale = useSharedValue(unread || count > 0 ? 1 : 0);
 
   useEffect(() => {
     const sub = AppState.addEventListener("change", (next) => {
@@ -85,65 +89,53 @@ const NotificationActionButton = memo(function NotificationActionButton({
   }, []);
 
   useEffect(() => {
-    if (!unread || !isFocused || !appActive || reducedMotion) {
+    const hasUnread = count > 0 || unread;
+    const prev = prevCountRef.current;
+    prevCountRef.current = count;
+
+    if (!hasUnread || !isFocused || !appActive || reducedMotion) {
       cancelAnimation(bellRotation);
-      cancelAnimation(radarScale);
-      cancelAnimation(radarOpacity);
       bellRotation.value = 0;
-      radarScale.value = 1;
-      radarOpacity.value = 0;
+      badgeScale.value = hasUnread ? 1 : 0;
       return;
     }
 
-    // Single gentle bell wiggle when focused with unread notification
-    bellRotation.value = withSequence(
-      withDelay(180, withTiming(-14, { duration: 85, easing: Easing.out(Easing.quad) })),
-      withTiming(12, { duration: 95, easing: Easing.inOut(Easing.quad) }),
-      withTiming(-6, { duration: 85, easing: Easing.inOut(Easing.quad) }),
-      withTiming(3, { duration: 75, easing: Easing.inOut(Easing.quad) }),
-      withTiming(0, { duration: 75, easing: Easing.out(Easing.quad) })
-    );
-
-    // Slow radar ripple around unread dot
-    radarScale.value = withRepeat(
-      withSequence(
-        withTiming(1, { duration: 0 }),
-        withTiming(2.15, { duration: 1150, easing: Easing.out(Easing.cubic) }),
-        withDelay(1250, withTiming(1, { duration: 0 }))
-      ),
-      -1,
-      false
-    );
-    radarOpacity.value = withRepeat(
-      withSequence(
-        withTiming(0.55, { duration: 0 }),
-        withTiming(0, { duration: 1150, easing: Easing.out(Easing.cubic) }),
-        withDelay(1250, withTiming(0, { duration: 0 }))
-      ),
-      -1,
-      false
-    );
+    if (count > prev || hasUnread) {
+      bellRotation.value = withSequence(
+        withDelay(120, withTiming(-14, { duration: 85, easing: Easing.out(Easing.quad) })),
+        withTiming(12, { duration: 95, easing: Easing.inOut(Easing.quad) }),
+        withTiming(-6, { duration: 85, easing: Easing.inOut(Easing.quad) }),
+        withTiming(3, { duration: 75, easing: Easing.inOut(Easing.quad) }),
+        withTiming(0, { duration: 75, easing: Easing.out(Easing.quad) })
+      );
+      badgeScale.value = withSequence(
+        withTiming(0.7, { duration: 60 }),
+        withSpring(1.18, { damping: 10, stiffness: 320 }),
+        withSpring(1, SPRING_SNAPPY)
+      );
+    }
 
     return () => {
       cancelAnimation(bellRotation);
-      cancelAnimation(radarScale);
-      cancelAnimation(radarOpacity);
     };
-  }, [unread, isFocused, appActive, reducedMotion, bellRotation, radarScale, radarOpacity]);
+  }, [count, unread, isFocused, appActive, reducedMotion, bellRotation, badgeScale]);
 
   const bellAnimStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${bellRotation.value}deg` }],
   }));
 
-  const radarAnimStyle = useAnimatedStyle(() => ({
-    opacity: radarOpacity.value,
-    transform: [{ scale: radarScale.value }],
+  const badgeAnimStyle = useAnimatedStyle(() => ({
+    opacity: badgeScale.value > 0.05 ? 1 : 0,
+    transform: [{ scale: badgeScale.value }],
   }));
+
+  const showBadge = count > 0;
+  const showDotOnly = !showBadge && unread;
 
   return (
     <ScalePressable
       accessibilityRole="button"
-      accessibilityLabel="Thông báo"
+      accessibilityLabel={count > 0 ? `Thông báo, ${count} chưa đọc` : "Thông báo"}
       hitSlop={6}
       activeScale={0.9}
       onPress={onPress}
@@ -152,12 +144,12 @@ const NotificationActionButton = memo(function NotificationActionButton({
       <Animated.View style={bellAnimStyle}>
         <Ionicons name="notifications-outline" size={20} color={Colors.primary} />
       </Animated.View>
-      {unread && (
-        <>
-          <Animated.View pointerEvents="none" style={[st.unreadRadar, radarAnimStyle]} />
-          <View style={st.unreadDot} />
-        </>
+      {showBadge && (
+        <Animated.View style={[st.notifBadge, badgeAnimStyle]}>
+          <Text style={st.notifBadgeText}>{count > 99 ? "99+" : count}</Text>
+        </Animated.View>
       )}
+      {showDotOnly && <View style={st.unreadDot} />}
     </ScalePressable>
   );
 });
@@ -253,6 +245,7 @@ export const ShopHeader = memo(function ShopHeader({
   showCart = true,
   cartCount: externalCartCount,
   unreadNotif: externalUnreadNotif,
+  unreadNotifCount: externalUnreadNotifCount,
   rightActions,
   children,
   style,
@@ -260,24 +253,17 @@ export const ShopHeader = memo(function ShopHeader({
 }: ShopHeaderProps) {
   const insets = useSafeAreaInsets();
   const { user } = useSession();
+  const { unreadCount: liveUnreadCount } = useNotifications();
 
   const needsInternalCart = showCart && externalCartCount === undefined && !!user;
-  const needsInternalNotif = showNotification && externalUnreadNotif === undefined && !!user;
-
   const cartState = useResource<Row[]>(needsInternalCart ? "/cart" : null);
-  const notifState = useResource<Row[]>(
-    needsInternalNotif ? "/notifications?size=10" : null
-  );
 
   useFocusEffect(
     useCallback(() => {
       if (needsInternalCart) {
         cartState.reload();
       }
-      if (needsInternalNotif) {
-        notifState.reload();
-      }
-    }, [needsInternalCart, needsInternalNotif, cartState.reload, notifState.reload])
+    }, [needsInternalCart, cartState.reload])
   );
 
   const cartCount =
@@ -287,12 +273,17 @@ export const ShopHeader = memo(function ShopHeader({
       ? cartState.data.reduce((s, r) => s + Number(r.quantity || 1), 0)
       : 0;
 
+  const resolvedNotifCount =
+    externalUnreadNotifCount !== undefined
+      ? externalUnreadNotifCount
+      : user
+      ? liveUnreadCount
+      : 0;
+
   const unreadNotif =
     externalUnreadNotif !== undefined
       ? externalUnreadNotif
-      : user && notifState.data
-      ? notifState.data.some((n) => !n.readStatus)
-      : false;
+      : resolvedNotifCount > 0;
 
   const actualStatusHeight =
     insets.top > 0
@@ -340,6 +331,7 @@ export const ShopHeader = memo(function ShopHeader({
         <View style={st.headerActions}>
           {showNotification && (
             <NotificationActionButton
+              count={resolvedNotifCount}
               unread={unreadNotif}
               onPress={handleOpenInbox}
             />
@@ -414,15 +406,6 @@ const st = StyleSheet.create({
     borderColor: Colors.borderHairline,
     position: "relative",
   },
-  unreadRadar: {
-    position: "absolute",
-    top: 6,
-    right: 7,
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: "#EF4444",
-  },
   unreadDot: {
     position: "absolute",
     top: 6,
@@ -431,6 +414,26 @@ const st = StyleSheet.create({
     height: 7,
     borderRadius: 4,
     backgroundColor: "#EF4444",
+  },
+  notifBadge: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    backgroundColor: "#DC2626",
+    borderRadius: 10,
+    minWidth: 17,
+    height: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 3,
+    borderWidth: 1.5,
+    borderColor: "#FAFAF9",
+  },
+  notifBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 9,
+    fontFamily: "JakartaSemiBold",
+    lineHeight: 11,
   },
   cartBadge: {
     position: "absolute",

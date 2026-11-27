@@ -1,8 +1,6 @@
 /**
- * YoFaSo Shop — Orders & Notifications Store & Master Data
- * High-fashion luxury seed data matching Lovable screen-to-reality-builder
+ * YoFaSo Shop — Orders & Notifications Types & Helpers
  */
-import { EditorialImages, formatVND } from "./catalog-data";
 
 export type TrangThaiDonHang =
   | "CHO_XAC_NHAN"
@@ -78,52 +76,3 @@ export function timeAgo(t: number): string {
   const days = Math.round(hours / 24);
   return `${days} ngày trước`;
 }
-
-const now = Date.now();
-
-export const SEED_NOTIFICATIONS: ThongBao[] = [
-  {
-    id: "n1",
-    loai: "DON_HANG",
-    tieuDe: "Kho đang đóng gói đơn #DH00000001",
-    noiDung: "Đơn hàng của bạn đã thanh toán VietQR thành công và đang được chuẩn bị để bàn giao cho shipper.",
-    time: now - 15 * 60000,
-    daDoc: false,
-    link: { pathname: "/order/[id]", params: { id: "DH00000001" } },
-  },
-  {
-    id: "n2",
-    loai: "THU_DO_VTON",
-    tieuDe: "Kết quả ướm thử VTON đạt 95/100 (Tuyệt hảo)",
-    noiDung: "Set Áo Sơ Mi Lụa + Quần Âu Xếp Ly có tỉ lệ cơ thể cực chuẩn. Chạm để xem chi tiết và Digital Fitting Pass.",
-    time: now - 2 * 3600000,
-    daDoc: false,
-    link: { pathname: "/session/[id]", params: { id: "PT00000001" } },
-  },
-  {
-    id: "n3",
-    loai: "KHUYEN_MAI",
-    tieuDe: "Mã VTON5 & BIRTHDAY15 dành riêng cho bạn",
-    noiDung: "Đặc quyền thành viên VIP Gold: Nhận ngay mã giảm 15% tối đa 150.000đ cho bộ sưu tập SS26 mới nhất.",
-    time: now - 6 * 3600000,
-    daDoc: false,
-    link: { pathname: "/cart" },
-  },
-  {
-    id: "n4",
-    loai: "CANH_BAO_KHO",
-    tieuDe: "Áo sơ mi lụa màu Đen tuyền chỉ còn 1 chiếc",
-    noiDung: "Sản phẩm trong danh sách yêu thích của bạn sắp hết size M tại xưởng may YoFaSo Atelier.",
-    time: now - 26 * 3600000,
-    daDoc: true,
-    link: { pathname: "/product/[id]", params: { id: "SP00000001" } },
-  },
-  {
-    id: "n5",
-    loai: "HE_THONG",
-    tieuDe: "Chào mừng đến YoFaSo Atelier",
-    noiDung: "Ướm thử AI miễn phí cho mọi sản phẩm có nhãn VTON Ready. Khám phá phong cách cá nhân hoàn mỹ ngay hôm nay.",
-    time: now - 3 * 86400000,
-    daDoc: true,
-  },
-];
