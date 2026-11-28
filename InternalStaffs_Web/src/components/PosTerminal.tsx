@@ -67,8 +67,10 @@ function PosSearchParamsSync({ onOpenShift }: { onOpenShift: () => void }) {
   return null;
 }
 
+const CASHIER_ONLY = ["ROLE_STAFF_CASHIER"] as const;
+
 export function PosTerminal() {
-  const { user, ready } = useRequireAuth(["ROLE_STAFF_CASHIER", "ROLE_SHOP_ADMIN"]);
+  const { user, ready, authorized } = useRequireAuth(CASHIER_ONLY);
 
   // 1. Resizable Split Ratio (Desktop: 60% Left - 40% Right)
   const [splitRatio, setSplitRatio] = useState<number>(60);
@@ -246,17 +248,17 @@ export function PosTerminal() {
   }, []);
 
   useEffect(() => {
-    if (ready && user) {
+    if (authorized) {
       fetchCategories();
       fetchProducts();
       fetchShift();
       fetchPromotions();
     }
-  }, [ready, user, fetchCategories, fetchProducts, fetchShift, fetchPromotions]);
+  }, [authorized, fetchCategories, fetchProducts, fetchShift, fetchPromotions]);
 
   // Live quote from server (/promotions/quote) for real Combo -5% + DB Voucher stacking
   useEffect(() => {
-    if (!ready || !user || don.length === 0) {
+    if (!authorized || don.length === 0) {
       setServerQuote(null);
       return;
     }
@@ -769,7 +771,7 @@ export function PosTerminal() {
     setPanel("operations");
   }, []);
 
-  if (!ready || !user) {
+  if (!ready || !user || !authorized) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-canvas text-sm text-muted-foreground gap-2">
         <Loader2 className="h-5 w-5 animate-spin text-accent" />

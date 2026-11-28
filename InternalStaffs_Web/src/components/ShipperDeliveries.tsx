@@ -60,9 +60,13 @@ function ShipperSearchParamsSync({ onOrder }: { onOrder: (orderId: string) => vo
   return null;
 }
 
+const SHIPPER_ONLY = ["ROLE_STAFF_SHIPPER"] as const;
+
 export function ShipperDeliveries() {
-  const { user, ready } = useRequireAuth(["ROLE_STAFF_SHIPPER", "ROLE_SHOP_ADMIN"]);
-  const { data: dbOrders, reload: reloadOrders, loading } = useResource<any[]>("/staff/orders?size=100");
+  const { user, ready, authorized } = useRequireAuth(SHIPPER_ONLY);
+  const { data: dbOrders, reload: reloadOrders, loading } = useResource<any[]>(
+    authorized ? "/staff/orders?size=100" : null,
+  );
   const [route, setRoute] = useState<Stop[]>([]);
   const [view, setView] = useState<View>("route");
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -99,7 +103,7 @@ export function ShipperDeliveries() {
     };
   }, [deepLinkOrder, route]);
 
-  if (!ready || !user) {
+  if (!ready || !user || !authorized) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-canvas text-sm text-muted-foreground">
         Đang kiểm tra phiên đăng nhập…

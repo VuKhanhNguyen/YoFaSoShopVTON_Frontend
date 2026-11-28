@@ -35,13 +35,17 @@ function WarehouseSearchParamsSync({ onTab }: { onTab: (tab: Tab) => void }) {
   return null;
 }
 
+const WAREHOUSE_ONLY = ["ROLE_STAFF_WAREHOUSE"] as const;
+
 export function WarehouseFulfillment() {
-  const { user, ready } = useRequireAuth(["ROLE_STAFF_WAREHOUSE", "ROLE_SHOP_ADMIN"]);
+  const { user, ready, authorized } = useRequireAuth(WAREHOUSE_ONLY);
   const [tab, setTab] = useState<Tab>("pick");
-  const { data: remoteOrders, reload: reloadOrders, loading } = useResource<WhOrder[]>("/staff/orders?size=100");
+  const { data: remoteOrders, reload: reloadOrders, loading } = useResource<WhOrder[]>(
+    authorized ? "/staff/orders?size=100" : null,
+  );
   const orders = (remoteOrders ?? []).filter((order) => order.channel !== "TAI_QUAY_POS");
 
-  if (!ready || !user) {
+  if (!ready || !user || !authorized) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-canvas text-sm text-muted-foreground">
         Đang kiểm tra phiên đăng nhập…

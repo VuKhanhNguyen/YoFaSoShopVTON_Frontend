@@ -74,8 +74,10 @@ function AdminSearchParamsSync({
   return null;
 }
 
+const ADMIN_ROLES = ["ROLE_SHOP_ADMIN"] as const;
+
 export function AdminDashboard({ initialTab = "finance" }: { initialTab?: Tab }) {
-  const { user, ready } = useRequireAuth(["ROLE_SHOP_ADMIN"]);
+  const { user, ready, authorized } = useRequireAuth(ADMIN_ROLES);
   const { logout } = useAuth();
   const { chatPingCount } = useStaffNotifications();
   const router = useRouter();
@@ -151,7 +153,7 @@ export function AdminDashboard({ initialTab = "finance" }: { initialTab?: Tab })
       ...prev,
     ]);
 
-  if (!ready || !user || user.role !== "ROLE_SHOP_ADMIN") {
+  if (!ready || !user || !authorized) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-canvas text-sm text-muted-foreground">
         Đang kiểm tra phiên đăng nhập…

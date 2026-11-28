@@ -136,19 +136,13 @@ export function resolveStaffNotificationLink(
     return role === "ROLE_SHOP_ADMIN" ? link : roleDefaultLink(role, type);
   }
   if (link.startsWith("/warehouse/fulfillment")) {
-    return role === "ROLE_STAFF_WAREHOUSE" || role === "ROLE_SHOP_ADMIN"
-      ? link
-      : roleDefaultLink(role, type);
+    return role === "ROLE_STAFF_WAREHOUSE" ? link : roleDefaultLink(role, type);
   }
   if (link.startsWith("/shipper/deliveries")) {
-    return role === "ROLE_STAFF_SHIPPER" || role === "ROLE_SHOP_ADMIN"
-      ? link
-      : roleDefaultLink(role, type);
+    return role === "ROLE_STAFF_SHIPPER" ? link : roleDefaultLink(role, type);
   }
   if (link.startsWith("/pos/terminal")) {
-    return role === "ROLE_STAFF_CASHIER" || role === "ROLE_SHOP_ADMIN"
-      ? link
-      : roleDefaultLink(role, type);
+    return role === "ROLE_STAFF_CASHIER" ? link : roleDefaultLink(role, type);
   }
 
   // Ánh xạ các link cũ (legacy seed URL) hoặc link rút gọn
@@ -185,12 +179,12 @@ export function resolveStaffNotificationLink(
     return role === "ROLE_SHOP_ADMIN" ? "/admin/dashboard?tab=livechat" : null;
   }
   if (link.startsWith("/shipper/tasks")) {
-    return role === "ROLE_STAFF_SHIPPER" || role === "ROLE_SHOP_ADMIN"
+    return role === "ROLE_STAFF_SHIPPER"
       ? "/shipper/deliveries"
       : roleDefaultLink(role, type);
   }
   if (link.startsWith("/pos/shift")) {
-    return role === "ROLE_STAFF_CASHIER" || role === "ROLE_SHOP_ADMIN"
+    return role === "ROLE_STAFF_CASHIER"
       ? "/pos/terminal?panel=shift"
       : roleDefaultLink(role, type);
   }
