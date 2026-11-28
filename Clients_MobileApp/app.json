@@ -8,7 +8,10 @@
     "scheme": "yofasomobile",
     "userInterfaceStyle": "light",
     "ios": {
-      "icon": "./assets/brand/app-icon.png"
+      "icon": "./assets/brand/app-icon.png",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Cho phép YoFaSo truy cập máy ảnh để chụp ảnh và nhận diện cử chỉ tay thử đồ ảo AI."
+      }
     },
     "androidStatusBar": {
       "translucent": true,
@@ -24,6 +27,7 @@
       "googleServicesFile": "./google-services.json",
       "predictiveBackGestureEnabled": false,
       "permissions": [
+        "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
@@ -72,7 +76,8 @@
             "photo"
           ]
         }
-      ]
+      ],
+      "./plugins/withHandGestureCamera"
     ],
     "experiments": {
       "typedRoutes": true,

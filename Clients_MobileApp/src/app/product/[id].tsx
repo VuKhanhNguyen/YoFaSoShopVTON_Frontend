@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
   Image,
   Modal,
@@ -143,6 +143,10 @@ export default function ProductDetailScreen() {
   const [busy, setBusy] = useState(false);
   const [zoomReviewPhoto, setZoomReviewPhoto] = useState<string | null>(null);
   const [brokenReviewAvatars, setBrokenReviewAvatars] = useState<Record<string, boolean>>({});
+  const [sizeGridWidth, setSizeGridWidth] = useState(0);
+
+  const effectiveSizeGridWidth = sizeGridWidth || Math.max(0, screenWidth - 40);
+  const sizePillWidth = Math.max(48, Math.floor((effectiveSizeGridWidth - 8 * 4 - 0.5) / 5));
 
   const galleryRef = useRef<ScrollView>(null);
 
@@ -215,26 +219,20 @@ export default function ProductDetailScreen() {
     );
   };
 
-  useEffect(() => {
-    if (p?.variants && p.variants.length > 0) {
-      if (!isSizeAvailable(selectedSize)) {
-        const firstAvail = displayedSizes.find((s) => isSizeAvailable(s));
-        if (firstAvail) {
-          setSelectedSize(firstAvail);
-        }
-      }
-    }
-  }, [activeColor.hex, p?.variants]);
+  const effectiveSize =
+    p?.variants?.length && !isSizeAvailable(selectedSize)
+      ? (displayedSizes.find((s) => isSizeAvailable(s)) ?? selectedSize)
+      : selectedSize;
 
-  useEffect(() => {
-    if (isMen) {
-      setSizeGuideTab(productCategory === "lower_body" ? "QUAN_NAM" : "AO_NAM");
-    } else {
-      if (productCategory === "dress") setSizeGuideTab("DAM_NU");
-      else if (productCategory === "lower_body") setSizeGuideTab("QUAN_VAY_NU");
-      else setSizeGuideTab("AO_NU");
-    }
-  }, [productCategory, isMen]);
+  const defaultSizeGuideTab: keyof typeof SIZE_GUIDES = isMen
+    ? productCategory === "lower_body"
+      ? "QUAN_NAM"
+      : "AO_NAM"
+    : productCategory === "dress"
+      ? "DAM_NU"
+      : productCategory === "lower_body"
+        ? "QUAN_VAY_NU"
+        : "AO_NU";
 
   // Build gallery slides with color metadata for Bidirectional Sync (Requirement 8)
   const gallerySlides: GallerySlideItem[] = [];
@@ -302,7 +300,7 @@ export default function ProductDetailScreen() {
 
   // Active SKU derived from active slide or active color (Requirement 8)
   const currentVariantByOption = !isMock && p?.variants
-    ? p.variants.find((v) => matchColor(v.colors, activeColor.hex) && v.size === selectedSize)
+    ? p.variants.find((v) => matchColor(v.colors, activeColor.hex) && v.size === effectiveSize)
       || p.variants.find((v) => matchColor(v.colors, activeColor.hex))
       || p.variants[0]
     : null;
@@ -312,7 +310,7 @@ export default function ProductDetailScreen() {
   const currentMockVariant = mockItem.bienThe[selectedColorIndex] ?? mockItem.bienThe[0];
   const stock = !isMock && currentVariantByOption
     ? currentVariantByOption.stock
-    : currentMockVariant ? tonKho(currentMockVariant, selectedSize as any) : 8;
+    : currentMockVariant ? tonKho(currentMockVariant, effectiveSize as any) : 8;
   const isSoldOut = stock <= 0;
 
   const cartCount =
@@ -615,16 +613,25 @@ export default function ProductDetailScreen() {
             <View style={st.sizeHeaderRow}>
               <Text style={st.sectionHeaderLabel}>Kích cỡ</Text>
               <Pressable
-                onPress={() => setSizeGuideOpen(true)}
+                onPress={() => {
+                  setSizeGuideTab(defaultSizeGuideTab);
+                  setSizeGuideOpen(true);
+                }}
                 style={st.sizeGuideLink}
               >
                 <Ionicons name="resize-outline" size={14} color={Colors.champagneDeep} />
                 <Text style={st.sizeGuideText}>Bảng quy đổi kích cỡ</Text>
               </Pressable>
             </View>
-            <View style={st.sizePillsGrid}>
+            <View
+              style={st.sizePillsGrid}
+              onLayout={(e) => {
+                const w = e.nativeEvent.layout.width;
+                if (w > 0 && Math.abs(w - sizeGridWidth) > 0.5) setSizeGridWidth(w);
+              }}
+            >
               {displayedSizes.map((s) => {
-                const on = selectedSize === s;
+                const on = effectiveSize === s;
                 const available = isSizeAvailable(s);
                 return (
                   <ScalePressable
@@ -634,6 +641,9 @@ export default function ProductDetailScreen() {
                     onPress={() => available && setSelectedSize(s)}
                     style={[
                       st.sizePill,
+                      s.length > 4
+                        ? { minWidth: sizePillWidth, paddingHorizontal: 12 }
+                        : { width: sizePillWidth },
                       on && st.sizePillActive,
                       !available && st.sizePillDisabled,
                     ]}
@@ -1271,8 +1281,6 @@ const st = StyleSheet.create({
     marginTop: 10,
   },
   sizePill: {
-    minWidth: 52,
-    flex: 1,
     height: 44,
     borderRadius: Radii.md,
     borderWidth: 1,

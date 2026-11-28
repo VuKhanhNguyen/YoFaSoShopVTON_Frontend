@@ -19,7 +19,14 @@ import { useResource } from "@/hooks/use-resource";
 import { api, publicUrl } from "@/lib/api";
 import type { Row, User } from "@/lib/models";
 import { Colors, Fonts, Radii, Shadows } from "@/constants/theme";
-import { formatMembershipBadge, formatMembershipRank, formatVND, getUserVouchers, type UserWalletVoucherItem } from "@/lib/catalog-data";
+import {
+  formatMembershipBadge,
+  formatMembershipRank,
+  formatVND,
+  getMembershipProgress,
+  getMembershipVisual,
+  getUserVouchers,
+} from "@/lib/catalog-data";
 import { ShopHeader } from "@/components/shop/ShopHeader";
 import { Sheet } from "@/components/shop/ui";
 import {
@@ -39,7 +46,7 @@ export const Account = memo(function Account() {
   const [voucherSheetOpen, setVoucherSheetOpen] = useState(false);
   const [voucherTab, setVoucherTab] = useState<"ALL" | "READY" | "USED">("ALL");
 
-  const orders = ordersState.data || [];
+  const orders = useMemo(() => ordersState.data || [], [ordersState.data]);
 
   const userVouchers = useMemo(
     () => getUserVouchers(user?.userId || "ND00000002", orders),
@@ -244,8 +251,8 @@ export const Account = memo(function Account() {
               </Pressable>
 
               <View style={{ flex: 1 }}>
-                <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-                  <Text style={st.userName}>{user.fullName}</Text>
+                <Text style={st.userName}>{user.fullName}</Text>
+                <View style={st.profileBadgesRow}>
                   {/* Trạng thái giới tính (icon + text badge) */}
                   <View style={st.genderBadge}>
                     <Ionicons
@@ -275,6 +282,26 @@ export const Account = memo(function Account() {
                       {user.gender === "NAM" ? "Nam" : user.gender === "NU" ? "Nữ" : user.gender === "KHAC" ? "Khác" : "Nữ"}
                     </Text>
                   </View>
+
+                  {/* Badge hạng thành viên (icon kim cương đổi màu theo Đồng / Bạc / Vàng / Kim cương) */}
+                  {(() => {
+                    const tier = getMembershipVisual(user.membership, user.membershipLabel);
+                    return (
+                      <View
+                        accessible
+                        accessibilityLabel={`Hội viên ${tier.rankLabel}`}
+                        style={[
+                          st.membershipBadge,
+                          { backgroundColor: tier.bgColor, borderColor: tier.borderColor },
+                        ]}
+                      >
+                        <Ionicons name="diamond" size={11} color={tier.iconColor} />
+                        <Text style={[st.membershipBadgeText, { color: tier.textColor }]}>
+                          {tier.rankLabel}
+                        </Text>
+                      </View>
+                    );
+                  })()}
                 </View>
                 {user.phone ? (
                   <Text style={st.userPhone}>{user.phone}</Text>
@@ -286,35 +313,6 @@ export const Account = memo(function Account() {
                   </Pressable>
                 )}
                 <Text style={st.userEmail}>{user.email || "Chưa cập nhật email"}</Text>
-                {!!user.linkedProviders?.length && (
-                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
-                    {user.linkedProviders.map((p) => (
-                      <View
-                        key={p}
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 4,
-                          paddingHorizontal: 7,
-                          paddingVertical: 2,
-                          borderRadius: Radii.full,
-                          backgroundColor: Colors.surfaceMuted,
-                          borderWidth: 1,
-                          borderColor: Colors.borderHairline,
-                        }}
-                      >
-                        <Ionicons
-                          name={p === "FACEBOOK" ? "logo-facebook" : "logo-google"}
-                          size={11}
-                          color={p === "FACEBOOK" ? "#1877F2" : "#DB4437"}
-                        />
-                        <Text style={{ fontFamily: Fonts.sansSemiBold, fontSize: 10, color: Colors.textSecondary }}>
-                          {p === "FACEBOOK" ? "Facebook" : "Google"}
-                        </Text>
-                      </View>
-                    ))}
-                  </View>
-                )}
                 <Pressable onPress={() => router.push("/settings")} style={st.editProfileBtn}>
                   <Text style={st.editProfileText}>Chỉnh sửa hồ sơ</Text>
                 </Pressable>
@@ -322,49 +320,52 @@ export const Account = memo(function Account() {
             </View>
 
             {/* VIP Card for Logged In User */}
-            <View style={st.vipCard}>
-              <View style={st.vipDashedBorder} pointerEvents="none" />
-              <View style={st.vipHeaderRow}>
-                <Text style={st.vipBrandText}>YoFaSo</Text>
-                <View style={st.vipTierBadge}>
-                  <Ionicons name="diamond-outline" size={11} color={Colors.champagne} />
-                  <Text style={st.vipTierText}>
-                    {formatMembershipBadge(user.membership, user.membershipLabel)}
+            {(() => {
+              const tier = getMembershipVisual(user.membership, user.membershipLabel);
+              const progress = getMembershipProgress(user.loyaltyPoints, user.membership);
+              return (
+                <View style={st.vipCard}>
+                  <View style={st.vipDashedBorder} pointerEvents="none" />
+                  <View style={st.vipHeaderRow}>
+                    <Text style={st.vipBrandText}>YoFaSo</Text>
+                    <View style={st.vipTierBadge}>
+                      <Ionicons name="diamond" size={11} color={tier.cardIconColor} />
+                      <Text style={st.vipTierText}>
+                        {formatMembershipBadge(user.membership, user.membershipLabel)}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={st.vipTierSub}>
+                    {formatMembershipRank(user.membership, user.membershipLabel)} · Thẻ Hội Viên Thân Thiết
                   </Text>
+
+                  <View style={st.pointsBlock}>
+                    <Text style={st.pointsNumber}>
+                      {Number(user.loyaltyPoints || 0).toLocaleString("vi-VN")}
+                    </Text>
+                    <Text style={st.pointsLabel}>Điểm thưởng tích lũy</Text>
+                  </View>
+                  <Text style={st.pointsEquivText}>
+                    ≈ {(Number(user.loyaltyPoints || 0) * 100).toLocaleString("vi-VN")}đ giảm giá trực tiếp
+                  </Text>
+
+                  <AnimatedProgressBar
+                    percent={progress.percent}
+                    fillColor={Colors.champagne}
+                    trackColor="rgba(255, 255, 255, 0.15)"
+                    height={5}
+                    borderRadius={2.5}
+                    style={{ marginTop: 14 }}
+                  />
+                  <View style={st.tierProgressLabelsRow}>
+                    <Text style={st.tierProgressLeft}>
+                      {Number(user.loyaltyPoints || 0).toLocaleString("vi-VN")} điểm
+                    </Text>
+                    <Text style={st.tierProgressRight}>{progress.nextHint}</Text>
+                  </View>
                 </View>
-              </View>
-              <Text style={st.vipTierSub}>
-                {formatMembershipRank(user.membership, user.membershipLabel)} · Thẻ Hội Viên Thân Thiết
-              </Text>
-
-              <View style={st.pointsBlock}>
-                <Text style={st.pointsNumber}>
-                  {Number(user.loyaltyPoints || 0).toLocaleString("vi-VN")}
-                </Text>
-                <Text style={st.pointsLabel}>Điểm thưởng tích lũy</Text>
-              </View>
-              <Text style={st.pointsEquivText}>
-                ≈ {(Number(user.loyaltyPoints || 0) * 100).toLocaleString("vi-VN")}đ giảm giá trực tiếp
-              </Text>
-
-              <AnimatedProgressBar
-                percent={Math.min(
-                  100,
-                  Math.max(10, ((Number(user.loyaltyPoints || 0) % 1000) / 1000) * 100)
-                )}
-                fillColor={Colors.champagne}
-                trackColor="rgba(255, 255, 255, 0.15)"
-                height={5}
-                borderRadius={2.5}
-                style={{ marginTop: 14 }}
-              />
-              <View style={st.tierProgressLabelsRow}>
-                <Text style={st.tierProgressLeft}>
-                  {Number(user.loyaltyPoints || 0).toLocaleString("vi-VN")} điểm
-                </Text>
-                <Text style={st.tierProgressRight}>Tích lũy nâng hạng hội viên</Text>
-              </View>
-            </View>
+              );
+            })()}
 
             {/* Order Status Strip */}
             <View style={st.orderStripCard}>
@@ -899,6 +900,14 @@ const st = StyleSheet.create({
     fontFamily: "JakartaSemiBold",
     color: Colors.primary,
   },
+  profileBadgesRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 4,
+    marginBottom: 2,
+  },
   genderBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -911,6 +920,19 @@ const st = StyleSheet.create({
     borderColor: Colors.borderHairline,
   },
   genderBadgeText: {
+    fontSize: 10,
+    fontFamily: Fonts.sansSemiBold,
+  },
+  membershipBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: Radii.full,
+    borderWidth: 1,
+  },
+  membershipBadgeText: {
     fontSize: 10,
     fontFamily: Fonts.sansSemiBold,
   },

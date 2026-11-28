@@ -51,8 +51,64 @@ export const MEMBERSHIP_TIER_NAMES: Record<string, string> = {
   VIP: "VIP",
 };
 
+export type MembershipCode = "DONG" | "BAC" | "VANG" | "KIM_CUONG";
+
+export interface MembershipVisual {
+  code: MembershipCode;
+  name: string;
+  rankLabel: string;
+  iconColor: string;
+  textColor: string;
+  bgColor: string;
+  borderColor: string;
+  cardIconColor: string;
+}
+
+const MEMBERSHIP_VISUALS: Record<MembershipCode, Omit<MembershipVisual, "name" | "rankLabel">> = {
+  DONG: {
+    code: "DONG",
+    iconColor: "#A16207",
+    textColor: "#92400E",
+    bgColor: "#FDF6EC",
+    borderColor: "#E6C9A8",
+    cardIconColor: "#D99B66",
+  },
+  BAC: {
+    code: "BAC",
+    iconColor: "#64748B",
+    textColor: "#475569",
+    bgColor: "#F1F5F9",
+    borderColor: "#CBD5E1",
+    cardIconColor: "#CBD5E1",
+  },
+  VANG: {
+    code: "VANG",
+    iconColor: "#D97706",
+    textColor: "#A16207",
+    bgColor: "#FEFCE8",
+    borderColor: "#FDE047",
+    cardIconColor: "#FACC15",
+  },
+  KIM_CUONG: {
+    code: "KIM_CUONG",
+    iconColor: "#0284C7",
+    textColor: "#0369A1",
+    bgColor: "#E0F2FE",
+    borderColor: "#7DD3FC",
+    cardIconColor: "#38BDF8",
+  },
+};
+
+export function normalizeMembershipCode(membership?: string | null): MembershipCode {
+  const raw = (membership || "").trim().toUpperCase();
+  if (raw === "KIM_CUONG" || raw === "VIP") return "KIM_CUONG";
+  if (raw === "VANG") return "VANG";
+  if (raw === "BAC") return "BAC";
+  return "DONG";
+}
+
 /**
- * Trả về tên hiển thị của hạng thẻ (vd: "Vàng", "Kim cương", "VIP", "Đồng", "Bạc")
+ * Trả về tên hiển thị của hạng thẻ (vd: "Đồng", "Bạc", "Vàng", "Kim cương")
  */
 export function getMembershipTierName(
   membership?: string | null,
@@ -62,14 +118,14 @@ export function getMembershipTierName(
     return membershipLabel.trim();
   }
   if (!membership || !membership.trim()) {
-    return "VIP";
+    return "Đồng";
   }
   const code = membership.trim().toUpperCase();
   return MEMBERSHIP_TIER_NAMES[code] || membership.trim();
 }
 
 /**
- * Định dạng nhãn hiển thị cho Thẻ Hội Viên (vd: "Thành viên Vàng", "Thành viên VIP")
+ * Định dạng nhãn hiển thị cho Thẻ Hội Viên (vd: "Thành viên Vàng", "Thành viên Đồng")
  */
 export function formatMembershipBadge(
   membership?: string | null,
@@ -80,7 +136,7 @@ export function formatMembershipBadge(
 }
 
 /**
- * Định dạng hiển thị hạng đầy đủ trên UI (vd: "Hạng Vàng", "Hạng Kim cương", "Hạng VIP")
+ * Định dạng hiển thị hạng đầy đủ trên UI (vd: "Hạng Đồng", "Hạng Bạc", "Hạng Vàng", "Hạng Kim cương")
  */
 export function formatMembershipRank(
   membership?: string | null,
@@ -88,7 +144,51 @@ export function formatMembershipRank(
 ): string {
   const tierName = getMembershipTierName(membership, membershipLabel);
   return `Hạng ${tierName}`;
-};
+}
+
+/**
+ * Bảng màu & nhãn hiển thị đồng nhất cho Badge Hạng thành viên (icon kim cương đổi màu theo 4 hạng)
+ */
+export function getMembershipVisual(
+  membership?: string | null,
+  membershipLabel?: string | null
+): MembershipVisual {
+  const code = normalizeMembershipCode(membership);
+  const name = getMembershipTierName(membership ?? code, membershipLabel);
+  return {
+    ...MEMBERSHIP_VISUALS[code],
+    name,
+    rankLabel: `Hạng ${name}`,
+  };
+}
+
+/**
+ * Tính tiến độ nâng hạng hội viên theo thang điểm chuẩn:
+ * Đồng (0–99) -> Bạc (100–299) -> Vàng (300–499) -> Kim cương (>= 500)
+ */
+export function getMembershipProgress(
+  loyaltyPoints?: number | null,
+  membership?: string | null
+): { percent: number; nextHint: string } {
+  const pts = Math.max(0, Math.floor(Number(loyaltyPoints || 0)));
+  const code = normalizeMembershipCode(membership);
+  if (code === "KIM_CUONG" || pts >= 500) {
+    return { percent: 100, nextHint: "Đặc quyền cao nhất · Kim cương" };
+  }
+  if (code === "VANG" || pts >= 300) {
+    const remain = Math.max(0, 500 - pts);
+    const pct = Math.min(100, Math.max(8, Math.round(((Math.max(pts, 300) - 300) / 200) * 100)));
+    return { percent: pct, nextHint: `Còn ${remain.toLocaleString("vi-VN")} điểm lên Hạng Kim cương` };
+  }
+  if (code === "BAC" || pts >= 100) {
+    const remain = Math.max(0, 300 - pts);
+    const pct = Math.min(100, Math.max(8, Math.round(((Math.max(pts, 100) - 100) / 200) * 100)));
+    return { percent: pct, nextHint: `Còn ${remain.toLocaleString("vi-VN")} điểm lên Hạng Vàng` };
+  }
+  const remain = Math.max(0, 100 - pts);
+  const pct = Math.min(100, Math.max(8, Math.round((pts / 100) * 100)));
+  return { percent: pct, nextHint: `Còn ${remain.toLocaleString("vi-VN")} điểm lên Hạng Bạc` };
+}
 
 // Local fallback editorial images
 export const EditorialImages = {

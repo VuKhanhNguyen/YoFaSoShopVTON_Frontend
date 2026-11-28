@@ -31,6 +31,10 @@ import { Colors, Radii, Shadows } from "@/constants/theme";
 import { Button, Notice, State } from "@/components/shop/ui";
 import { PrivateImage } from "@/components/shop/PrivateImage";
 import { CatalogPickerModal } from "@/components/shop/CatalogPickerModal";
+import {
+  LiveVtonCameraModal,
+  type CapturedVtonPhoto,
+} from "@/components/shop/LiveVtonCameraModal";
 import { AnimatedToast, SlidingTabs } from "@/components/shop/MotionPrimitives";
 import { SmartImage } from "@/components/shop/Skeleton";
 
@@ -113,6 +117,7 @@ export default function TryOnScreen() {
       : null
   );
   const [catalogOpen, setCatalogOpen] = useState(false);
+  const [liveCamOpen, setLiveCamOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
@@ -202,17 +207,48 @@ export default function TryOnScreen() {
     }
   }
 
-  async function pick(camera: boolean) {
+  async function openSystemCamera() {
     setError("");
     try {
-      if (camera && !(await ImagePicker.requestCameraPermissionsAsync()).granted) {
+      if (!(await ImagePicker.requestCameraPermissionsAsync()).granted) {
         setError("Cần cấp quyền máy ảnh để chụp ảnh thử đồ.");
         return;
       }
-      const options: ImagePicker.ImagePickerOptions = { mediaTypes: ["images"], quality: 0.95 };
-      const selection = camera
-        ? await ImagePicker.launchCameraAsync(options)
-        : await ImagePicker.launchImageLibraryAsync(options);
+      const selection = await ImagePicker.launchCameraAsync({
+        mediaTypes: ["images"],
+        quality: 0.95,
+      });
+      if (!selection.canceled) {
+        const captured = selection.assets[0];
+        setPhoto(captured);
+        setAssetId(undefined);
+        setChainedContext(null);
+        setValidatedPhotoFrame(undefined);
+        checkedPhoto.current = undefined;
+        if (variant) {
+          void submit(captured);
+        }
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function pick(camera: boolean) {
+    setError("");
+    if (camera && Platform.OS === "android") {
+      setLiveCamOpen(true);
+      return;
+    }
+    if (camera) {
+      await openSystemCamera();
+      return;
+    }
+    try {
+      const selection = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        quality: 0.95,
+      });
       if (!selection.canceled) {
         setPhoto(selection.assets[0]);
         setAssetId(undefined);
@@ -225,12 +261,47 @@ export default function TryOnScreen() {
     }
   }
 
-  async function submit() {
+  function handleLiveCameraCapture(captured: CapturedVtonPhoto) {
+    const asset: ImagePicker.ImagePickerAsset = {
+      uri: captured.uri,
+      width: captured.width,
+      height: captured.height,
+      fileName: captured.fileName,
+      mimeType: captured.mimeType,
+    };
+    setLiveCamOpen(false);
+    setPhoto(asset);
+    setAssetId(undefined);
+    setChainedContext(null);
+    setValidatedPhotoFrame(undefined);
+    checkedPhoto.current = undefined;
+    setError("");
+
+    if (!variant) {
+      showToast("Đã chụp ảnh! Hãy chọn trang phục để bắt đầu thử đồ AI.");
+      setCatalogOpen(true);
+      return;
+    }
+
+    if (captured.trigger === "VICTORY") {
+      showToast("Đã chụp bằng cử chỉ ✌️ — tự động bắt đầu thử đồ AI!");
+    } else if (captured.trigger === "OPEN_PALM") {
+      showToast("Đã chụp sau đếm ngược 🖐️ — tự động bắt đầu thử đồ AI!");
+    } else {
+      showToast("Đã chụp ảnh — tự động bắt đầu thử đồ AI!");
+    }
+    void submit(asset);
+  }
+
+  async function submit(overridePhoto?: ImagePicker.ImagePickerAsset) {
     if (!variant || sending.current) return;
     if (!user) {
       router.push({ pathname: "/auth", params: { returnToFitting: "1" } });
       return;
     }
+
+    const activePhoto = overridePhoto ?? photo;
+    const activeInitialAssetId = overridePhoto ? undefined : assetId;
 
     const preCompat = checkTryOnCompatibility({
       targetCategory: activeCategory,
@@ -239,10 +310,12 @@ export default function TryOnScreen() {
           ? modelFrame === "upper"
             ? "HALF_BODY"
             : "FULL_BODY"
+          : overridePhoto
+          ? undefined
           : validatedPhotoFrame,
       shopModelId: mode === "shop" ? activeModelKey : undefined,
-      chainedFromCategory: chainedContext?.category,
-      chainedFromFrame: chainedContext?.frame,
+      chainedFromCategory: overridePhoto ? undefined : chainedContext?.category,
+      chainedFromFrame: overridePhoto ? undefined : chainedContext?.frame,
     });
     if (!preCompat.allowed) {
       setError(preCompat.reason);
@@ -263,23 +336,23 @@ export default function TryOnScreen() {
     setBusy(true);
     setError("");
     try {
-      let personAssetId = assetId;
+      let personAssetId = activeInitialAssetId;
       if (mode === "photo") {
-        if (!personAssetId && photo) {
+        if (!personAssetId && activePhoto) {
           const form = new FormData();
           form.append("role", "person");
           form.append("consent", "true");
           if (Platform.OS === "web") {
             form.append(
               "file",
-              photo.file || (await (await fetch(photo.uri)).blob()),
-              photo.fileName || "person.png"
+              activePhoto.file || (await (await fetch(activePhoto.uri)).blob()),
+              activePhoto.fileName || "person.png"
             );
           } else {
             form.append(
               "file",
-              new File(photo.uri) as unknown as Blob,
-              photo.fileName || "person.png"
+              new File(activePhoto.uri) as unknown as Blob,
+              activePhoto.fileName || "person.png"
             );
           }
           personAssetId = (await api<{ assetId: string }>("/assets", "POST", form)).assetId;
@@ -748,6 +821,16 @@ export default function TryOnScreen() {
           setCategory(item.vtonCategory || "upper_body");
           setError("");
         }}
+      />
+
+      {/* Live AI Hand-Gesture Camera Modal (Android APK) */}
+      <LiveVtonCameraModal
+        visible={liveCamOpen}
+        category={activeCategory}
+        guideText={guide}
+        onClose={() => setLiveCamOpen(false)}
+        onCapture={handleLiveCameraCapture}
+        onFallbackSystemCamera={() => void openSystemCamera()}
       />
 
       {/* Floating Blocking Toast */}

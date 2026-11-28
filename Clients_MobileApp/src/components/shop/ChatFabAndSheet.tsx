@@ -42,7 +42,7 @@ import { PrivateImage } from "./PrivateImage";
 const FAB_SIZE = 56;
 const EDGE_MARGIN = 16;
 const DOCK_HEIGHT = 68;
-const DOCK_GAP = 14;
+const DOCK_GAP = 90;
 const PRODUCT_CARD_HEIGHT = 188;
 
 interface ProductAttachment {
@@ -632,7 +632,7 @@ export const ChatSheetModal = memo(function ChatSheetModal() {
         <Pressable style={st.backdrop} onPress={closeChat} />
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : "height"}
-          style={[st.sheet, { paddingBottom: Math.max(insets.bottom, 12) }]}
+          style={[st.sheet, { paddingBottom: Math.max(insets.bottom, 20) }]}
         >
           {/* Handle + Header */}
           <View style={st.handle} />

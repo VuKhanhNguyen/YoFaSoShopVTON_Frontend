@@ -35,6 +35,10 @@ import { OutfitScoring, type RecommendedTryOnItem } from "@/components/shop/Outf
 import { ResultActions, exportResultImage } from "@/components/shop/ResultActions";
 import { PrivateImage } from "@/components/shop/PrivateImage";
 import { FittingPassModal } from "@/components/shop/FittingPassModal";
+import {
+  LiveVtonCameraModal,
+  type CapturedVtonPhoto,
+} from "@/components/shop/LiveVtonCameraModal";
 import { AnimatedToast } from "@/components/shop/MotionPrimitives";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
@@ -129,6 +133,7 @@ export default function SessionResultScreen() {
   // Modals & Chained Try-On state
   const [passOpen, setPassOpen] = useState(false);
   const [zoomOpen, setZoomOpen] = useState(false);
+  const [liveCamOpen, setLiveCamOpen] = useState(false);
   const [liveScore, setLiveScore] = useState<
     { total: number; tier?: string; tierLabel?: string } | undefined
   >(undefined);
@@ -273,27 +278,15 @@ export default function SessionResultScreen() {
   }
 
   /** Req 2: Upload & validate ảnh mới rồi chạy lại ngay trên cùng mã phiên thử đồ. */
-  async function replacePhotoInSession(camera: boolean) {
+  async function uploadAndReplacePersonPhoto(picked: {
+    uri: string;
+    fileName?: string | null;
+    file?: globalThis.File;
+  }) {
     if (!session || replacing || busy) return;
     setActionError("");
+    setReplacing(true);
     try {
-      if (camera && !(await ImagePicker.requestCameraPermissionsAsync()).granted) {
-        const msg = "Cần cấp quyền máy ảnh để chụp ảnh thử đồ.";
-        setActionError(msg);
-        showToast(msg);
-        return;
-      }
-      const options: ImagePicker.ImagePickerOptions = {
-        mediaTypes: ["images"],
-        quality: 0.95,
-      };
-      const selection = camera
-        ? await ImagePicker.launchCameraAsync(options)
-        : await ImagePicker.launchImageLibraryAsync(options);
-      if (selection.canceled || !selection.assets?.[0]) return;
-
-      setReplacing(true);
-      const picked = selection.assets[0];
       const form = new FormData();
       form.append("role", "person");
       form.append("consent", "true");
@@ -358,6 +351,62 @@ export default function SessionResultScreen() {
     } finally {
       setReplacing(false);
     }
+  }
+
+  async function launchSystemReplaceCamera() {
+    if (!session || replacing || busy) return;
+    setActionError("");
+    try {
+      if (!(await ImagePicker.requestCameraPermissionsAsync()).granted) {
+        const msg = "Cần cấp quyền máy ảnh để chụp ảnh thử đồ.";
+        setActionError(msg);
+        showToast(msg);
+        return;
+      }
+      const selection = await ImagePicker.launchCameraAsync({
+        mediaTypes: ["images"],
+        quality: 0.95,
+      });
+      if (selection.canceled || !selection.assets?.[0]) return;
+      await uploadAndReplacePersonPhoto(selection.assets[0]);
+    } catch (err) {
+      const msg = (err as Error).message || "Không thể chụp ảnh.";
+      setActionError(msg);
+      showToast(msg);
+    }
+  }
+
+  async function replacePhotoInSession(camera: boolean) {
+    if (!session || replacing || busy) return;
+    setActionError("");
+    if (camera && Platform.OS === "android") {
+      setLiveCamOpen(true);
+      return;
+    }
+    if (camera) {
+      await launchSystemReplaceCamera();
+      return;
+    }
+    try {
+      const selection = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        quality: 0.95,
+      });
+      if (selection.canceled || !selection.assets?.[0]) return;
+      await uploadAndReplacePersonPhoto(selection.assets[0]);
+    } catch (err) {
+      const msg = (err as Error).message || "Không thể chọn ảnh.";
+      setActionError(msg);
+      showToast(msg);
+    }
+  }
+
+  function handleLiveReplaceCapture(captured: CapturedVtonPhoto) {
+    setLiveCamOpen(false);
+    void uploadAndReplacePersonPhoto({
+      uri: captured.uri,
+      fileName: captured.fileName,
+    });
   }
 
   /** Req 5: Mở lựa chọn 2 phương án thử tiếp món phối đối ứng & chặn tổ hợp không hợp lệ. */
@@ -940,6 +989,15 @@ export default function SessionResultScreen() {
           )}
         </ScrollView>
       )}
+
+      {/* Live AI Hand-Gesture Camera Modal for In-Session Retry (Android APK) */}
+      <LiveVtonCameraModal
+        visible={liveCamOpen}
+        category={session?.vtonCategory}
+        onClose={() => setLiveCamOpen(false)}
+        onCapture={handleLiveReplaceCapture}
+        onFallbackSystemCamera={() => void launchSystemReplaceCamera()}
+      />
 
       {/* Floating Blocking / Feedback Toast */}
       <AnimatedToast message={toast} tone="warning" position="top" offset={14} />
